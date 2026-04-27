@@ -82,6 +82,12 @@ export async function init(ctx) {
             <label>用户名（每行一个，支持批量创建）</label>
             <textarea id="batch-usernames" rows="6" placeholder="zhangsan&#10;lisi&#10;wangwu" style="min-height:100px"></textarea>
           </div>
+          <div class="field">
+            <label>镜像标签</label>
+            <select id="image-tag-select" style="width:100%;padding:6px 8px;border-radius:4px;border:1px solid #ccc">
+              <option value="">加载中...</option>
+            </select>
+          </div>
           <div id="modal-msg" class="msg"></div>
           <div id="batch-result" class="hidden">
             <div class="msg msg-ok">创建完成，请复制账号密码并告知用户</div>
@@ -98,6 +104,30 @@ export async function init(ctx) {
       </div>`;
 
     ctx.$('#content-area').appendChild(overlay);
+
+    // 加载本地镜像标签
+    loadLocalTags();
+
+    async function loadLocalTags() {
+      const select = ctx.$('#image-tag-select');
+      try {
+        const data = await Api.get('/api/admin/images/local-tags');
+        const tags = data.tags || [];
+        select.innerHTML = '';
+        if (tags.length === 0) {
+          select.innerHTML = '<option value="">无本地镜像，请先拉取</option>';
+          return;
+        }
+        for (const tag of tags) {
+          const opt = document.createElement('option');
+          opt.value = tag;
+          opt.textContent = tag;
+          select.appendChild(opt);
+        }
+      } catch {
+        select.innerHTML = '<option value="">加载失败</option>';
+      }
+    }
 
     // 关闭
     overlay.querySelector('#modal-close').addEventListener('click', () => overlay.remove());
@@ -117,6 +147,12 @@ export async function init(ctx) {
       return;
     }
 
+    const imageTag = ctx.$('#image-tag-select')?.value || '';
+    if (!imageTag) {
+      showMsg('#modal-msg', '请先拉取镜像', false);
+      return;
+    }
+
     const msgEl = ctx.$('#modal-msg');
     showMsg('#modal-msg', '创建中...', true);
 
@@ -124,7 +160,7 @@ export async function init(ctx) {
     const errors = [];
 
     for (const name of names) {
-      const res = await Api.post('/api/admin/users/create', { username: name });
+      const res = await Api.post('/api/admin/users/create', { username: name, image_tag: imageTag });
       if (res.success) {
         results.push({ username: res.username, password: res.password });
       } else {

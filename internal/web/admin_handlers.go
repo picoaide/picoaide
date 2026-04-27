@@ -137,8 +137,11 @@ func (s *Server) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
     return
   }
 
+  // 获取镜像标签参数
+  imageTag := r.FormValue("image_tag")
+
   // 创建用户容器目录
-  if err := user.InitUser(s.cfg, username); err != nil {
+  if err := user.InitUser(s.cfg, username, imageTag); err != nil {
     // 回滚：删除已创建的用户记录
     auth.DeleteUser(username)
     writeError(w, http.StatusInternalServerError, "初始化用户目录失败: "+err.Error())

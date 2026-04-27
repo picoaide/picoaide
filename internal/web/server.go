@@ -229,7 +229,9 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   // 超管 - 镜像管理
   mux.HandleFunc("/api/admin/images", s.secureHeaders(s.handleAdminImages))
   mux.HandleFunc("/api/admin/images/pull", s.secureHeaders(s.handleAdminImagePull))
+  mux.HandleFunc("/api/admin/images/delete", s.secureHeaders(s.handleAdminImageDelete))
   mux.HandleFunc("/api/admin/images/registry", s.secureHeaders(s.handleAdminImageRegistry))
+  mux.HandleFunc("/api/admin/images/local-tags", s.secureHeaders(s.handleAdminLocalTags))
 
   fmt.Printf("PicoClaw 管理面板启动: http://%s\n", listenAddr)
   return http.ListenAndServe(listenAddr, mux)
@@ -313,7 +315,8 @@ func (s *Server) handleAdminImagePull(w http.ResponseWriter, r *http.Request) {
 
   imageRef := r.FormValue("image")
   if imageRef == "" {
-    imageRef = fmt.Sprintf("%s:%s", s.cfg.Image.Name, s.cfg.Image.Tag)
+    writeError(w, http.StatusBadRequest, "镜像参数不能为空")
+    return
   }
 
   ctx := context.Background()
@@ -345,7 +348,67 @@ func (s *Server) handleAdminImagePull(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintf(w, "data: {\"status\":\"done\"}\n\n")
 }
 
-// handleAdminImageRegistry 列出远程仓库标签
+// handleAdminImageDelete 删除本地镜像（检查用户依赖）
+func (s *Server) handleAdminImageDelete(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if !s.dockerAvailable {
+    writeError(w, http.StatusServiceUnavailable, "Docker 服务不可用，请联系管理员")
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+
+  imageRef := r.FormValue("image")
+  if imageRef == "" {
+    writeError(w, http.StatusBadRequest, "镜像参数不能为空")
+    return
+  }
+
+  // 检查是否有用户依赖此镜像
+  containers, err := auth.GetAllContainers()
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, "查询用户列表失败: "+err.Error())
+    return
+  }
+  var dependentUsers []string
+  for _, c := range containers {
+    if c.Image == imageRef {
+      dependentUsers = append(dependentUsers, c.Username)
+    }
+  }
+  if len(dependentUsers) > 0 {
+    writeJSON(w, http.StatusConflict, struct {
+      Success bool     `json:"success"`
+      Error   string   `json:"error"`
+      Users   []string `json:"users"`
+    }{false, "以下用户正在使用此镜像，请先升级或降级后再删除", dependentUsers})
+    return
+  }
+
+  // 检查镜像是否存在
+  ctx := contextWithTimeout(30)
+  if !dockerpkg.ImageExists(ctx, imageRef) {
+    writeError(w, http.StatusNotFound, "镜像 "+imageRef+" 不存在")
+    return
+  }
+
+  if err := dockerpkg.RemoveImage(ctx, imageRef); err != nil {
+    writeError(w, http.StatusInternalServerError, "删除镜像失败: "+err.Error())
+    return
+  }
+
+  writeSuccess(w, "镜像 "+imageRef+" 已删除")
+}
+
+// handleAdminImageRegistry 列出 PicoAide 远程仓库标签
 func (s *Server) handleAdminImageRegistry(w http.ResponseWriter, r *http.Request) {
   if s.requireSuperadmin(w, r) == "" {
     return
@@ -359,19 +422,41 @@ func (s *Server) handleAdminImageRegistry(w http.ResponseWriter, r *http.Request
     return
   }
 
-  repo := s.cfg.Image.Name
-  // 去掉 registry 前缀后面的 tag 部分
-  if idx := strings.LastIndex(repo, ":"); idx > strings.LastIndex(repo, "/") {
-    repo = repo[:idx]
-  }
-  // 去掉 ghcr.io/ 前缀得到仓库路径
-  repoPath := strings.TrimPrefix(repo, "ghcr.io/")
-  repoPath = strings.TrimPrefix(repoPath, "docker.io/")
-
+  // 固定查询 picoaide/picoaide 仓库
   ctx := contextWithTimeout(15)
-  tags, err := dockerpkg.ListRegistryTags(ctx, repoPath)
+  tags, err := dockerpkg.ListRegistryTags(ctx, "picoaide/picoaide")
   if err != nil {
     writeError(w, http.StatusInternalServerError, "获取远程标签失败: "+err.Error())
+    return
+  }
+  if tags == nil {
+    tags = []string{}
+  }
+
+  writeJSON(w, http.StatusOK, struct {
+    Success bool     `json:"success"`
+    Tags    []string `json:"tags"`
+  }{true, tags})
+}
+
+// handleAdminLocalTags 列出本地镜像的所有标签
+func (s *Server) handleAdminLocalTags(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if !s.dockerAvailable {
+    writeError(w, http.StatusServiceUnavailable, "Docker 服务不可用，请联系管理员")
+    return
+  }
+  if r.Method != "GET" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+    return
+  }
+
+  ctx := contextWithTimeout(10)
+  tags, err := dockerpkg.ListLocalTags(ctx, s.cfg.Image.Name)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, "获取本地标签失败: "+err.Error())
     return
   }
   if tags == nil {

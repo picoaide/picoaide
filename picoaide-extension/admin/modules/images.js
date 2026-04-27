@@ -21,7 +21,18 @@ export async function init(ctx) {
     $('#images-local-empty')?.classList.add('hidden');
     for (const img of images) {
       const tags = (img.repo_tags || []).join(', ') || '(无标签)';
-      tbody.innerHTML += '<tr><td style="font-family:monospace;font-size:13px">' + esc(tags) + '</td><td>' + esc(img.repo_tags?.[0]?.split(':')[1] || '-') + '</td><td>' + esc(img.size_str) + '</td></tr>';
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td style="font-family:monospace;font-size:13px">' + esc(tags) + '</td><td>' + esc(img.repo_tags?.[0]?.split(':')[1] || '-') + '</td><td>' + esc(img.size_str) + '</td><td></td>';
+      // 为每个 tag 添加删除按钮
+      for (const tag of (img.repo_tags || [])) {
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-sm btn-danger';
+        btn.textContent = '删除';
+        btn.dataset.image = tag;
+        btn.addEventListener('click', () => deleteImage(tag));
+        tr.querySelector('td:last-child').appendChild(btn);
+      }
+      tbody.appendChild(tr);
     }
   }
 
@@ -50,14 +61,7 @@ export async function init(ctx) {
     const progress = $('#pull-progress');
     const nameEl = $('#pull-image-name');
 
-    const serverUrl = localStorage.getItem('picoaide-server') || '';
-    const imageRef = nameEl.textContent = serverUrl ? '' : '';
-    // 构建镜像引用
-    const cfgResp = await Api.get('/api/config').catch(() => null);
-    let imageName = 'ghcr.io/picoaide/picoaide';
-    if (cfgResp?.image?.name) {
-      imageName = cfgResp.image.name;
-    }
+    const imageName = 'ghcr.io/picoaide/picoaide';
     const fullRef = imageName + ':' + tag;
     nameEl.textContent = fullRef;
     progress.innerHTML = '';
@@ -70,7 +74,7 @@ export async function init(ctx) {
     formData.append('csrf_token', csrf);
 
     try {
-      const serverBase = localStorage.getItem('picoaide-server') || window.location.origin;
+      const serverBase = await getServerUrl();
       const response = await fetch(serverBase + '/api/admin/images/pull', {
         method: 'POST',
         body: formData,
@@ -122,6 +126,36 @@ export async function init(ctx) {
   async function getCSRF() {
     const data = await Api.get('/api/csrf');
     return data.csrf_token || '';
+  }
+
+  async function deleteImage(imageRef) {
+    if (!confirm('确定要删除镜像 ' + imageRef + ' 吗？')) return;
+
+    const csrf = await getCSRF();
+    const serverBase = await getServerUrl();
+    try {
+      const formData = new FormData();
+      formData.append('image', imageRef);
+      formData.append('csrf_token', csrf);
+      const resp = await fetch(serverBase + '/api/admin/images/delete', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+      const data = await resp.json();
+      if (data.success) {
+        showMsg('#images-local-msg', data.message || '删除成功', true);
+        await loadLocalImages();
+      } else {
+        let msg = data.error || '删除失败';
+        if (data.users && data.users.length > 0) {
+          msg += '\n依赖用户: ' + data.users.join(', ');
+        }
+        showMsg('#images-local-msg', msg, false);
+      }
+    } catch (err) {
+      showMsg('#images-local-msg', '删除失败: ' + err.message, false);
+    }
   }
 
   function closePullModal() {

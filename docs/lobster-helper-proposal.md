@@ -97,7 +97,7 @@ var connections sync.Map  // map[string]*websocket.Conn
 ```yaml
 services:
   picoaide-zhangsan:
-    image: ghcr.io/lostmaniac/picoclaw:v0.2.6
+    image: ghcr.io/picoaide/picoaide:v0.2.6
     container_name: picoaide-zhangsan
     environment:
       - TZ=Asia/Shanghai

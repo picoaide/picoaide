@@ -38,7 +38,6 @@ ldap:
 
 image:
   name: "ghcr.io/picoaide/picoaide"
-  tag: "v0.2.6"
   timezone: "Asia/Shanghai"
 
 users_root: "./users"
@@ -116,7 +115,6 @@ type LDAPConfig struct {
 
 type ImageConfig struct {
   Name     string `yaml:"name"`
-  Tag      string `yaml:"tag"`
   Timezone string `yaml:"timezone"`
 }
 
