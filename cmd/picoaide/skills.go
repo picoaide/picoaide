@@ -12,7 +12,7 @@ import (
 )
 
 func SkillsDeploy(cfg *config.GlobalConfig, targetUser string) error {
-  skillDir := filepath.Join(filepath.Dir(config.ConfigPath()), "skill")
+  skillDir := config.SkillsDirPath()
 
   entries, err := os.ReadDir(skillDir)
   if err != nil {

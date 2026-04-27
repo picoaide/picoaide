@@ -38,13 +38,6 @@ export async function init(ctx) {
 
   $('#save-btn').addEventListener('click', saveConfig);
   $('#reset-btn').addEventListener('click', () => { if (confirm('重新加载？未保存的修改将丢失。')) loadConfig(); });
-  $('#ldap-enabled').addEventListener('change', () => {
-    var checked = $('#ldap-enabled').checked;
-    $('#ldap-section').style.display = checked ? '' : 'none';
-    if (!rawConfig.web) rawConfig.web = {};
-    rawConfig.web.ldap_enabled = checked;
-    rawConfig.web.auth_mode = checked ? 'ldap' : 'local';
-  });
   $('#add-model-btn').addEventListener('click', () => {
     if (!rawConfig.picoclaw) rawConfig.picoclaw = {};
     if (!rawConfig.picoclaw.model_list) rawConfig.picoclaw.model_list = [];
@@ -74,11 +67,6 @@ export async function init(ctx) {
       var val = deepGet(rawConfig, sel.dataset.path);
       if (val !== undefined && val !== null) sel.value = val;
     });
-    var ldapOn = rawConfig.web?.ldap_enabled === true || rawConfig.web?.ldap_enabled === 'true';
-    if (rawConfig.web?.auth_mode === 'local') ldapOn = false;
-    if (rawConfig.web?.auth_mode === 'ldap') ldapOn = true;
-    $('#ldap-enabled').checked = ldapOn;
-    $('#ldap-section').style.display = ldapOn ? '' : 'none';
     renderModelList();
   }
 

@@ -11,7 +11,6 @@ import (
   dockerpkg "github.com/picoaide/picoaide/internal/docker"
   "github.com/picoaide/picoaide/internal/ldap"
   "github.com/picoaide/picoaide/internal/user"
-  "gopkg.in/yaml.v3"
 )
 
 // ============================================================
@@ -334,9 +333,14 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
   writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 和 POST 方法")
 }
 
-// handleConfigGet 读取 config.yaml 并返回为 JSON
+// handleConfigGet 从数据库读取配置并返回为 JSON
 func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
-  data, err := config.LoadRaw()
+  raw, err := config.LoadRawFromDB()
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, err.Error())
+    return
+  }
+  data, err := json.MarshalIndent(raw, "", "  ")
   if err != nil {
     writeError(w, http.StatusInternalServerError, err.Error())
     return
@@ -345,7 +349,7 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
   w.Write(data)
 }
 
-// handleConfigSave 从 JSON 保存为 config.yaml
+// handleConfigSave 从 JSON 保存配置到数据库
 func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
   if !s.checkCSRF(r) {
     writeError(w, http.StatusForbidden, "无效请求")
@@ -363,20 +367,17 @@ func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  // JSON → map → YAML
   var raw map[string]interface{}
   if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
     writeError(w, http.StatusBadRequest, fmt.Sprintf("JSON 格式错误: %v", err))
     return
   }
 
-  yamlData, err := yaml.Marshal(raw)
-  if err != nil {
-    writeError(w, http.StatusInternalServerError, fmt.Sprintf("序列化 YAML 失败: %v", err))
-    return
+  changedBy := s.getSessionUser(r)
+  if changedBy == "" {
+    changedBy = "admin"
   }
-
-  if err := config.SaveRaw(yamlData); err != nil {
+  if err := config.SaveRawToDB(raw, changedBy); err != nil {
     writeError(w, http.StatusInternalServerError, err.Error())
     return
   }

@@ -61,6 +61,14 @@ func InitDB(dataDir string) error {
   return nil
 }
 
+// GetDB 返回数据库连接（供其他包直接操作 DB）
+func GetDB() (*sql.DB, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
+  return db, nil
+}
+
 // ensureDB 确保数据库连接可用，db 为 nil 时自动重连
 func ensureDB() error {
   if db != nil {
@@ -94,6 +102,34 @@ func createTables() error {
     memory_limit INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT (datetime('now','localtime')),
     updated_at DATETIME DEFAULT (datetime('now','localtime'))
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '',
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS settings_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    changed_by TEXT NOT NULL DEFAULT 'system',
+    changed_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS whitelist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    added_by TEXT NOT NULL DEFAULT 'system',
+    added_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
   )`)
   return err
 }

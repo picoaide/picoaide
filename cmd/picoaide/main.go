@@ -113,18 +113,6 @@ func main() {
   var configPath string
   if configPathOverride != "" {
     configPath = configPathOverride
-  } else {
-    var exists bool
-    configPath, exists = config.EnsureConfig()
-    if !exists {
-      os.Exit(0)
-    }
-  }
-
-  cfg, err := config.Load(configPath)
-  if err != nil {
-    fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
-    os.Exit(1)
   }
 
   // 初始化数据库（失败时重试一次）
@@ -136,6 +124,45 @@ func main() {
       fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
       os.Exit(1)
     }
+  }
+
+  // 配置初始化：检查 DB 是否有配置，没有则迁移或初始化
+  count, err := config.SettingsCount()
+  if err != nil {
+    fmt.Fprintf(os.Stderr, "检查配置失败: %v\n", err)
+    os.Exit(1)
+  }
+  if count == 0 {
+    if configPath != "" {
+      // 从指定 config.yaml 迁移
+      if _, err := os.Stat(configPath); err == nil {
+        fmt.Printf("检测到配置文件 %s，正在迁移到数据库...\n", configPath)
+        if err := config.MigrateFromYAML(configPath); err != nil {
+          fmt.Fprintf(os.Stderr, "迁移配置失败: %v\n", err)
+          os.Exit(1)
+        }
+      }
+    } else if _, err := os.Stat("config.yaml"); err == nil {
+      // 自动检测当前目录的 config.yaml
+      fmt.Println("检测到 config.yaml，正在迁移到数据库...")
+      if err := config.MigrateFromYAML("config.yaml"); err != nil {
+        fmt.Fprintf(os.Stderr, "迁移配置失败: %v\n", err)
+        os.Exit(1)
+      }
+    } else {
+      // 全新安装：用默认配置初始化
+      fmt.Println("首次运行，初始化默认配置...")
+      if err := config.InitDBDefaults(); err != nil {
+        fmt.Fprintf(os.Stderr, "初始化默认配置失败: %v\n", err)
+        os.Exit(1)
+      }
+    }
+  }
+
+  cfg, err := config.LoadFromDB()
+  if err != nil {
+    fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
+    os.Exit(1)
   }
 
   // 初始化 Docker 客户端（容器操作需要）
@@ -466,15 +493,21 @@ func runInitEarly(cmdArgs []string) {
   targetUser := flags["-user"]
 
   if targetUser != "" {
-    config.EnsureConfig()
-    cfg, err := config.Load(config.ConfigPath())
-    if err != nil {
-      fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
-      os.Exit(1)
-    }
     wd, _ := os.Getwd()
     if err := auth.InitDB(wd); err != nil {
       fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
+      os.Exit(1)
+    }
+    count, _ := config.SettingsCount()
+    if count == 0 {
+      if err := config.InitDBDefaults(); err != nil {
+        fmt.Fprintf(os.Stderr, "初始化默认配置失败: %v\n", err)
+        os.Exit(1)
+      }
+    }
+    cfg, err := config.LoadFromDB()
+    if err != nil {
+      fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
       os.Exit(1)
     }
     if err := user.InitUser(cfg, targetUser, flags["-tag"]); err != nil {
@@ -494,8 +527,19 @@ func runInitEarly(cmdArgs []string) {
     return
   }
 
-  config.EnsureConfig()
-  cfg, err := config.Load(config.ConfigPath())
+  wd, _ := os.Getwd()
+  if err := auth.InitDB(wd); err != nil {
+    fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
+    os.Exit(1)
+  }
+  count, _ := config.SettingsCount()
+  if count == 0 {
+    if err := config.InitDBDefaults(); err != nil {
+      fmt.Fprintf(os.Stderr, "初始化默认配置失败: %v\n", err)
+      os.Exit(1)
+    }
+  }
+  cfg, err := config.LoadFromDB()
   if err != nil {
     fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
     os.Exit(1)
@@ -544,8 +588,12 @@ func runFirstRun(reader *bufio.Reader) {
   ldapAnswer = strings.TrimSpace(strings.ToLower(ldapAnswer))
 
   if ldapAnswer == "n" || ldapAnswer == "no" {
-    config.EnsureConfig()
-    cfg, err := config.Load(config.ConfigPath())
+    if err := config.InitDBDefaults(); err != nil {
+      fmt.Fprintf(os.Stderr, "初始化默认配置失败: %v\n", err)
+      os.Exit(1)
+    }
+
+    cfg, err := config.LoadFromDB()
     if err != nil {
       fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
       os.Exit(1)
@@ -554,13 +602,9 @@ func runFirstRun(reader *bufio.Reader) {
     falseVal := false
     cfg.Web.LDAPEnabled = &falseVal
 
-    if err := config.Save(cfg, config.ConfigPath()); err != nil {
+    if err := config.SaveToDB(cfg, "system"); err != nil {
       fmt.Fprintf(os.Stderr, "保存配置失败: %v\n", err)
       os.Exit(1)
-    }
-
-    if err := config.EnsureWhitelistFile(); err != nil {
-      fmt.Fprintf(os.Stderr, "创建白名单文件失败: %v\n", err)
     }
 
     if err := setupSuperAdmin(reader, dataDir); err != nil {
@@ -578,15 +622,14 @@ func runFirstRun(reader *bufio.Reader) {
     fmt.Printf("数据目录: %s\n", dataDir)
     fmt.Println("服务已启动，可通过浏览器访问 API")
   } else {
-    config.EnsureConfig()
-
-    if err := config.EnsureWhitelistFile(); err != nil {
-      fmt.Fprintf(os.Stderr, "创建白名单文件失败: %v\n", err)
+    if err := config.InitDBDefaults(); err != nil {
+      fmt.Fprintf(os.Stderr, "初始化默认配置失败: %v\n", err)
+      os.Exit(1)
     }
 
     fmt.Println()
-    fmt.Println("已生成配置文件模板。")
-    fmt.Printf("请修改 %s 中的 LDAP 连接信息后，重新运行: picoaide init\n", config.ConfigPath())
+    fmt.Println("已初始化默认配置。")
+    fmt.Println("请通过管理面板修改 LDAP 连接信息后，重新运行: picoaide init")
   }
 }
 

@@ -37,29 +37,30 @@ func ValidateUsername(username string) error {
   return nil
 }
 
-// LoadWhitelist 读取白名单文件，返回用户名集合
+// LoadWhitelist 从数据库读取白名单，返回用户名集合
 func LoadWhitelist() (map[string]bool, error) {
-  path := config.WhitelistPath()
-  data, err := os.ReadFile(path)
+  d, err := auth.GetDB()
   if err != nil {
-    if os.IsNotExist(err) {
-      return nil, nil
-    }
-    return nil, fmt.Errorf("读取白名单文件失败: %w", err)
-  }
-
-  var wl config.WhitelistFile
-  if err := yaml.Unmarshal(data, &wl); err != nil {
-    return nil, fmt.Errorf("解析白名单文件失败: %w", err)
-  }
-
-  if len(wl.Users) == 0 {
     return nil, nil
   }
 
-  m := make(map[string]bool, len(wl.Users))
-  for _, u := range wl.Users {
-    m[u] = true
+  rows, err := d.Query("SELECT username FROM whitelist")
+  if err != nil {
+    return nil, nil
+  }
+  defer rows.Close()
+
+  m := make(map[string]bool)
+  for rows.Next() {
+    var username string
+    if err := rows.Scan(&username); err != nil {
+      continue
+    }
+    m[username] = true
+  }
+
+  if len(m) == 0 {
+    return nil, nil
   }
   return m, nil
 }
@@ -77,7 +78,8 @@ func ResolveUsersRoot(cfg *config.GlobalConfig) string {
   if filepath.IsAbs(cfg.UsersRoot) {
     return cfg.UsersRoot
   }
-  return filepath.Join(filepath.Dir(config.ConfigPath()), cfg.UsersRoot)
+  wd, _ := os.Getwd()
+  return filepath.Join(wd, cfg.UsersRoot)
 }
 
 // UserDir 返回指定用户的目录路径
@@ -175,9 +177,6 @@ func InitUser(cfg *config.GlobalConfig, username string, imageTag string) error 
 
 // InitAll 从 LDAP 获取用户列表并初始化所有白名单内的用户
 func InitAll(cfg *config.GlobalConfig, imageTag string) error {
-  if err := config.EnsureWhitelistFile(); err != nil {
-    fmt.Fprintf(os.Stderr, "创建白名单文件失败: %v\n", err)
-  }
 
   whitelist, err := LoadWhitelist()
   if err != nil {
@@ -214,7 +213,8 @@ func ResolveArchiveRoot(cfg *config.GlobalConfig) string {
   if cfg.ArchiveRoot == "" {
     cfg.ArchiveRoot = "./archive"
   }
-  return filepath.Join(filepath.Dir(config.ConfigPath()), cfg.ArchiveRoot)
+  wd, _ := os.Getwd()
+  return filepath.Join(wd, cfg.ArchiveRoot)
 }
 
 // ArchiveUser 将离职用户的目录从 users/ 移动到 archive/

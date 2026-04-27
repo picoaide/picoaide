@@ -1,0 +1,53 @@
+<h2>认证配置</h2>
+<p class="text-sm text-muted">配置系统认证方式和访问控制</p>
+<div id="auth-msg" class="msg"></div>
+
+<div class="card">
+  <div class="card-header">认证模式</div>
+  <div class="field">
+    <label class="switch"><input type="checkbox" id="ldap-enabled"> 启用 LDAP 统一登录</label>
+  </div>
+  <div class="field">
+    <label>Session 密钥</label>
+    <input type="password" id="session-secret" placeholder="change-me-to-a-random-secret">
+  </div>
+  <button class="btn btn-primary btn-sm" id="save-auth-btn">保存认证配置</button>
+</div>
+
+<div id="ldap-section">
+  <div class="card">
+    <div class="card-header">LDAP 配置</div>
+    <div class="grid-2">
+      <div class="field"><label>LDAP 地址</label><input type="text" id="ldap-host" placeholder="ldap://ldap.example.com:389"></div>
+      <div class="field"><label>Bind DN</label><input type="text" id="ldap-bind-dn" placeholder="cn=admin,dc=example,dc=com"></div>
+    </div>
+    <div class="grid-2">
+      <div class="field"><label>Bind Password</label><input type="password" id="ldap-bind-password"></div>
+      <div class="field"><label>Base DN</label><input type="text" id="ldap-base-dn" placeholder="ou=users,dc=example,dc=com"></div>
+    </div>
+    <div class="grid-2">
+      <div class="field"><label>Filter</label><input type="text" id="ldap-filter" placeholder="(objectClass=inetOrgPerson)"></div>
+      <div class="field"><label>Username Attribute</label><input type="text" id="ldap-username-attr" placeholder="uid"></div>
+    </div>
+    <div class="row mt-1">
+      <button class="btn btn-outline btn-sm" id="test-ldap-btn">测试连接</button>
+      <button class="btn btn-primary btn-sm" id="save-ldap-btn">保存 LDAP 配置</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">白名单</div>
+    <p class="text-sm text-muted">白名单为空时所有用户均可使用。修改后需手动运行 sync 同步。</p>
+    <div id="wl-tags" class="mt-1"></div>
+    <div id="wl-msg" class="msg"></div>
+    <div class="row mt-1">
+      <input type="text" id="wl-search-input" placeholder="搜索 LDAP 用户...">
+      <button class="btn btn-outline btn-sm" id="wl-search-btn">搜索</button>
+    </div>
+    <div id="wl-search-results" class="mt-1 hidden"></div>
+    <div class="row mt-1">
+      <input type="text" id="wl-add-input" placeholder="手动输入用户名">
+      <button class="btn btn-primary btn-sm" id="wl-add-btn">添加</button>
+    </div>
+  </div>
+</div>

@@ -49,6 +49,44 @@ func FetchUsers(cfg *config.GlobalConfig) ([]string, error) {
   return users, nil
 }
 
+// TestConnection 使用指定参数测试 LDAP 连接，返回用户数量
+func TestConnection(host, bindDN, bindPassword, baseDN, filter, usernameAttr string) ([]string, error) {
+  l, err := ldap.DialURL(host)
+  if err != nil {
+    return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
+  }
+  defer l.Close()
+
+  err = l.Bind(bindDN, bindPassword)
+  if err != nil {
+    return nil, fmt.Errorf("LDAP 认证失败: %w", err)
+  }
+
+  searchRequest := ldap.NewSearchRequest(
+    baseDN,
+    ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+    filter,
+    []string{usernameAttr},
+    nil,
+  )
+
+  sr, err := l.Search(searchRequest)
+  if err != nil {
+    return nil, fmt.Errorf("LDAP 搜索失败: %w", err)
+  }
+
+  var users []string
+  for _, entry := range sr.Entries {
+    username := entry.GetAttributeValue(usernameAttr)
+    if username != "" {
+      users = append(users, username)
+    }
+  }
+
+  sort.Strings(users)
+  return users, nil
+}
+
 // Authenticate 先以管理员身份搜索用户 DN，再用用户 DN 绑定验证密码
 func Authenticate(cfg *config.GlobalConfig, username, password string) bool {
   // 1. 以管理员身份连接并搜索用户 DN

@@ -1,0 +1,231 @@
+var rawConfig = {};
+
+export async function init(ctx) {
+  const { Api, showMsg, $, $$ } = ctx;
+  await loadConfig();
+
+  $('#ldap-enabled').addEventListener('change', function() {
+    var checked = this.checked;
+    if (checked) {
+      if (!confirm('切换到 LDAP 统一登录模式？\n\n本地用户（包括超管）仍可使用本地密码登录。')) {
+        this.checked = false;
+        return;
+      }
+    } else {
+      if (!confirm('切换到本地认证模式？\n\nLDAP 用户将无法登录，但超管仍可使用本地密码登录。')) {
+        this.checked = true;
+        return;
+      }
+    }
+    $('#ldap-section').style.display = checked ? '' : 'none';
+  });
+
+  $('#save-auth-btn').addEventListener('click', saveAuthConfig);
+  $('#save-ldap-btn').addEventListener('click', saveLDAPConfig);
+  $('#test-ldap-btn').addEventListener('click', testLDAP);
+  $('#wl-add-btn').addEventListener('click', addWhitelistUser);
+  $('#wl-search-btn').addEventListener('click', searchLDAPUsers);
+
+  async function loadConfig() {
+    showMsg('#auth-msg', '加载中...', true);
+    try {
+      var base = await getServerUrl();
+      var resp = await fetch(base + '/api/config', { method: 'GET', credentials: 'include' });
+      var text = await resp.text();
+      try { var e = JSON.parse(text); if (e.success === false) { showMsg('#auth-msg', e.error, false); return; } } catch {}
+      rawConfig = JSON.parse(text);
+      showMsg('#auth-msg', '');
+      renderConfig();
+    } catch (e) { showMsg('#auth-msg', e.message, false); }
+  }
+
+  function renderConfig() {
+    var ldapOn = rawConfig.web?.ldap_enabled === true || rawConfig.web?.ldap_enabled === 'true';
+    if (rawConfig.web?.auth_mode === 'local') ldapOn = false;
+    if (rawConfig.web?.auth_mode === 'ldap') ldapOn = true;
+
+    $('#ldap-enabled').checked = ldapOn;
+    $('#ldap-section').style.display = ldapOn ? '' : 'none';
+
+    $('#session-secret').value = rawConfig.web?.password || '';
+
+    $('#ldap-host').value = rawConfig.ldap?.host || '';
+    $('#ldap-bind-dn').value = rawConfig.ldap?.bind_dn || '';
+    $('#ldap-bind-password').value = rawConfig.ldap?.bind_password || '';
+    $('#ldap-base-dn').value = rawConfig.ldap?.base_dn || '';
+    $('#ldap-filter').value = rawConfig.ldap?.filter || '';
+    $('#ldap-username-attr').value = rawConfig.ldap?.username_attribute || '';
+
+    if (ldapOn) loadWhitelist();
+  }
+
+  async function saveAuthConfig() {
+    showMsg('#auth-msg', '保存中...', true);
+    var ldapOn = $('#ldap-enabled').checked;
+    if (!rawConfig.web) rawConfig.web = {};
+    rawConfig.web.ldap_enabled = ldapOn;
+    rawConfig.web.auth_mode = ldapOn ? 'ldap' : 'local';
+    rawConfig.web.password = $('#session-secret').value;
+    if (!rawConfig.ldap) rawConfig.ldap = {};
+    rawConfig.ldap.host = $('#ldap-host').value;
+    rawConfig.ldap.bind_dn = $('#ldap-bind-dn').value;
+    rawConfig.ldap.bind_password = $('#ldap-bind-password').value;
+    rawConfig.ldap.base_dn = $('#ldap-base-dn').value;
+    rawConfig.ldap.filter = $('#ldap-filter').value;
+    rawConfig.ldap.username_attribute = $('#ldap-username-attr').value;
+    try {
+      var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
+      showMsg('#auth-msg', res.message || res.error, res.success);
+    } catch (e) { showMsg('#auth-msg', e.message, false); }
+  }
+
+  async function saveLDAPConfig() {
+    showMsg('#auth-msg', '保存中...', true);
+    if (!rawConfig.ldap) rawConfig.ldap = {};
+    rawConfig.ldap.host = $('#ldap-host').value;
+    rawConfig.ldap.bind_dn = $('#ldap-bind-dn').value;
+    rawConfig.ldap.bind_password = $('#ldap-bind-password').value;
+    rawConfig.ldap.base_dn = $('#ldap-base-dn').value;
+    rawConfig.ldap.filter = $('#ldap-filter').value;
+    rawConfig.ldap.username_attribute = $('#ldap-username-attr').value;
+    try {
+      var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
+      showMsg('#auth-msg', res.message || res.error, res.success);
+    } catch (e) { showMsg('#auth-msg', e.message, false); }
+  }
+
+  async function testLDAP() {
+    showMsg('#auth-msg', '测试连接中...', true);
+    try {
+      var res = await Api.post('/api/admin/auth/test-ldap', {
+        host: $('#ldap-host').value,
+        bind_dn: $('#ldap-bind-dn').value,
+        bind_password: $('#ldap-bind-password').value,
+        base_dn: $('#ldap-base-dn').value,
+        filter: $('#ldap-filter').value,
+        username_attribute: $('#ldap-username-attr').value
+      });
+      if (res.success) {
+        showMsg('#auth-msg', res.message + '（用户: ' + (res.users || []).slice(0, 5).join(', ') + (res.user_count > 5 ? '...' : '') + ')', true);
+      } else {
+        showMsg('#auth-msg', res.error, false);
+      }
+    } catch (e) { showMsg('#auth-msg', e.message, false); }
+  }
+
+  async function loadWhitelist() {
+    var tags = $('#wl-tags');
+    tags.innerHTML = '';
+    var data = await Api.get('/api/admin/whitelist');
+    if (!data.success) return;
+
+    var users = data.users || [];
+    if (users.length === 0) {
+      tags.innerHTML = '<small>白名单为空（所有用户均可使用）</small>';
+      return;
+    }
+
+    for (var i = 0; i < users.length; i++) {
+      var tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.innerHTML = ctx.esc(users[i]) + ' <button data-remove="' + ctx.esc(users[i]) + '">&times;</button>';
+      tags.appendChild(tag);
+    }
+
+    tags.querySelectorAll('[data-remove]').forEach(function(btn) {
+      btn.addEventListener('click', function() { removeWhitelistUser(btn.dataset.remove); });
+    });
+  }
+
+  async function removeWhitelistUser(username) {
+    if (!confirm('移除 ' + username + '？')) return;
+    var data = await Api.get('/api/admin/whitelist');
+    var users = (data.users || []).filter(function(u) { return u !== username; });
+    var res = await Api.post('/api/admin/whitelist', { users: users.join(',') });
+    showMsg('#wl-msg', res.message || res.error, res.success);
+    if (res.success) loadWhitelist();
+  }
+
+  async function addWhitelistUser() {
+    var input = $('#wl-add-input');
+    var newUsers = input.value.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    if (newUsers.length === 0) return;
+
+    var data = await Api.get('/api/admin/whitelist');
+    var existing = data.users || [];
+    var merged = existing.concat(newUsers);
+    merged = merged.filter(function(v, i, a) { return a.indexOf(v) === i; });
+
+    var res = await Api.post('/api/admin/whitelist', { users: merged.join(',') });
+    showMsg('#wl-msg', res.message || res.error, res.success);
+    if (res.success) { input.value = ''; loadWhitelist(); }
+  }
+
+  async function searchLDAPUsers() {
+    var query = $('#wl-search-input').value.trim().toLowerCase();
+    var container = $('#wl-search-results');
+    container.classList.remove('hidden');
+    container.innerHTML = '<small>搜索中...</small>';
+
+    try {
+      var data = await Api.get('/api/admin/auth/ldap-users');
+      if (!data.success) { container.innerHTML = '<small>' + ctx.esc(data.error) + '</small>'; return; }
+
+      var users = data.users || [];
+      if (query) {
+        users = users.filter(function(u) { return u.toLowerCase().indexOf(query) !== -1; });
+      }
+
+      if (users.length === 0) {
+        container.innerHTML = '<small>未找到用户</small>';
+        return;
+      }
+
+      // 获取当前白名单
+      var wlData = await Api.get('/api/admin/whitelist');
+      var wlUsers = wlData.users || [];
+
+      container.innerHTML = '';
+      var list = document.createElement('div');
+      list.className = 'row';
+      list.style.flexWrap = 'wrap';
+      list.style.gap = '4px';
+
+      users.slice(0, 50).forEach(function(u) {
+        var inWhitelist = wlUsers.indexOf(u) !== -1;
+        var tag = document.createElement('span');
+        tag.className = 'tag' + (inWhitelist ? '' : ' tag-muted');
+        tag.innerHTML = ctx.esc(u) + (inWhitelist ? ' <small>✓</small>' : ' <button data-wl-add="' + ctx.esc(u) + '">+</button>');
+        list.appendChild(tag);
+      });
+
+      if (users.length > 50) {
+        var more = document.createElement('small');
+        more.textContent = '还有 ' + (users.length - 50) + ' 个用户...';
+        list.appendChild(more);
+      }
+
+      container.appendChild(list);
+
+      container.querySelectorAll('[data-wl-add]').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          var username = btn.dataset.wlAdd;
+          var wlD = await Api.get('/api/admin/whitelist');
+          var ex = wlD.users || [];
+          ex.push(username);
+          var r = await Api.post('/api/admin/whitelist', { users: ex.join(',') });
+          showMsg('#wl-msg', r.message || r.error, r.success);
+          if (r.success) { loadWhitelist(); searchLDAPUsers(); }
+        });
+      });
+
+    } catch (e) {
+      container.innerHTML = '<small>' + ctx.esc(e.message) + '</small>';
+    }
+  }
+}
+
+async function getServerUrl() {
+  var r = await chrome.storage.local.get('serverUrl');
+  return (r.serverUrl || '').replace(/\/+$/, '');
+}

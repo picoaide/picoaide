@@ -215,6 +215,9 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/admin/container/restart", s.secureHeaders(s.handleAdminContainerRestart))
   // 超管 - 白名单
   mux.HandleFunc("/api/admin/whitelist", s.secureHeaders(s.handleAdminWhitelist))
+  // 超管 - 认证配置
+  mux.HandleFunc("/api/admin/auth/test-ldap", s.secureHeaders(s.handleAdminAuthTestLDAP))
+  mux.HandleFunc("/api/admin/auth/ldap-users", s.secureHeaders(s.handleAdminAuthLDAPUsers))
   // 超管 - 技能库
   mux.HandleFunc("/api/admin/skills", s.secureHeaders(s.handleAdminSkills))
   mux.HandleFunc("/api/admin/skills/deploy", s.secureHeaders(s.handleAdminSkillsDeploy))

@@ -42,7 +42,7 @@ func ConfigSetModel(cfg *config.GlobalConfig, configPath, jsonStr string) error 
   picoClawMap["model_list"] = modelInterfaces
   cfg.PicoClaw = picoClawMap
 
-  return config.Save(cfg, configPath)
+  return config.SaveToDB(cfg, "cli")
 }
 
 func ConfigSetKey(cfg *config.GlobalConfig, configPath, modelName, apiKey string) error {
@@ -71,7 +71,7 @@ func ConfigSetKey(cfg *config.GlobalConfig, configPath, modelName, apiKey string
   }
 
   cfg.Security = secMap
-  return config.Save(cfg, configPath)
+  return config.SaveToDB(cfg, "cli")
 }
 
 func ConfigSetChannel(cfg *config.GlobalConfig, configPath, jsonStr string) error {
@@ -90,7 +90,7 @@ func ConfigSetChannel(cfg *config.GlobalConfig, configPath, jsonStr string) erro
   picoClawMap["channels"] = channels
   cfg.PicoClaw = picoClawMap
 
-  return config.Save(cfg, configPath)
+  return config.SaveToDB(cfg, "cli")
 }
 
 func ConfigApply(cfg *config.GlobalConfig, targetUser string) error {

@@ -3,6 +3,7 @@ package web
 import (
   "archive/zip"
   "context"
+  "encoding/json"
   "fmt"
   "io"
   "net/http"
@@ -17,9 +18,9 @@ import (
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
   dockerpkg "github.com/picoaide/picoaide/internal/docker"
+  "github.com/picoaide/picoaide/internal/ldap"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
-  "gopkg.in/yaml.v3"
 )
 
 var gitMutex sync.Mutex
@@ -302,6 +303,73 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
 }
 
 // ============================================================
+// 认证配置 — LDAP 测试 & 用户搜索
+// ============================================================
+
+func (s *Server) handleAdminAuthTestLDAP(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+
+  host := r.FormValue("host")
+  bindDN := r.FormValue("bind_dn")
+  bindPassword := r.FormValue("bind_password")
+  baseDN := r.FormValue("base_dn")
+  filter := r.FormValue("filter")
+  usernameAttr := r.FormValue("username_attribute")
+
+  if host == "" || bindDN == "" || baseDN == "" {
+    writeError(w, http.StatusBadRequest, "LDAP 地址、Bind DN 和 Base DN 不能为空")
+    return
+  }
+
+  users, err := ldap.TestConnection(host, bindDN, bindPassword, baseDN, filter, usernameAttr)
+  if err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+
+  writeJSON(w, http.StatusOK, struct {
+    Success   bool     `json:"success"`
+    Message   string   `json:"message"`
+    UserCount int      `json:"user_count"`
+    Users     []string `json:"users"`
+  }{true, fmt.Sprintf("连接成功，找到 %d 个用户", len(users)), len(users), users})
+}
+
+func (s *Server) handleAdminAuthLDAPUsers(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "GET" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+    return
+  }
+
+  users, err := ldap.FetchUsers(s.cfg)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, err.Error())
+    return
+  }
+
+  if users == nil {
+    users = []string{}
+  }
+  writeJSON(w, http.StatusOK, struct {
+    Success bool     `json:"success"`
+    Users   []string `json:"users"`
+  }{true, users})
+}
+
+// ============================================================
 // 白名单管理
 // ============================================================
 
@@ -349,13 +417,24 @@ func (s *Server) handleAdminWhitelist(w http.ResponseWriter, r *http.Request) {
       }
     }
     sort.Strings(users)
-    wl := config.WhitelistFile{Users: users}
-    data, err := yaml.Marshal(&wl)
+
+    // 写入数据库
+    d, err := auth.GetDB()
+    if err != nil {
+      writeError(w, http.StatusInternalServerError, "数据库连接失败")
+      return
+    }
+    tx, err := d.Begin()
     if err != nil {
       writeError(w, http.StatusInternalServerError, err.Error())
       return
     }
-    if err := os.WriteFile(config.WhitelistPath(), data, 0644); err != nil {
+    defer tx.Rollback()
+    tx.Exec("DELETE FROM whitelist")
+    for _, u := range users {
+      tx.Exec("INSERT OR IGNORE INTO whitelist (username, added_by) VALUES (?, ?)", u, s.getSessionUser(r))
+    }
+    if err := tx.Commit(); err != nil {
       writeError(w, http.StatusInternalServerError, err.Error())
       return
     }
@@ -372,7 +451,8 @@ func (s *Server) handleAdminWhitelist(w http.ResponseWriter, r *http.Request) {
 
 // skillReposDir 技能仓库克隆区路径
 func skillReposDir() string {
-  return filepath.Join(filepath.Dir(config.ConfigPath()), "skill-repos")
+  wd, _ := os.Getwd()
+  return filepath.Join(wd, "skill-repos")
 }
 
 func (s *Server) handleAdminSkills(w http.ResponseWriter, r *http.Request) {
@@ -863,22 +943,17 @@ func gitCmd(dir string, args ...string) (string, error) {
 }
 
 func (s *Server) saveSkillsConfig() {
-  data, err := os.ReadFile(config.ConfigPath())
-  if err != nil {
-    return
-  }
-  var raw map[string]interface{}
-  if err := yaml.Unmarshal(data, &raw); err != nil {
-    return
-  }
-  raw["skills"] = map[string]interface{}{
+  skillsJSON, err := json.Marshal(map[string]interface{}{
     "repos": s.cfg.Skills.Repos,
-  }
-  out, err := yaml.Marshal(raw)
+  })
   if err != nil {
     return
   }
-  os.WriteFile(config.ConfigPath(), out, 0644)
+  d, err := auth.GetDB()
+  if err != nil {
+    return
+  }
+  d.Exec("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('skills', ?, datetime('now','localtime'))", string(skillsJSON))
 }
 
 func formatSize(size int64) string {
