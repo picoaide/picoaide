@@ -3,6 +3,7 @@ package config
 import (
   "bufio"
   "bytes"
+  "database/sql"
   "encoding/json"
   "fmt"
   "net"
@@ -13,6 +14,7 @@ import (
   "strings"
   "text/template"
 
+  "github.com/picoaide/picoaide/internal/auth"
   "gopkg.in/yaml.v3"
 )
 
@@ -204,9 +206,13 @@ func (cfg *GlobalConfig) AuthMode() string {
   return "local"
 }
 
-// SkillsDirPath 返回技能目录路径
+// SkillsDirPath 返回技能目录路径（使用工作目录）
 func SkillsDirPath() string {
-  return filepath.Join(filepath.Dir(ConfigPath()), "skill")
+  wd, err := os.Getwd()
+  if err != nil {
+    return "./skill"
+  }
+  return filepath.Join(wd, "skill")
 }
 
 // ============================================================
@@ -574,4 +580,473 @@ func LoadRaw() ([]byte, error) {
 func SaveRaw(data []byte) error {
   os.MkdirAll(filepath.Dir(ConfigPath()), 0755)
   return os.WriteFile(ConfigPath(), data, 0644)
+}
+
+// ============================================================
+// 数据库配置管理
+// ============================================================
+
+// SettingsCount 返回 settings 表中的配置项数量
+func SettingsCount() (int, error) {
+  d, err := auth.GetDB()
+  if err != nil {
+    return 0, fmt.Errorf("获取数据库连接失败: %w", err)
+  }
+  var count int
+  err = d.QueryRow("SELECT COUNT(*) FROM settings").Scan(&count)
+  if err != nil {
+    return 0, fmt.Errorf("查询配置数量失败: %w", err)
+  }
+  return count, nil
+}
+
+// LoadFromDB 从数据库加载全局配置
+func LoadFromDB() (*GlobalConfig, error) {
+  d, err := auth.GetDB()
+  if err != nil {
+    return nil, fmt.Errorf("获取数据库连接失败: %w", err)
+  }
+
+  rows, err := d.Query("SELECT key, value FROM settings")
+  if err != nil {
+    return nil, fmt.Errorf("查询配置失败: %w", err)
+  }
+  defer rows.Close()
+
+  // 读取所有键值对
+  kv := make(map[string]string)
+  for rows.Next() {
+    var key, value string
+    if err := rows.Scan(&key, &value); err != nil {
+      return nil, fmt.Errorf("读取配置行失败: %w", err)
+    }
+    kv[key] = value
+  }
+
+  cfg := &GlobalConfig{}
+
+  // 简单字段直接赋值
+  cfg.LDAP.Host = kv["ldap.host"]
+  cfg.LDAP.BindDN = kv["ldap.bind_dn"]
+  cfg.LDAP.BindPassword = kv["ldap.bind_password"]
+  cfg.LDAP.BaseDN = kv["ldap.base_dn"]
+  cfg.LDAP.Filter = kv["ldap.filter"]
+  cfg.LDAP.UsernameAttribute = kv["ldap.username_attribute"]
+  cfg.Image.Name = kv["image.name"]
+  cfg.Image.Timezone = kv["image.timezone"]
+  cfg.Image.Registry = kv["image.registry"]
+  cfg.UsersRoot = kv["users_root"]
+  cfg.ArchiveRoot = kv["archive_root"]
+  cfg.Web.Listen = kv["web.listen"]
+  cfg.Web.Password = kv["web.password"]
+  cfg.Web.AuthMode = kv["web.auth_mode"]
+
+  // web.ldap_enabled 需要解析为 bool 指针
+  if v, ok := kv["web.ldap_enabled"]; ok && v != "" {
+    b, err := strconv.ParseBool(v)
+    if err == nil {
+      cfg.Web.LDAPEnabled = &b
+    }
+  }
+
+  // 结构化字段从 JSON 反序列化
+  if v, ok := kv["picoclaw"]; ok && v != "" {
+    var picoclaw interface{}
+    if err := json.Unmarshal([]byte(v), &picoclaw); err == nil {
+      cfg.PicoClaw = picoclaw
+    }
+  }
+  if v, ok := kv["security"]; ok && v != "" {
+    var security interface{}
+    if err := json.Unmarshal([]byte(v), &security); err == nil {
+      cfg.Security = security
+    }
+  }
+  if v, ok := kv["skills"]; ok && v != "" {
+    var skills SkillsConfig
+    if err := json.Unmarshal([]byte(v), &skills); err == nil {
+      cfg.Skills = skills
+    }
+  }
+
+  return cfg, nil
+}
+
+// SaveToDB 将全局配置保存到数据库
+func SaveToDB(cfg *GlobalConfig, changedBy string) error {
+  d, err := auth.GetDB()
+  if err != nil {
+    return fmt.Errorf("获取数据库连接失败: %w", err)
+  }
+
+  // 构建键值映射
+  kv := make(map[string]string)
+  kv["ldap.host"] = cfg.LDAP.Host
+  kv["ldap.bind_dn"] = cfg.LDAP.BindDN
+  kv["ldap.bind_password"] = cfg.LDAP.BindPassword
+  kv["ldap.base_dn"] = cfg.LDAP.BaseDN
+  kv["ldap.filter"] = cfg.LDAP.Filter
+  kv["ldap.username_attribute"] = cfg.LDAP.UsernameAttribute
+  kv["image.name"] = cfg.Image.Name
+  kv["image.timezone"] = cfg.Image.Timezone
+  kv["image.registry"] = cfg.Image.Registry
+  kv["users_root"] = cfg.UsersRoot
+  kv["archive_root"] = cfg.ArchiveRoot
+  kv["web.listen"] = cfg.Web.Listen
+  kv["web.password"] = cfg.Web.Password
+  kv["web.auth_mode"] = cfg.Web.AuthMode
+
+  if cfg.Web.LDAPEnabled != nil {
+    kv["web.ldap_enabled"] = strconv.FormatBool(*cfg.Web.LDAPEnabled)
+  }
+
+  // 结构化字段序列化为 JSON
+  if cfg.PicoClaw != nil {
+    b, err := json.Marshal(cfg.PicoClaw)
+    if err != nil {
+      return fmt.Errorf("序列化 picoclaw 配置失败: %w", err)
+    }
+    kv["picoclaw"] = string(b)
+  }
+  if cfg.Security != nil {
+    b, err := json.Marshal(cfg.Security)
+    if err != nil {
+      return fmt.Errorf("序列化 security 配置失败: %w", err)
+    }
+    kv["security"] = string(b)
+  }
+  // skills 即使为空值也需要保存（保留默认结构）
+  {
+    b, err := json.Marshal(cfg.Skills)
+    if err != nil {
+      return fmt.Errorf("序列化 skills 配置失败: %w", err)
+    }
+    kv["skills"] = string(b)
+  }
+
+  // 事务写入
+  tx, err := d.Begin()
+  if err != nil {
+    return fmt.Errorf("开启事务失败: %w", err)
+  }
+  defer tx.Rollback()
+
+  for key, newValue := range kv {
+    // 查询当前值
+    var oldValue sql.NullString
+    tx.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&oldValue)
+
+    // 值相同则跳过
+    if oldValue.Valid && oldValue.String == newValue {
+      continue
+    }
+
+    // 记录变更历史
+    if oldValue.Valid {
+      _, err := tx.Exec(
+        "INSERT INTO settings_history (key, old_value, new_value, changed_by) VALUES (?, ?, ?, ?)",
+        key, oldValue.String, newValue, changedBy,
+      )
+      if err != nil {
+        return fmt.Errorf("写入配置历史失败: %w", err)
+      }
+    }
+
+    // 写入新值
+    _, err := tx.Exec(
+      "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
+      key, newValue,
+    )
+    if err != nil {
+      return fmt.Errorf("写入配置失败: %w", err)
+    }
+  }
+
+  return tx.Commit()
+}
+
+// LoadRawFromDB 从数据库加载配置并返回嵌套 JSON 结构（与 LoadRaw 返回格式一致）
+func LoadRawFromDB() (map[string]interface{}, error) {
+  d, err := auth.GetDB()
+  if err != nil {
+    return nil, fmt.Errorf("获取数据库连接失败: %w", err)
+  }
+
+  rows, err := d.Query("SELECT key, value FROM settings")
+  if err != nil {
+    return nil, fmt.Errorf("查询配置失败: %w", err)
+  }
+  defer rows.Close()
+
+  kv := make(map[string]string)
+  for rows.Next() {
+    var key, value string
+    if err := rows.Scan(&key, &value); err != nil {
+      return nil, fmt.Errorf("读取配置行失败: %w", err)
+    }
+    kv[key] = value
+  }
+
+  return buildNested(kv), nil
+}
+
+// SaveRawToDB 将嵌套 JSON 配置保存到数据库
+func SaveRawToDB(data map[string]interface{}, changedBy string) error {
+  flat := flattenConfig(data)
+
+  d, err := auth.GetDB()
+  if err != nil {
+    return fmt.Errorf("获取数据库连接失败: %w", err)
+  }
+
+  tx, err := d.Begin()
+  if err != nil {
+    return fmt.Errorf("开启事务失败: %w", err)
+  }
+  defer tx.Rollback()
+
+  for key, newValue := range flat {
+    // 查询当前值
+    var oldValue sql.NullString
+    tx.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&oldValue)
+
+    // 值相同则跳过
+    if oldValue.Valid && oldValue.String == newValue {
+      continue
+    }
+
+    // 记录变更历史
+    if oldValue.Valid {
+      _, err := tx.Exec(
+        "INSERT INTO settings_history (key, old_value, new_value, changed_by) VALUES (?, ?, ?, ?)",
+        key, oldValue.String, newValue, changedBy,
+      )
+      if err != nil {
+        return fmt.Errorf("写入配置历史失败: %w", err)
+      }
+    }
+
+    // 写入新值
+    _, err := tx.Exec(
+      "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
+      key, newValue,
+    )
+    if err != nil {
+      return fmt.Errorf("写入配置失败: %w", err)
+    }
+  }
+
+  return tx.Commit()
+}
+
+// InitDBDefaults 将默认配置写入数据库（不覆盖已有值）
+func InitDBDefaults() error {
+  // 解析默认配置 YAML 为 map
+  var raw map[string]interface{}
+  if err := yaml.Unmarshal([]byte(DefaultConfig), &raw); err != nil {
+    return fmt.Errorf("解析默认配置失败: %w", err)
+  }
+
+  flat := flattenConfig(raw)
+
+  d, err := auth.GetDB()
+  if err != nil {
+    return fmt.Errorf("获取数据库连接失败: %w", err)
+  }
+
+  tx, err := d.Begin()
+  if err != nil {
+    return fmt.Errorf("开启事务失败: %w", err)
+  }
+  defer tx.Rollback()
+
+  for key, value := range flat {
+    // INSERT OR IGNORE：键已存在时不覆盖
+    _, err := tx.Exec(
+      "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
+      key, value,
+    )
+    if err != nil {
+      return fmt.Errorf("写入默认配置失败: %w", err)
+    }
+  }
+
+  return tx.Commit()
+}
+
+// MigrateFromYAML 从 config.yaml 和 whitelist.yaml 迁移配置到数据库
+func MigrateFromYAML(yamlPath string) error {
+  // 读取并解析 YAML 配置文件
+  data, err := os.ReadFile(yamlPath)
+  if err != nil {
+    return fmt.Errorf("读取配置文件失败: %w", err)
+  }
+
+  var raw map[string]interface{}
+  if err := yaml.Unmarshal(data, &raw); err != nil {
+    return fmt.Errorf("解析配置文件失败: %w", err)
+  }
+
+  flat := flattenConfig(raw)
+
+  d, err := auth.GetDB()
+  if err != nil {
+    return fmt.Errorf("获取数据库连接失败: %w", err)
+  }
+
+  tx, err := d.Begin()
+  if err != nil {
+    return fmt.Errorf("开启事务失败: %w", err)
+  }
+  defer tx.Rollback()
+
+  // 写入配置项
+  for key, value := range flat {
+    _, err := tx.Exec(
+      "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
+      key, value,
+    )
+    if err != nil {
+      return fmt.Errorf("写入配置失败: %w", err)
+    }
+  }
+
+  // 迁移白名单
+  whitelistPath := filepath.Join(filepath.Dir(yamlPath), whitelistFileName)
+  if _, err := os.Stat(whitelistPath); err == nil {
+    wlData, err := os.ReadFile(whitelistPath)
+    if err == nil {
+      var wl WhitelistFile
+      if err := yaml.Unmarshal(wlData, &wl); err == nil {
+        for _, username := range wl.Users {
+          _, err := tx.Exec(
+            "INSERT OR IGNORE INTO whitelist (username, added_by) VALUES (?, 'migration')",
+            username,
+          )
+          if err != nil {
+            fmt.Fprintf(os.Stderr, "警告: 迁移白名单用户 %s 失败: %v\n", username, err)
+          }
+        }
+        if len(wl.Users) > 0 {
+          fmt.Printf("已迁移 %d 个白名单用户\n", len(wl.Users))
+        }
+      }
+    }
+  }
+
+  if err := tx.Commit(); err != nil {
+    return fmt.Errorf("提交迁移事务失败: %w", err)
+  }
+
+  fmt.Printf("已从 %s 迁移 %d 个配置项到数据库\n", yamlPath, len(flat))
+  return nil
+}
+
+// flattenConfig 将嵌套配置展平为点分隔的键值映射
+// 规则：
+//   - 字符串/数字/布尔值 → 直接存储为字符串
+//   - 嵌套 map → 递归展平，键用点连接
+//   - 切片/数组 → 序列化为 JSON 字符串，存储在父键下
+//   - 特殊键 picoclaw、security、skills → 整体序列化为 JSON
+func flattenConfig(data map[string]interface{}) map[string]string {
+  result := make(map[string]string)
+  flattenRecursive(data, "", result)
+  return result
+}
+
+// flattenConfig 内部递归实现
+func flattenRecursive(data map[string]interface{}, prefix string, result map[string]string) {
+  // 需要整体存储为 JSON 的顶层键
+  jsonBlobKeys := map[string]bool{
+    "picoclaw": true,
+    "security": true,
+    "skills":   true,
+  }
+
+  for key, val := range data {
+    fullKey := key
+    if prefix != "" {
+      fullKey = prefix + "." + key
+    }
+
+    // 顶层特殊键：整体序列化为 JSON
+    if prefix == "" && jsonBlobKeys[key] {
+      b, err := json.Marshal(val)
+      if err == nil {
+        result[key] = string(b)
+      }
+      continue
+    }
+
+    switch v := val.(type) {
+    case map[string]interface{}:
+      // 嵌套 map → 递归展平
+      flattenRecursive(v, fullKey, result)
+    case []interface{}:
+      // 切片 → 序列化为 JSON
+      b, err := json.Marshal(v)
+      if err == nil {
+        result[fullKey] = string(b)
+      }
+    case nil:
+      result[fullKey] = ""
+    default:
+      // 字符串、数字、布尔值等 → 转为字符串
+      result[fullKey] = fmt.Sprintf("%v", v)
+    }
+  }
+}
+
+// buildNested 将展平的键值映射重建为嵌套 JSON 结构
+func buildNested(flat map[string]string) map[string]interface{} {
+  // 需要从 JSON 反序列化的顶层键
+  jsonBlobKeys := map[string]bool{
+    "picoclaw": true,
+    "security": true,
+    "skills":   true,
+  }
+
+  // 需要作为 bool 返回的键
+  boolKeys := map[string]bool{
+    "web.ldap_enabled": true,
+  }
+
+  result := make(map[string]interface{})
+
+  for key, value := range flat {
+    // 特殊键直接从 JSON 解析
+    if jsonBlobKeys[key] {
+      var parsed interface{}
+      if err := json.Unmarshal([]byte(value), &parsed); err == nil {
+        result[key] = parsed
+      }
+      continue
+    }
+
+    // 类型转换
+    var typedVal interface{} = value
+    if boolKeys[key] {
+      if b, err := strconv.ParseBool(value); err == nil {
+        typedVal = b
+      }
+    } else if iv, err := strconv.ParseInt(value, 10, 64); err == nil && strconv.FormatInt(iv, 10) == value {
+      typedVal = iv
+    }
+
+    // 按点分隔逐层构建嵌套 map
+    parts := strings.Split(key, ".")
+    current := result
+    for i := 0; i < len(parts)-1; i++ {
+      part := parts[i]
+      if _, ok := current[part]; !ok {
+        current[part] = make(map[string]interface{})
+      }
+      if m, ok := current[part].(map[string]interface{}); ok {
+        current = m
+      }
+    }
+    current[parts[len(parts)-1]] = typedVal
+  }
+
+  return result
 }

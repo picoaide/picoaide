@@ -74,7 +74,7 @@ export async function init(ctx) {
       var val = deepGet(rawConfig, sel.dataset.path);
       if (val !== undefined && val !== null) sel.value = val;
     });
-    var ldapOn = rawConfig.web?.ldap_enabled !== false;
+    var ldapOn = rawConfig.web?.ldap_enabled === true || rawConfig.web?.ldap_enabled === 'true';
     if (rawConfig.web?.auth_mode === 'local') ldapOn = false;
     if (rawConfig.web?.auth_mode === 'ldap') ldapOn = true;
     $('#ldap-enabled').checked = ldapOn;
@@ -141,7 +141,8 @@ export async function init(ctx) {
         vendorOptions += '<option value="' + vk + '"' + (parsed.vendor === vk ? ' selected' : '') + '>' + VENDORS[vk].label + '</option>';
       });
 
-      var isCustomApiBase = !m.api_base || !VENDORS[parsed.vendor] || m.api_base !== VENDORS[parsed.vendor].api_base;
+      var defaultBase = VENDORS[parsed.vendor] ? VENDORS[parsed.vendor].api_base : '';
+      var apiBaseValue = m.api_base || defaultBase;
 
       var keysHtml = '';
       keys.forEach(function(k, ki) {
@@ -160,7 +161,7 @@ export async function init(ctx) {
           '</div></div>' +
         '</div>' +
         '<div class="grid-2">' +
-          '<div class="field vendor-api-base' + (isCustomApiBase ? '' : ' hidden') + '"><label>API Base (留空使用默认)</label><input type="text" value="' + ctx.esc(m.api_base || '') + '" data-mi="' + i + '" data-mf="api_base"></div>' +
+          '<div class="field"><label>API Base</label><input type="text" value="' + ctx.esc(apiBaseValue) + '" data-mi="' + i + '" data-mf="api_base" placeholder="' + ctx.esc(defaultBase) + '"></div>' +
           '<div class="field"><label>超时(秒)</label><input type="number" value="' + (m.request_timeout || '') + '" data-mi="' + i + '" data-mf="request_timeout"></div>' +
         '</div>' +
         '<div class="field"><label>API 密钥</label>' + keysHtml +
@@ -181,21 +182,19 @@ export async function init(ctx) {
         if (!rawConfig.picoclaw) rawConfig.picoclaw = {};
         if (!rawConfig.picoclaw.model_list) rawConfig.picoclaw.model_list = [];
         rawConfig.picoclaw.model_list[idx].model = buildModelField(vendor, modelId);
-        // 自动更新 api_base 显示
-        var card = sel.closest('.card');
-        var apiBaseWrap = card.querySelector('.vendor-api-base');
-        var apiBaseInput = card.querySelector('input[data-mf="api_base"]');
+        // 自动填充默认 api_base
         if (VENDORS[vendor] && VENDORS[vendor].api_base) {
+          var card = sel.closest('.card');
+          var apiBaseInput = card.querySelector('input[data-mf="api_base"]');
           var currentBase = rawConfig.picoclaw.model_list[idx].api_base || '';
-          var oldVendor = Object.keys(VENDORS).find(function(v) {
-            return v !== vendor && VENDORS[v].api_base && VENDORS[v].api_base === currentBase;
+          var isOldDefault = Object.keys(VENDORS).some(function(v) {
+            return v !== vendor && VENDORS[v].api_base === currentBase;
           });
-          if (!currentBase || oldVendor) {
+          if (!currentBase || isOldDefault) {
             rawConfig.picoclaw.model_list[idx].api_base = VENDORS[vendor].api_base;
+            apiBaseInput.value = VENDORS[vendor].api_base;
+            apiBaseInput.placeholder = VENDORS[vendor].api_base;
           }
-          apiBaseWrap.classList.toggle('hidden', rawConfig.picoclaw.model_list[idx].api_base === VENDORS[vendor].api_base);
-        } else {
-          apiBaseWrap.classList.remove('hidden');
         }
       });
     });
@@ -220,18 +219,6 @@ export async function init(ctx) {
         if (!rawConfig.picoclaw) rawConfig.picoclaw = {};
         if (!rawConfig.picoclaw.model_list) rawConfig.picoclaw.model_list = [];
         rawConfig.picoclaw.model_list[idx][input.dataset.mf] = val;
-        // api_base 修改时更新显示状态
-        if (input.dataset.mf === 'api_base') {
-          var card = input.closest('.card');
-          var vendorSel = card.querySelector('select[data-vf="vendor"]');
-          var vendor = vendorSel ? vendorSel.value : 'custom';
-          var wrap = card.querySelector('.vendor-api-base');
-          if (VENDORS[vendor] && val === VENDORS[vendor].api_base) {
-            wrap.classList.add('hidden');
-          } else {
-            wrap.classList.remove('hidden');
-          }
-        }
         // 如果改了 model_name，同步更新 security 中的 key 和默认模型下拉
         if (input.dataset.mf === 'model_name') {
           syncSecurityOnRename();
