@@ -4,20 +4,21 @@ export async function init(ctx) {
   const { Api, showMsg, $, $$ } = ctx;
   await loadConfig();
 
-  $('#ldap-enabled').addEventListener('change', function() {
-    var checked = this.checked;
-    if (checked) {
-      if (!confirm('切换到 LDAP 统一登录模式？\n\n本地用户（包括超管）仍可使用本地密码登录。')) {
-        this.checked = false;
+  $('#auth-mode').addEventListener('change', function() {
+    var mode = this.value;
+    var ldapOn = mode === 'ldap';
+    if (ldapOn) {
+      if (!confirm('切换到 LDAP 统一登录模式？\n\n启用后，本地用户（非超管）将被禁用，仅超管可使用本地密码登录。')) {
+        this.value = 'local';
         return;
       }
     } else {
-      if (!confirm('切换到本地认证模式？\n\nLDAP 用户将无法登录，但超管仍可使用本地密码登录。')) {
-        this.checked = true;
+      if (!confirm('切换到本地认证模式？\n\nLDAP 用户将无法登录。')) {
+        this.value = 'ldap';
         return;
       }
     }
-    $('#ldap-section').style.display = checked ? '' : 'none';
+    updateLDAPVisibility(ldapOn);
   });
 
   $('#save-auth-btn').addEventListener('click', saveAuthConfig);
@@ -44,8 +45,8 @@ export async function init(ctx) {
     if (rawConfig.web?.auth_mode === 'local') ldapOn = false;
     if (rawConfig.web?.auth_mode === 'ldap') ldapOn = true;
 
-    $('#ldap-enabled').checked = ldapOn;
-    $('#ldap-section').style.display = ldapOn ? '' : 'none';
+    $('#auth-mode').value = ldapOn ? 'ldap' : 'local';
+    updateLDAPVisibility(ldapOn);
 
     $('#session-secret').value = rawConfig.web?.password || '';
 
@@ -59,9 +60,14 @@ export async function init(ctx) {
     if (ldapOn) loadWhitelist();
   }
 
+  function updateLDAPVisibility(ldapOn) {
+    $('#ldap-section').style.display = ldapOn ? '' : 'none';
+    $('#ldap-mode-notice').classList.toggle('hidden', !ldapOn);
+  }
+
   async function saveAuthConfig() {
     showMsg('#auth-msg', '保存中...', true);
-    var ldapOn = $('#ldap-enabled').checked;
+    var ldapOn = $('#auth-mode').value === 'ldap';
     if (!rawConfig.web) rawConfig.web = {};
     rawConfig.web.ldap_enabled = ldapOn;
     rawConfig.web.auth_mode = ldapOn ? 'ldap' : 'local';
@@ -181,7 +187,6 @@ export async function init(ctx) {
         return;
       }
 
-      // 获取当前白名单
       var wlData = await Api.get('/api/admin/whitelist');
       var wlUsers = wlData.users || [];
 

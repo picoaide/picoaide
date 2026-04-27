@@ -5,8 +5,13 @@
 <div class="card">
   <div class="card-header">认证模式</div>
   <div class="field">
-    <label class="switch"><input type="checkbox" id="ldap-enabled"> 启用 LDAP 统一登录</label>
+    <label>认证方式</label>
+    <select id="auth-mode">
+      <option value="local">本地认证</option>
+      <option value="ldap">LDAP 统一登录</option>
+    </select>
   </div>
+  <div id="ldap-mode-notice" class="msg msg-info hidden">LDAP 模式下，本地用户（非超管）将被禁用，仅超管可使用本地密码登录。</div>
   <div class="field">
     <label>Session 密钥</label>
     <input type="password" id="session-secret" placeholder="change-me-to-a-random-secret">

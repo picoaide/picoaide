@@ -74,17 +74,21 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  // 1. 先尝试本地认证
+  // 1. 本地认证（LDAP 模式下仅允许超管）
   if ok, _, err := auth.AuthenticateLocal(username, password); err == nil && ok {
-    s.setSessionCookie(w, s.createSessionToken(username), 86400)
-    writeJSON(w, http.StatusOK, struct {
-      Success  bool   `json:"success"`
-      Username string `json:"username"`
-    }{
-      Success:  true,
-      Username: username,
-    })
-    return
+    if s.cfg.UnifiedAuthEnabled() && !auth.IsSuperadmin(username) {
+      // 统一认证模式下，非超管本地用户禁止登录
+    } else {
+      s.setSessionCookie(w, s.createSessionToken(username), 86400)
+      writeJSON(w, http.StatusOK, struct {
+        Success  bool   `json:"success"`
+        Username string `json:"username"`
+      }{
+        Success:  true,
+        Username: username,
+      })
+      return
+    }
   }
 
   // 2. LDAP 认证（如果启用）
