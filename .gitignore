@@ -7,8 +7,8 @@ config.yaml
 whitelist.yaml
 
 # 编译产物
-picoaide
-picoaide-linux-amd64
+/picoaide
+/picoaide-linux-amd64
 *.exe
 
 # Go 工具产物
