@@ -131,7 +131,7 @@ func Sync(cfg *config.GlobalConfig) error {
 
 		fmt.Println("\n--- 应用全局配置 ---")
 		for _, u := range needApplyUsers {
-			picoclawDir := filepath.Join(user.UserDir(cfg, u), "root", ".picoclaw")
+			picoclawDir := filepath.Join(user.UserDir(cfg, u), ".picoclaw")
 			configJSON := filepath.Join(picoclawDir, "config.json")
 			securityYAML := filepath.Join(picoclawDir, ".security.yml")
 
@@ -156,7 +156,7 @@ func Sync(cfg *config.GlobalConfig) error {
 		fmt.Println("\n--- 重启已配置用户 ---")
 		for _, u := range needApplyUsers {
 			ud := user.UserDir(cfg, u)
-			if _, err := os.Stat(filepath.Join(ud, "root", ".picoclaw", "config.json")); err != nil {
+			if _, err := os.Stat(filepath.Join(ud, ".picoclaw", "config.json")); err != nil {
 				continue
 			}
 			fmt.Printf("  [重启] %s ... ", u)

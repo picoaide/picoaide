@@ -15,6 +15,7 @@ import (
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
   dockerpkg "github.com/picoaide/picoaide/internal/docker"
+  "github.com/picoaide/picoaide/internal/user"
 )
 
 // ============================================================
@@ -23,9 +24,10 @@ import (
 
 // Server 是 Web 管理面板服务器
 type Server struct {
-  cfg     *config.GlobalConfig
-  secret  string
-  csrfKey string
+  cfg            *config.GlobalConfig
+  secret         string
+  csrfKey        string
+  dockerAvailable bool
 }
 
 // createSessionToken 生成 HMAC 签名的 session token
@@ -143,30 +145,46 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
     fmt.Fprintln(os.Stderr, "警告: 未配置 web.password，使用默认 session 密钥，请尽快修改")
   }
 
-  // CSRF 密钥独立于 session 密钥
   csrfKey := secret + "-csrf"
 
-  // 初始化本地用户数据库
+  // 确保工作目录存在
   wd, _ := os.Getwd()
+  if wd != "" {
+    os.MkdirAll(wd, 0755)
+  }
+
+  // 确保 users/ 和 archive/ 目录存在
+  if err := user.EnsureUsersRoot(cfg); err != nil {
+    fmt.Fprintf(os.Stderr, "警告: 创建用户目录失败: %v\n", err)
+  }
+
+  // 初始化本地用户数据库（失败时重试一次）
   if err := auth.InitDB(wd); err != nil {
-    return fmt.Errorf("初始化用户数据库失败: %w", err)
+    fmt.Fprintf(os.Stderr, "警告: 数据库初始化失败，正在重试: %v\n", err)
+    os.MkdirAll(wd, 0755)
+    if err := auth.InitDB(wd); err != nil {
+      return fmt.Errorf("初始化用户数据库失败: %w", err)
+    }
   }
 
   // 初始化 Docker 客户端
+  dockerOK := false
   if err := dockerpkg.InitClient(); err != nil {
-    fmt.Fprintf(os.Stderr, "警告: Docker 初始化失败: %v\n", err)
+    fmt.Fprintf(os.Stderr, "警告: Docker 不可用，容器操作将被禁用: %v\n", err)
   } else {
     defer dockerpkg.CloseClient()
     ctx := contextWithTimeout(5)
     if err := dockerpkg.EnsureNetwork(ctx); err != nil {
       fmt.Fprintf(os.Stderr, "警告: 网络初始化失败: %v\n", err)
     }
+    dockerOK = true
   }
 
   s := &Server{
-    cfg:     cfg,
-    secret:  secret,
-    csrfKey: csrfKey,
+    cfg:            cfg,
+    secret:         secret,
+    csrfKey:        csrfKey,
+    dockerAvailable: dockerOK,
   }
 
   mux := http.NewServeMux()
@@ -231,6 +249,10 @@ func (s *Server) handleAdminImages(w http.ResponseWriter, r *http.Request) {
   if s.requireSuperadmin(w, r) == "" {
     return
   }
+  if !s.dockerAvailable {
+    writeError(w, http.StatusServiceUnavailable, "Docker 服务不可用，请联系管理员")
+    return
+  }
   if r.Method != "GET" {
     writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
@@ -274,6 +296,10 @@ func (s *Server) handleAdminImages(w http.ResponseWriter, r *http.Request) {
 // handleAdminImagePull 拉取镜像（SSE 流式推送）
 func (s *Server) handleAdminImagePull(w http.ResponseWriter, r *http.Request) {
   if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if !s.dockerAvailable {
+    writeError(w, http.StatusServiceUnavailable, "Docker 服务不可用，请联系管理员")
     return
   }
   if r.Method != "POST" {
@@ -322,6 +348,10 @@ func (s *Server) handleAdminImagePull(w http.ResponseWriter, r *http.Request) {
 // handleAdminImageRegistry 列出远程仓库标签
 func (s *Server) handleAdminImageRegistry(w http.ResponseWriter, r *http.Request) {
   if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if !s.dockerAvailable {
+    writeError(w, http.StatusServiceUnavailable, "Docker 服务不可用，请联系管理员")
     return
   }
   if r.Method != "GET" {

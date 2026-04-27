@@ -37,7 +37,7 @@ ldap:
   username_attribute: "uid"
 
 image:
-  name: "ghcr.io/lostmaniac/picoclaw"
+  name: "ghcr.io/picoaide/picoaide"
   tag: "v0.2.6"
   timezone: "Asia/Shanghai"
 
@@ -218,6 +218,7 @@ func ConfigPath() string {
 func EnsureConfig() (string, bool) {
   configPath := ConfigPath()
   if _, err := os.Stat(configPath); os.IsNotExist(err) {
+    os.MkdirAll(filepath.Dir(configPath), 0755)
     err := os.WriteFile(configPath, []byte(DefaultConfig), 0644)
     if err != nil {
       fmt.Fprintf(os.Stderr, "错误: 无法创建默认配置文件 %s: %v\n", configPath, err)
@@ -278,6 +279,7 @@ func EnsureWhitelistFile() error {
   if _, err := os.Stat(path); err == nil {
     return nil
   }
+  os.MkdirAll(filepath.Dir(path), 0755)
   return os.WriteFile(path, []byte(defaultWhitelist), 0644)
 }
 
@@ -552,5 +554,6 @@ func LoadRaw() ([]byte, error) {
 
 // SaveRaw 将 YAML 字节写入 config.yaml
 func SaveRaw(data []byte) error {
+  os.MkdirAll(filepath.Dir(ConfigPath()), 0755)
   return os.WriteFile(ConfigPath(), data, 0644)
 }

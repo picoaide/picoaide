@@ -95,7 +95,7 @@ func ConfigSetChannel(cfg *config.GlobalConfig, configPath, jsonStr string) erro
 
 func ConfigApply(cfg *config.GlobalConfig, targetUser string) error {
   applyFn := func(username string) error {
-    picoclawDir := filepath.Join(user.UserDir(cfg, username), "root", ".picoclaw")
+    picoclawDir := filepath.Join(user.UserDir(cfg, username), ".picoclaw")
 
     configJSONPath := filepath.Join(picoclawDir, "config.json")
     securityYAMLPath := filepath.Join(picoclawDir, ".security.yml")

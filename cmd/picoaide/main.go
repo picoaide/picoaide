@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -74,7 +75,10 @@ func main() {
 	}
 	if hcfg != nil && hcfg.WorkDir != "" {
 		if err := os.Chdir(hcfg.WorkDir); err != nil {
-			fmt.Fprintf(os.Stderr, "警告: 无法切换到工作目录 %s: %v\n", hcfg.WorkDir, err)
+			os.MkdirAll(hcfg.WorkDir, 0755)
+			if err := os.Chdir(hcfg.WorkDir); err != nil {
+				fmt.Fprintf(os.Stderr, "警告: 无法切换到工作目录 %s: %v\n", hcfg.WorkDir, err)
+			}
 		}
 	}
 
@@ -123,29 +127,40 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 初始化数据库
+	// 初始化数据库（失败时重试一次）
 	wd, _ := os.Getwd()
 	if err := auth.InitDB(wd); err != nil {
-		fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "警告: 数据库初始化失败，正在重试: %v\n", err)
+		os.MkdirAll(wd, 0755)
+		if err := auth.InitDB(wd); err != nil {
+			fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// 初始化 Docker 客户端（容器操作需要）
 	needDocker := map[string]bool{
 		"start": true, "stop": true, "down": true, "restart": true,
-		"sync": true, "upgrade": true, "list": true,
+		"sync": true, "upgrade": true,
 	}
-	if needDocker[command] {
+	canRunWithoutDocker := map[string]bool{"list": true}
+	if !canRunWithoutDocker[command] {
+		needDocker[command] = true
+	}
+	if needDocker[command] || canRunWithoutDocker[command] {
 		if err := dockerpkg.InitClient(); err != nil {
-			fmt.Fprintf(os.Stderr, "Docker 初始化失败: %v\n", err)
-			os.Exit(1)
-		}
-		defer dockerpkg.CloseClient()
-
-		ctx := context.Background()
-		if err := dockerpkg.EnsureNetwork(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "网络初始化失败: %v\n", err)
-			os.Exit(1)
+			if canRunWithoutDocker[command] {
+				fmt.Fprintf(os.Stderr, "警告: Docker 不可用，将以降级模式运行\n")
+			} else {
+				fmt.Fprintf(os.Stderr, "Docker 初始化失败: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			defer dockerpkg.CloseClient()
+			ctx := context.Background()
+			if err := dockerpkg.EnsureNetwork(ctx); err != nil {
+				fmt.Fprintf(os.Stderr, "警告: 网络初始化失败: %v\n", err)
+			}
 		}
 	}
 
@@ -236,7 +251,7 @@ func main() {
 		}
 
 	case "list":
-		if err := List(cfg); err != nil {
+		if err := List(); err != nil {
 			fmt.Fprintf(os.Stderr, "列表失败: %v\n", err)
 			os.Exit(1)
 		}
@@ -503,6 +518,8 @@ func runFirstRun(reader *bufio.Reader) {
 		fmt.Fprintf(os.Stderr, "创建数据目录失败: %v\n", err)
 		os.Exit(1)
 	}
+	os.MkdirAll(filepath.Join(dataDir, "users"), 0755)
+	os.MkdirAll(filepath.Join(dataDir, "archive"), 0755)
 
 	hcfg, _ := config.LoadHome()
 	if hcfg == nil {

@@ -33,7 +33,7 @@ func SkillsDeploy(cfg *config.GlobalConfig, targetUser string) error {
   fmt.Printf("发现 %d 个技能: %s\n", len(skillNames), strings.Join(skillNames, ", "))
 
   deployFn := func(username string) error {
-    targetSkillsDir := filepath.Join(user.UserDir(cfg, username), "root", ".picoclaw", "workspace", "skills")
+    targetSkillsDir := filepath.Join(user.UserDir(cfg, username), ".picoclaw", "workspace", "skills")
 
     for _, skillName := range skillNames {
       srcPath := filepath.Join(skillDir, skillName)

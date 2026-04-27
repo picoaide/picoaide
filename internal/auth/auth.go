@@ -5,9 +5,11 @@ import (
   "database/sql"
   "fmt"
   "math/big"
+  "os"
   "path/filepath"
   "strconv"
   "strings"
+  "time"
 
   _ "modernc.org/sqlite"
   "golang.org/x/crypto/bcrypt"
@@ -15,10 +17,19 @@ import (
 
 const dbFileName = "picoaide.db"
 
-var db *sql.DB
+var (
+  db       *sql.DB
+  dbDataDir string
+)
 
 // InitDB 打开或创建 SQLite 数据库
 func InitDB(dataDir string) error {
+  dbDataDir = dataDir
+
+  if err := os.MkdirAll(dataDir, 0755); err != nil {
+    return fmt.Errorf("创建数据库目录失败: %w", err)
+  }
+
   dbPath := filepath.Join(dataDir, dbFileName)
 
   var err error
@@ -27,15 +38,38 @@ func InitDB(dataDir string) error {
     return fmt.Errorf("打开数据库失败: %w", err)
   }
 
-  // SQLite 单写优化
+  if err := db.Ping(); err != nil {
+    // 数据库损坏，备份后重建
+    db.Close()
+    db = nil
+    backupPath := dbPath + ".broken." + time.Now().Format("20060102-150405")
+    fmt.Fprintf(os.Stderr, "数据库损坏，已备份到 %s，正在重建\n", backupPath)
+    os.Rename(dbPath, backupPath)
+
+    db, err = sql.Open("sqlite", dbPath)
+    if err != nil {
+      return fmt.Errorf("重建数据库失败: %w", err)
+    }
+  }
+
   db.SetMaxOpenConns(1)
 
-  // 总是执行 CREATE TABLE IF NOT EXISTS，确保新增的表也能创建
   if err := createTables(); err != nil {
     return fmt.Errorf("创建数据表失败: %w", err)
   }
 
   return nil
+}
+
+// ensureDB 确保数据库连接可用，db 为 nil 时自动重连
+func ensureDB() error {
+  if db != nil {
+    return nil
+  }
+  if dbDataDir == "" {
+    return fmt.Errorf("数据库未初始化")
+  }
+  return InitDB(dbDataDir)
 }
 
 func createTables() error {
@@ -66,6 +100,9 @@ func createTables() error {
 
 // CreateUser 创建本地用户
 func CreateUser(username, password, role string) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
   hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
   if err != nil {
     return fmt.Errorf("密码哈希失败: %w", err)
@@ -83,6 +120,9 @@ func CreateUser(username, password, role string) error {
 
 // AuthenticateLocal 校验本地用户，返回 (是否成功, 角色, 错误)
 func AuthenticateLocal(username, password string) (bool, string, error) {
+  if err := ensureDB(); err != nil {
+    return false, "", err
+  }
   var hash, role string
   err := db.QueryRow(
     "SELECT password_hash, role FROM local_users WHERE username = ?",
@@ -105,6 +145,9 @@ func AuthenticateLocal(username, password string) (bool, string, error) {
 
 // UserExists 检查本地用户是否存在
 func UserExists(username string) bool {
+  if ensureDB() != nil {
+    return false
+  }
   var count int
   db.QueryRow("SELECT COUNT(*) FROM local_users WHERE username = ?", username).Scan(&count)
   return count > 0
@@ -112,6 +155,9 @@ func UserExists(username string) bool {
 
 // HasAnySuperadmin 检查系统中是否存在超管
 func HasAnySuperadmin() bool {
+  if ensureDB() != nil {
+    return false
+  }
   var count int
   db.QueryRow("SELECT COUNT(*) FROM local_users WHERE role = 'superadmin'").Scan(&count)
   return count > 0
@@ -124,6 +170,9 @@ func DB() *sql.DB {
 
 // IsSuperadmin 检查指定用户是否是超管
 func IsSuperadmin(username string) bool {
+  if ensureDB() != nil {
+    return false
+  }
   var role string
   err := db.QueryRow(
     "SELECT role FROM local_users WHERE username = ?",
@@ -137,6 +186,9 @@ func IsSuperadmin(username string) bool {
 
 // GetUserRole 获取用户角色
 func GetUserRole(username string) string {
+  if ensureDB() != nil {
+    return ""
+  }
   var role string
   err := db.QueryRow(
     "SELECT role FROM local_users WHERE username = ?",
@@ -150,6 +202,9 @@ func GetUserRole(username string) string {
 
 // ChangePassword 修改本地用户密码
 func ChangePassword(username, newPassword string) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
   hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
   if err != nil {
     return fmt.Errorf("密码哈希失败: %w", err)
@@ -181,6 +236,9 @@ func GenerateRandomPassword(length int) string {
 
 // DeleteUser 删除本地用户
 func DeleteUser(username string) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
   result, err := db.Exec("DELETE FROM local_users WHERE username = ?", username)
   if err != nil {
     return fmt.Errorf("删除用户失败: %w", err)
@@ -212,6 +270,9 @@ type ContainerRecord struct {
 
 // UpsertContainer 插入或更新容器记录
 func UpsertContainer(rec *ContainerRecord) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
   _, err := db.Exec(`INSERT INTO containers (username, container_id, image, status, ip, cpu_limit, memory_limit)
     VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(username) DO UPDATE SET
@@ -228,6 +289,9 @@ func UpsertContainer(rec *ContainerRecord) error {
 
 // GetContainerByUsername 按用户名查询容器记录
 func GetContainerByUsername(username string) (*ContainerRecord, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
   var r ContainerRecord
   err := db.QueryRow(`SELECT id, username, container_id, image, status, ip, cpu_limit, memory_limit, created_at, updated_at
     FROM containers WHERE username = ?`, username).Scan(&r.ID, &r.Username, &r.ContainerID, &r.Image, &r.Status, &r.IP, &r.CPULimit, &r.MemoryLimit, &r.CreatedAt, &r.UpdatedAt)
@@ -242,6 +306,9 @@ func GetContainerByUsername(username string) (*ContainerRecord, error) {
 
 // GetAllContainers 返回所有容器记录
 func GetAllContainers() ([]ContainerRecord, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
   rows, err := db.Query(`SELECT id, username, container_id, image, status, ip, cpu_limit, memory_limit, created_at, updated_at FROM containers ORDER BY id`)
   if err != nil {
     return nil, err
@@ -260,24 +327,36 @@ func GetAllContainers() ([]ContainerRecord, error) {
 
 // DeleteContainer 删除容器记录
 func DeleteContainer(username string) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
   _, err := db.Exec("DELETE FROM containers WHERE username = ?", username)
   return err
 }
 
 // UpdateContainerStatus 更新容器状态
 func UpdateContainerStatus(username, status string) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
   _, err := db.Exec("UPDATE containers SET status = ?, updated_at = datetime('now','localtime') WHERE username = ?", status, username)
   return err
 }
 
 // UpdateContainerID 更新 Docker 容器 ID
 func UpdateContainerID(username, containerID string) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
   _, err := db.Exec("UPDATE containers SET container_id = ?, updated_at = datetime('now','localtime') WHERE username = ?", containerID, username)
   return err
 }
 
 // AllocateNextIP 分配下一个可用 IP（100.64.0.2 起）
 func AllocateNextIP() (string, error) {
+  if err := ensureDB(); err != nil {
+    return "", err
+  }
   var maxIP string
   db.QueryRow("SELECT ip FROM containers WHERE ip IS NOT NULL ORDER BY id DESC LIMIT 1").Scan(&maxIP)
   if maxIP == "" {

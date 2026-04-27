@@ -53,9 +53,8 @@ export async function init(ctx) {
     const serverUrl = localStorage.getItem('picoaide-server') || '';
     const imageRef = nameEl.textContent = serverUrl ? '' : '';
     // 构建镜像引用
-    const resp = await Api.get('/api/admin/images').catch(() => null);
     const cfgResp = await Api.get('/api/config').catch(() => null);
-    let imageName = 'ghcr.io/lostmaniac/picoclaw';
+    let imageName = 'ghcr.io/picoaide/picoaide';
     if (cfgResp?.image?.name) {
       imageName = cfgResp.image.name;
     }

@@ -217,6 +217,10 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
   if s.requireSuperadmin(w, r) == "" {
     return
   }
+  if !s.dockerAvailable {
+    writeError(w, http.StatusServiceUnavailable, "Docker 服务不可用，请联系管理员")
+    return
+  }
   if r.Method != "POST" {
     writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
@@ -471,7 +475,7 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
 
   userCount := 0
   deployFn := func(username string) error {
-    targetSkillsDir := filepath.Join(user.UserDir(s.cfg, username), "root", ".picoclaw", "workspace", "skills")
+    targetSkillsDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills")
     for _, sn := range deploySkills {
       srcPath := filepath.Join(skillDir, sn)
       dstPath := filepath.Join(targetSkillsDir, sn)

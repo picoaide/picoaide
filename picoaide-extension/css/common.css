@@ -461,7 +461,7 @@ tbody tr:hover { background: var(--primary-light); }
 .mb-1 { margin-bottom: .75rem; }
 .mb-2 { margin-bottom: 1.25rem; }
 .text-center { text-align: center; }
-.hidden { display: none; }
+.hidden { display: none !important; }
 .flex-2 { flex: 2 !important; }
 
 /* ===== Modal ===== */

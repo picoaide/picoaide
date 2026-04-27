@@ -1,8 +1,5 @@
 FROM debian:13
 
-# 是否安装浏览器（true/false）
-ARG INSTALL_BROWSER=false
-
 # 设置非交互式安装
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=zh_CN.UTF-8
@@ -49,21 +46,6 @@ RUN apt-get update && apt-get install -y \
     locale-gen zh_CN.UTF-8 && \
     ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
-# 安装Chromium无头浏览器和字体（仅 browser 变体）
-RUN if [ "$INSTALL_BROWSER" = "true" ]; then \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        chromium \
-        fonts-noto-cjk \
-        fonts-liberation \
-        fonts-dejavu-core \
-        fonts-freefont-ttf \
-        fonts-noto-color-emoji && \
-    rm -rf /var/lib/apt/lists/* && \
-    chromium --version && \
-    echo "Chromium + fonts installed successfully"; \
-    fi
-
 # 配置SSH - 只允许密钥登录，禁用密码，启用SFTP
 RUN mkdir -p /var/run/sshd && \
     sed -i 's/#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && \
@@ -100,7 +82,7 @@ ENV PATH="/root/.nvm/versions/node/v22.12.0/bin:$PATH" \
     NODE_PATH="/root/.nvm/versions/node/v22.12.0/lib/node_modules"
 
 # 安装 picoclaw
-ARG PICOCLAW_VERSION=latest
+ARG PICOCLAW_VERSION
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then \
         DOWNLOAD_ARCH="x86_64"; \
@@ -110,9 +92,6 @@ RUN ARCH=$(uname -m) && \
         echo "Unsupported architecture: $ARCH" && exit 1; \
     fi && \
     echo "Installing picoclaw for platform: $ARCH (download: $DOWNLOAD_ARCH)" && \
-    if [ "$PICOCLAW_VERSION" = "latest" ]; then \
-        PICOCLAW_VERSION=$(curl -s https://api.github.com/repos/sipeed/picoclaw/releases/latest | python3 -c "import sys, json; print(json.load(sys.stdin).get('tag_name', 'latest'))" 2>/dev/null || echo "latest"); \
-    fi && \
     echo "Installing picoclaw version: $PICOCLAW_VERSION" && \
     DOWNLOAD_URL="https://github.com/sipeed/picoclaw/releases/download/${PICOCLAW_VERSION}/picoclaw_Linux_${DOWNLOAD_ARCH}.tar.gz" && \
     echo "Downloading from: $DOWNLOAD_URL" && \
@@ -132,11 +111,6 @@ RUN ARCH=$(uname -m) && \
 RUN CONFIG="/root/.picoclaw/config.json" && \
     jq '.tools.mcp.servers["chrome-devtools"]={"args":["chrome-devtools-mcp@latest","--browser-url=http://127.0.0.1:9222","--autoConnect"],"command":"npx","enabled":true}' "$CONFIG" > "${CONFIG}.tmp" && mv "${CONFIG}.tmp" "$CONFIG"
 
-# 安装 chrome-devtools-mcp（仅 browser 变体）
-RUN if [ "$INSTALL_BROWSER" = "true" ]; then \
-        . "$NVM_DIR/nvm.sh" && npm i chrome-devtools-mcp@latest -g; \
-    fi
-
 # 安装 bocha-search-mcp
 RUN git clone https://github.com/BochaAI/bocha-search-mcp.git /mcp/bocha-search-mcp
 
@@ -152,10 +126,6 @@ RUN mkdir -p ~/.pip && \
 
 # 复制启动脚本
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-
-# 复制浏览器指纹伪装扩展（仅 browser 变体）
-COPY chrome-extension/ /root/chrome-extension/
-RUN if [ "$INSTALL_BROWSER" = "false" ]; then rm -rf /root/chrome-extension; fi
 
 RUN chmod +x /usr/local/bin/entrypoint.sh
 

@@ -2,12 +2,7 @@
 
 [PicoClaw](https://github.com/sipeed/picoclaw) 的开箱即用开发环境容器镜像，集成完整的 Linux 工具链和多平台 AI Agent 运行时，一行命令即可启动。
 
-提供两个镜像变体：
-
-| 镜像 | 说明 |
-|------|------|
-| `ghcr.io/picoaide/picoaide-browser` | 含 Chromium 浏览器（默认推荐） |
-| `ghcr.io/picoaide/picoaide` | 精简版，无浏览器 |
+镜像地址：`ghcr.io/picoaide/picoaide`
 
 ## 特性
 
@@ -30,7 +25,7 @@ mkdir picoaide-deploy && cd picoaide-deploy
 mkdir -p root data
 
 # 下载 docker-compose 文件
-curl -O https://raw.githubusercontent.com/PicoAide/PicoAide/main/docker/docker-compose.yaml
+curl -O https://raw.githubusercontent.com/picoaide/picoaide/main/docker/docker-compose.yaml
 ```
 
 ### 2. 配置 SSH 公钥（可选）
@@ -72,30 +67,6 @@ picoaide-deploy/
 └── data/                    # 挂载到容器 /data（持久化工作数据）
 ```
 
-### 使用无浏览器版本
-
-编辑 `docker-compose.yaml`，将镜像替换为精简版：
-
-```yaml
-image: ghcr.io/picoaide/picoaide:latest
-```
-
-### 自定义端口映射
-
-```yaml
-services:
-  picoaide-deploy:
-    image: ghcr.io/picoaide/picoaide-browser:latest
-    container_name: picoaide-deploy
-    volumes:
-      - ./root:/root
-      - ./data:/data
-    ports:
-      - "2222:22"       # SSH
-      - "18790:18790"   # PicoClaw Gateway
-    restart: unless-stopped
-```
-
 ### PicoClaw 配置
 
 配置文件位于 `root/.picoclaw/config.json`，首次启动会自动生成默认配置。主要配置项：
@@ -114,24 +85,24 @@ services:
 | PicoClaw | 最新 release 版本 |
 | Node.js | v22 LTS（通过 NVM 管理） |
 | Python | 通过 uv 管理 |
-| 浏览器 | Chromium（仅 picoaide-browser 镜像） |
 | Shell | bash / zsh / fish |
 | 编辑器 | vim / nano |
 | 工具 | git, tmux, htop, tree, jq, ripgrep, bat, fzf, curl, wget 等 |
 
 ## 镜像标签
 
+所有镜像使用固定版本号标签，不提供 `latest`：
+
 | Tag | 说明 |
 |-----|------|
-| `latest` | 最新构建 |
 | `vX.Y.Z` | 对应 PicoClaw release 版本 |
-| `sha-xxxxxx` | 对应构建的 commit SHA |
 
 ## 更新
 
-拉取最新镜像即可更新：
+拉取指定版本镜像即可更新：
 
 ```bash
+# 编辑 docker-compose.yaml 中的版本号后
 docker compose pull && docker compose up -d
 ```
 

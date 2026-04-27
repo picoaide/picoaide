@@ -135,8 +135,9 @@ func InitUser(cfg *config.GlobalConfig, username string) error {
 	existing := false
 	if _, err := os.Stat(ud); err == nil {
 		existing = true
+		migrateLegacyRootDir(ud)
 	} else {
-		if err := os.MkdirAll(filepath.Join(ud, "root"), 0755); err != nil {
+		if err := os.MkdirAll(ud, 0755); err != nil {
 			return fmt.Errorf("创建目录失败 %s: %w", username, err)
 		}
 	}
@@ -337,7 +338,7 @@ func ApplySecurityToYAML(cfg *config.GlobalConfig, picoclawDir string) error {
 
 // GetDingTalkConfig 获取用户的钉钉配置（clientID 和 clientSecret）
 func GetDingTalkConfig(cfg *config.GlobalConfig, username string) (clientID, clientSecret string) {
-	picoclawDir := filepath.Join(UserDir(cfg, username), "root", ".picoclaw")
+	picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
 
 	configPath := filepath.Join(picoclawDir, "config.json")
 	if data, err := os.ReadFile(configPath); err == nil {
@@ -376,16 +377,18 @@ func GetDingTalkConfig(cfg *config.GlobalConfig, username string) (clientID, cli
 
 // SaveDingTalkConfig 保存用户的钉钉配置
 func SaveDingTalkConfig(cfg *config.GlobalConfig, username, clientID, clientSecret string) error {
-	picoclawDir := filepath.Join(UserDir(cfg, username), "root", ".picoclaw")
+	picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
+	os.MkdirAll(picoclawDir, 0755)
 
+	// config.json — 不存在则创建空结构
 	configPath := filepath.Join(picoclawDir, "config.json")
 	configData, err := os.ReadFile(configPath)
 	if err != nil {
-		return fmt.Errorf("读取 config.json 失败: %w", err)
+		configData = []byte("{}")
 	}
 	var configMap map[string]interface{}
 	if err := json.Unmarshal(configData, &configMap); err != nil {
-		return fmt.Errorf("解析 config.json 失败: %w", err)
+		configMap = make(map[string]interface{})
 	}
 
 	channelList, _ := configMap["channel_list"].(map[string]interface{})
@@ -414,14 +417,15 @@ func SaveDingTalkConfig(cfg *config.GlobalConfig, username, clientID, clientSecr
 		return fmt.Errorf("写入 config.json 失败: %w", err)
 	}
 
+	// .security.yml — 不存在则创建空结构
 	securityPath := filepath.Join(picoclawDir, ".security.yml")
 	securityData, err := os.ReadFile(securityPath)
 	if err != nil {
-		return fmt.Errorf("读取 .security.yml 失败: %w", err)
+		securityData = []byte("{}")
 	}
 	var secMap map[string]interface{}
 	if err := yaml.Unmarshal(securityData, &secMap); err != nil {
-		return fmt.Errorf("解析 .security.yml 失败: %w", err)
+		secMap = make(map[string]interface{})
 	}
 
 	secChannelList, _ := secMap["channel_list"].(map[string]interface{})
@@ -450,4 +454,35 @@ func SaveDingTalkConfig(cfg *config.GlobalConfig, username, clientID, clientSecr
 	}
 
 	return nil
+}
+
+// ============================================================
+// 旧版目录迁移
+// ============================================================
+
+// migrateLegacyRootDir 将旧版 users/xxx/root/ 的内容提升到 users/xxx/
+func migrateLegacyRootDir(userDir string) {
+	rootDir := filepath.Join(userDir, "root")
+	info, err := os.Stat(rootDir)
+	if err != nil || !info.IsDir() {
+		return
+	}
+
+	entries, err := os.ReadDir(rootDir)
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		src := filepath.Join(rootDir, e.Name())
+		dst := filepath.Join(userDir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		os.Rename(src, dst)
+	}
+
+	if remaining, _ := os.ReadDir(rootDir); len(remaining) == 0 {
+		os.Remove(rootDir)
+	}
 }

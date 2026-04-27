@@ -7,11 +7,10 @@ import (
 	"text/tabwriter"
 
 	"github.com/picoaide/picoaide/internal/auth"
-	"github.com/picoaide/picoaide/internal/config"
 	dockerpkg "github.com/picoaide/picoaide/internal/docker"
 )
 
-func List(cfg *config.GlobalConfig) error {
+func List() error {
 	containers, err := auth.GetAllContainers()
 	if err != nil {
 		return err
@@ -26,11 +25,11 @@ func List(cfg *config.GlobalConfig) error {
 	fmt.Fprintln(w, "用户名\t状态\t镜像\tIP")
 	fmt.Fprintln(w, "──────\t────\t────\t──")
 
-	ctx := context.Background()
+	dockerOK := dockerpkg.IsInitialized()
 	for _, c := range containers {
 		status := c.Status
-		if c.ContainerID != "" {
-			status = dockerpkg.ContainerStatus(ctx, c.ContainerID)
+		if dockerOK && c.ContainerID != "" {
+			status = dockerpkg.ContainerStatus(context.Background(), c.ContainerID)
 			if status == "running" {
 				status = "Up"
 			}

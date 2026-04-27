@@ -39,7 +39,7 @@ jobs:
         run: |
           LATEST="${{ steps.get_version.outputs.version }}"
           TAGS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://ghcr.io/v2/picoaide/picoaide-browser/tags/list" 2>/dev/null || echo "")
+            "https://ghcr.io/v2/picoaide/picoaide/tags/list" 2>/dev/null || echo "")
 
           if echo "$TAGS" | jq -e --arg tag "$LATEST" '.tags | index($tag)' >/dev/null 2>&1; then
             echo "Image with tag $LATEST already exists, skipping build"
@@ -57,13 +57,6 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.should_build != 'false'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        variant:
-          - name: picoaide
-            install_browser: "false"
-          - name: picoaide-browser
-            install_browser: "true"
 
     permissions:
       contents: read
@@ -86,17 +79,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/picoaide/${{ matrix.variant.name }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ needs.check-version.outputs.version }}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
         with:
@@ -104,10 +86,10 @@ jobs:
           file: ./docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ghcr.io/picoaide/picoaide:${{ needs.check-version.outputs.version }}
           build-args: |
-            INSTALL_BROWSER=${{ matrix.variant.install_browser }}
+            INSTALL_BROWSER=false
             PICOCLAW_VERSION=${{ needs.check-version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
