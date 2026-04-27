@@ -1,0 +1,113 @@
+name: Build Docker Image
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: '强制构建（跳过版本检查）'
+        required: false
+        default: 'false'
+  schedule:
+    # 每天 UTC 03:00 执行（北京时间 11:00）
+    - cron: '0 3 * * *'
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      should_build: ${{ steps.check_build.outputs.should_build }}
+    steps:
+      - name: Get latest picoclaw version
+        id: get_version
+        run: |
+          VERSION=$(curl -s https://api.github.com/repos/sipeed/picoclaw/releases/latest | jq -r '.tag_name')
+          if [ "$VERSION" = "null" ] || [ -z "$VERSION" ]; then
+            echo "Failed to get version"
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Latest picoclaw version: $VERSION"
+
+      - name: Check if build is needed
+        id: check_build
+        if: github.event_name == 'schedule'
+        run: |
+          LATEST="${{ steps.get_version.outputs.version }}"
+          TAGS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://ghcr.io/v2/picoaide/picoaide-browser/tags/list" 2>/dev/null || echo "")
+
+          if echo "$TAGS" | jq -e --arg tag "$LATEST" '.tags | index($tag)' >/dev/null 2>&1; then
+            echo "Image with tag $LATEST already exists, skipping build"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version $LATEST detected, build needed"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Force build for push/dispatch
+        if: github.event_name != 'schedule'
+        run: echo "should_build=true" >> $GITHUB_OUTPUT
+
+  build:
+    needs: check-version
+    if: needs.check-version.outputs.should_build != 'false'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant:
+          - name: picoaide
+            install_browser: "false"
+          - name: picoaide-browser
+            install_browser: "true"
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/picoaide/${{ matrix.variant.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.check-version.outputs.version }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./docker
+          file: ./docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            INSTALL_BROWSER=${{ matrix.variant.install_browser }}
+            PICOCLAW_VERSION=${{ needs.check-version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

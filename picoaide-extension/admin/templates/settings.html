@@ -1,0 +1,83 @@
+<h2>系统配置</h2>
+<p class="text-sm text-muted">编辑 config.yaml 配置项</p>
+<div id="settings-msg" class="msg"></div>
+
+<div class="card">
+  <div class="card-header">LDAP 认证</div>
+  <div class="field">
+    <label class="switch"><input type="checkbox" id="ldap-enabled"> 启用 LDAP 统一登录</label>
+  </div>
+  <div id="ldap-section">
+    <div class="grid-2">
+      <div class="field"><label>LDAP 地址</label><input type="text" data-path="ldap.host" placeholder="ldap://ldap.example.com:389"></div>
+      <div class="field"><label>Bind DN</label><input type="text" data-path="ldap.bind_dn" placeholder="cn=admin,dc=example,dc=com"></div>
+    </div>
+    <div class="grid-2">
+      <div class="field"><label>Bind Password</label><input type="password" data-path="ldap.bind_password"></div>
+      <div class="field"><label>Base DN</label><input type="text" data-path="ldap.base_dn" placeholder="ou=users,dc=example,dc=com"></div>
+    </div>
+    <div class="grid-2">
+      <div class="field"><label>Filter</label><input type="text" data-path="ldap.filter" placeholder="(objectClass=inetOrgPerson)"></div>
+      <div class="field"><label>Username Attribute</label><input type="text" data-path="ldap.username_attribute" placeholder="uid"></div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">容器镜像</div>
+  <div class="grid-2">
+    <div class="field"><label>镜像名称</label><input type="text" data-path="image.name" placeholder="ghcr.io/lostmaniac/picoclaw"></div>
+    <div class="field"><label>版本标签</label><input type="text" data-path="image.tag" placeholder="v0.2.6"></div>
+  </div>
+  <div class="field"><label>时区</label><input type="text" data-path="image.timezone" placeholder="Asia/Shanghai"></div>
+</div>
+
+<div class="card">
+  <div class="card-header">目录配置</div>
+  <div class="grid-2">
+    <div class="field"><label>用户目录</label><input type="text" data-path="users_root" placeholder="./users"></div>
+    <div class="field"><label>归档目录</label><input type="text" data-path="archive_root" placeholder="./archive"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Web 服务</div>
+  <div class="grid-2">
+    <div class="field"><label>监听地址</label><input type="text" data-path="web.listen" placeholder=":80"></div>
+    <div class="field"><label>Session 密钥</label><input type="password" data-path="web.password"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">PicoClaw — 智能体默认配置</div>
+  <div class="grid-2">
+    <div class="field"><label>默认模型</label><input type="text" data-path="picoclaw.agents.defaults.model_name" placeholder="gpt-5.4"></div>
+    <div class="field"><label>最大 Token</label><input type="number" data-path="picoclaw.agents.defaults.max_tokens" placeholder="32768"></div>
+  </div>
+  <div class="field"><label>最大工具迭代次数</label><input type="number" data-path="picoclaw.agents.defaults.max_tool_iterations" placeholder="50"></div>
+</div>
+
+<div class="card">
+  <div class="card-header">PicoClaw — 模型列表</div>
+  <div id="model-list"></div>
+  <button class="btn btn-primary btn-sm mt-1" id="add-model-btn">+ 添加模型</button>
+</div>
+
+<div class="card">
+  <div class="card-header">PicoClaw — 网关</div>
+  <div class="grid-2">
+    <div class="field"><label>监听地址</label><input type="text" data-path="picoclaw.gateway.host" placeholder="0.0.0.0"></div>
+    <div class="field"><label>端口</label><input type="number" data-path="picoclaw.gateway.port" placeholder="18790"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">安全 — API 密钥</div>
+  <div id="security-keys-list"></div>
+  <button class="btn btn-primary btn-sm mt-1" id="add-security-key-btn">+ 添加模型密钥组</button>
+</div>
+
+<div class="btn-group mt-2" style="justify-content:flex-end">
+  <button class="btn btn-ghost" id="reset-btn">重置</button>
+  <button class="btn btn-primary" id="save-btn">保存配置</button>
+</div>

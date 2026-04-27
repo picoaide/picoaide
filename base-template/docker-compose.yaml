@@ -1,0 +1,10 @@
+services:
+  picoaide-deploy:
+    image: ghcr.io/lostmaniac/picoclaw:v0.2.6
+    container_name: picoaide-deploy
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./root:/root
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped

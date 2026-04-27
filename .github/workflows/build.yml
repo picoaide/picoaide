@@ -1,0 +1,72 @@
+name: Build PicoAide
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - 'docker/**'
+      - 'docs/**'
+      - '**.md'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build picoaide (linux amd64)
+        run: GOOS=linux GOARCH=amd64 go build -o picoaide-linux-amd64 ./cmd/picoaide/
+
+      - name: Build picoaide (linux arm64)
+        run: GOOS=linux GOARCH=arm64 go build -o picoaide-linux-arm64 ./cmd/picoaide/
+
+      - name: Upload Go binary artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: picoaide-binaries
+          path: picoaide-linux-*
+
+      - name: Package browser extension
+        run: cd picoaide-extension && zip -r ../picoaide-extension.zip .
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: picoaide-extension
+          path: picoaide-extension.zip
+
+  release:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download picoaide binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: picoaide-binaries
+
+      - name: Download extension
+        uses: actions/download-artifact@v4
+        with:
+          name: picoaide-extension
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            picoaide-linux-amd64
+            picoaide-linux-arm64
+            picoaide-extension.zip

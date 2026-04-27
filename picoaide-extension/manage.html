@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>PicoAide 配置管理</title>
+  <link rel="stylesheet" href="css/common.css">
+</head>
+<body>
+  <main id="login-page" class="login">
+    <div class="login-card">
+      <h2>PicoAide</h2>
+      <p>配置管理</p>
+      <div class="field">
+        <label>服务器地址</label>
+        <input type="text" id="login-server" placeholder="http://192.168.1.100:80">
+      </div>
+      <div class="row">
+        <div class="field"><label>用户名</label><input type="text" id="login-user"></div>
+        <div class="field"><label>密码</label><input type="password" id="login-pass"></div>
+      </div>
+      <div id="login-msg" class="msg"></div>
+      <button class="btn btn-primary" id="login-btn" style="width:100%">登录</button>
+    </div>
+  </main>
+
+  <div id="manage-page" class="hidden">
+    <nav class="navbar">
+      <h1>PicoAide 配置管理</h1>
+      <div class="navbar-right">
+        <span id="user-display"></span>
+        <button class="btn btn-sm btn-outline" id="logout-btn">退出</button>
+      </div>
+    </nav>
+
+    <main class="container">
+      <div class="tabs">
+        <button class="tab active" data-tab="dingtalk">钉钉配置</button>
+        <button class="tab" data-tab="files">文件管理</button>
+        <button class="tab" data-tab="password" id="tab-password-btn">修改密码</button>
+      </div>
+
+      <div id="tab-dingtalk" class="panel active">
+        <div class="card">
+          <div class="card-header">钉钉机器人配置</div>
+          <div class="grid-2">
+            <div class="field"><label>Client ID</label><input type="text" id="dt-client-id" placeholder="dingxxx"></div>
+            <div class="field"><label>Client Secret</label><input type="password" id="dt-client-secret" placeholder="secret"></div>
+          </div>
+          <div id="dt-msg" class="msg"></div>
+          <button class="btn btn-primary" id="dt-save-btn">保存并重启容器</button>
+        </div>
+      </div>
+
+      <div id="tab-files" class="panel">
+        <div class="card">
+          <div class="card-header">文件管理</div>
+          <nav id="breadcrumb" class="text-sm mb-1"></nav>
+          <div class="btn-group mb-1">
+            <button class="btn btn-sm btn-outline" id="mkdir-btn">新建目录</button>
+            <label class="btn btn-sm btn-outline" style="cursor:pointer">上传文件<input type="file" id="upload-input" class="hidden"></label>
+          </div>
+          <div id="file-list"></div>
+          <div id="file-msg" class="msg"></div>
+        </div>
+      </div>
+
+      <div id="tab-password" class="panel">
+        <div class="card">
+          <div class="card-header">修改密码</div>
+          <div id="password-unified-tip" class="msg msg-info hidden">统一认证模式下不支持修改密码，请联系管理员。</div>
+          <div id="password-form">
+            <div class="field"><label>旧密码</label><input type="password" id="old-password"></div>
+            <div class="field"><label>新密码</label><input type="password" id="new-password" placeholder="至少 6 个字符"></div>
+            <div class="field"><label>确认新密码</label><input type="password" id="confirm-password"></div>
+            <div id="password-msg" class="msg"></div>
+            <button class="btn btn-primary" id="change-password-btn">修改密码</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-editor" class="panel">
+        <div class="card">
+          <div class="row mb-1">
+            <button class="btn btn-outline" id="editor-back">返回</button>
+            <strong id="editor-filename" style="flex:1"></strong>
+            <button class="btn btn-primary" id="editor-save">保存</button>
+          </div>
+          <div id="editor-msg" class="msg"></div>
+          <textarea id="editor-content" spellcheck="false" style="font-family:monospace;height:480px"></textarea>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script src="manage.js"></script>
+</body>
+</html>

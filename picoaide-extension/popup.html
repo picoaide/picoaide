@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="icons/icon48.png" alt="PicoAide" class="logo">
+      <span class="title">PicoAide</span>
+    </div>
+
+    <!-- 未登录 -->
+    <div id="login-view">
+      <label>服务器地址</label>
+      <input type="text" id="server-url" placeholder="http://192.168.1.100:80">
+      <label>用户名</label>
+      <input type="text" id="username" placeholder="用户名">
+      <label>密码</label>
+      <input type="password" id="password" placeholder="密码">
+      <div id="login-error" class="msg"></div>
+      <button id="login-btn" class="action-btn">登录</button>
+    </div>
+
+    <!-- 已登录 -->
+    <div id="main-view" style="display:none">
+      <div class="user-bar">
+        <span id="user-display"></span>
+        <button id="logout-btn" class="btn-logout">退出</button>
+      </div>
+      <div id="status" class="status"></div>
+      <button id="sync-btn" class="action-btn">同步当前网站凭据</button>
+      <button id="manage-btn" class="action-btn secondary">配置管理</button>
+      <button id="admin-btn" class="action-btn secondary" style="display:none">管理后台</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

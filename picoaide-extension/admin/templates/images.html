@@ -1,0 +1,32 @@
+<h2>镜像管理</h2>
+
+<h3>本地镜像</h3>
+<table>
+  <thead><tr><th>镜像</th><th>标签</th><th>大小</th></tr></thead>
+  <tbody id="images-local"></tbody>
+</table>
+<p id="images-local-empty" class="text-muted text-center mt-1 hidden">暂无本地镜像</p>
+
+<div class="row mb-1 mt-2" style="align-items:center">
+  <h3 style="flex:1;margin:0">远程标签</h3>
+  <button class="btn btn-outline btn-sm" id="images-refresh-registry">刷新</button>
+</div>
+<div id="images-registry-msg" class="msg"></div>
+<table>
+  <thead><tr><th>标签</th><th>操作</th></tr></thead>
+  <tbody id="images-registry"></tbody>
+</table>
+<p id="images-registry-empty" class="text-muted text-center mt-1 hidden">暂无远程标签</p>
+
+<div id="image-pull-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">拉取镜像<button id="pull-modal-close">&times;</button></div>
+    <div class="modal-body">
+      <p id="pull-image-name" style="font-family:monospace;word-break:break-all"></p>
+      <div id="pull-progress" style="background:#1a1a2e;border-radius:4px;padding:8px;max-height:300px;overflow-y:auto;font-family:monospace;font-size:12px;color:#aaa"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="pull-close-btn">关闭</button>
+    </div>
+  </div>
+</div>

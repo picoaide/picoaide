@@ -1,0 +1,142 @@
+export async function init(ctx) {
+  const { Api, esc, showMsg } = ctx;
+  await loadSkills();
+  await loadRepos();
+  ctx.$('#deploy-btn').addEventListener('click', deploySkills);
+  ctx.$('#repo-add-btn').addEventListener('click', addRepo);
+
+  async function loadSkills() {
+    const tbody = ctx.$('#skills-tbody');
+    const empty = ctx.$('#skills-empty');
+    tbody.innerHTML = '';
+    empty.classList.add('hidden');
+
+    const data = await Api.get('/api/admin/skills');
+    if (!data.success) return;
+
+    const skills = data.skills || [];
+    if (skills.length === 0) { empty.classList.remove('hidden'); }
+    else {
+      for (const sk of skills) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td><strong>' + esc(sk.name) + '</strong></td><td>' + sk.file_count + ' 文件</td><td>' + sk.size_str + '</td><td>' + sk.mod_time + '</td><td><div class="btn-group"><button class="btn btn-sm btn-outline" data-dl="' + esc(sk.name) + '">下载</button><button class="btn btn-sm btn-danger" data-rm="' + esc(sk.name) + '">删除</button></div></td>';
+        tbody.appendChild(tr);
+      }
+    }
+
+    tbody.querySelectorAll('[data-dl]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const base = await getServerUrl();
+        window.open(base + '/api/admin/skills/download?name=' + encodeURIComponent(btn.dataset.dl), '_blank');
+      });
+    });
+    tbody.querySelectorAll('[data-rm]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('删除技能 ' + btn.dataset.rm + '？')) return;
+        const res = await Api.post('/api/admin/skills/remove', { name: btn.dataset.rm });
+        showMsg('#skills-msg', res.message || res.error, res.success);
+        if (res.success) loadSkills();
+      });
+    });
+
+    const skillSel = ctx.$('#deploy-skill');
+    skillSel.innerHTML = '<option value="">所有技能</option>';
+    for (const sk of skills) skillSel.innerHTML += '<option value="' + esc(sk.name) + '">' + esc(sk.name) + '</option>';
+
+    try {
+      const uData = await Api.get('/api/admin/users');
+      const userSel = ctx.$('#deploy-user');
+      userSel.innerHTML = '<option value="">所有用户</option>';
+      for (const u of (uData.users || [])) userSel.innerHTML += '<option value="' + esc(u.username) + '">' + esc(u.username) + '</option>';
+    } catch {}
+  }
+
+  async function deploySkills() {
+    const params = {};
+    const skill = ctx.$('#deploy-skill').value;
+    const username = ctx.$('#deploy-user').value;
+    if (skill) params.skill_name = skill;
+    if (username) params.username = username;
+    const res = await Api.post('/api/admin/skills/deploy', params);
+    showMsg('#deploy-msg', res.message || res.error, res.success);
+  }
+
+  async function loadRepos() {
+    const list = ctx.$('#repos-list');
+    list.innerHTML = '';
+    const data = await Api.get('/api/admin/skills');
+    const repos = data.repos || [];
+
+    if (repos.length === 0) { list.innerHTML = '<small>暂无仓库</small>'; return; }
+
+    for (const repo of repos) {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = '<div class="card-header">' + esc(repo.name) + '</div><small>' + esc(repo.url) + '</small><br><small>上次拉取: ' + (repo.last_pull || '从未') + '</small><div class="card-footer"><div class="btn-group"><button class="btn btn-sm btn-outline" data-repo-skill="' + esc(repo.name) + '">查看技能</button><button class="btn btn-sm btn-outline" data-pull="' + esc(repo.name) + '">拉取更新</button><button class="btn btn-sm btn-danger" data-install="' + esc(repo.name) + '">安装全部</button><button class="btn btn-sm btn-outline" data-rm-repo="' + esc(repo.name) + '">删除仓库</button></div></div><div id="repo-skills-' + esc(repo.name) + '" class="mt-1"></div>';
+      list.appendChild(card);
+    }
+
+    list.querySelectorAll('[data-repo-skill]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const name = btn.dataset.repoSkill;
+        const target = ctx.$('#repo-skills-' + CSS.escape(name));
+        if (!target) return;
+        if (target.innerHTML) { target.innerHTML = ''; return; }
+        const data = await Api.get('/api/admin/skills/repos/list?name=' + encodeURIComponent(name));
+        if (!data.success) return;
+        const skills = data.skills || [];
+        if (skills.length === 0) { target.innerHTML = '<small>无技能</small>'; return; }
+        let html = '<div class="grid-auto">';
+        for (const sk of skills) html += '<button class="btn btn-sm btn-outline" data-install-skill="' + esc(name) + ':' + esc(sk.name) + '">' + esc(sk.name) + (sk.installed ? ' ✅' : '') + '</button>';
+        html += '</div>';
+        target.innerHTML = html;
+        target.querySelectorAll('[data-install-skill]').forEach(el => {
+          el.addEventListener('click', async () => {
+            const [repo, skill] = el.dataset.installSkill.split(':');
+            const res = await Api.post('/api/admin/skills/install', { repo, skill });
+            showMsg('#repo-msg', res.message || res.error, res.success);
+            if (res.success) { loadSkills(); loadRepos(); }
+          });
+        });
+      });
+    });
+
+    list.querySelectorAll('[data-pull]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const res = await Api.post('/api/admin/skills/repos/pull', { name: btn.dataset.pull });
+        showMsg('#repo-msg', res.message || res.error, res.success);
+        if (res.success) loadRepos();
+      });
+    });
+    list.querySelectorAll('[data-install]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('安装此仓库中的所有技能到技能库？')) return;
+        const res = await Api.post('/api/admin/skills/install', { repo: btn.dataset.install });
+        showMsg('#repo-msg', res.message || res.error, res.success);
+        if (res.success) { loadSkills(); loadRepos(); }
+      });
+    });
+    list.querySelectorAll('[data-rm-repo]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('删除仓库 ' + btn.dataset.rmRepo + '？')) return;
+        const res = await Api.post('/api/admin/skills/repos/remove', { name: btn.dataset.rmRepo });
+        showMsg('#repo-msg', res.message || res.error, res.success);
+        if (res.success) loadRepos();
+      });
+    });
+  }
+
+  async function addRepo() {
+    const name = ctx.$('#repo-name').value.trim();
+    const url = ctx.$('#repo-url').value.trim();
+    if (!name || !url) { showMsg('#repo-msg', '请输入仓库名称和地址', false); return; }
+    const res = await Api.post('/api/admin/skills/repos/add', { name, url });
+    showMsg('#repo-msg', res.message || res.error, res.success);
+    if (res.success) { ctx.$('#repo-name').value = ''; ctx.$('#repo-url').value = ''; loadRepos(); }
+  }
+}
+
+async function getServerUrl() {
+  const r = await chrome.storage.local.get('serverUrl');
+  return (r.serverUrl || '').replace(/\/+$/, '');
+}

@@ -1,0 +1,32 @@
+# 用户数据目录
+users/
+archive/
+
+# 配置文件（包含敏感信息）
+config.yaml
+whitelist.yaml
+
+# 编译产物
+picoaide
+picoaide-linux-amd64
+*.exe
+
+# Go 工具产物
+*.test
+*.out
+vendor/
+
+# 数据库文件
+*.db
+
+# SSH 端口映射
+.ssh_ports.json
+
+# Claude Code 配置
+CLAUDE.md
+.claude/
+
+# IDE
+.idea/
+.vscode/
+*.swp
