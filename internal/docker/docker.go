@@ -215,6 +215,16 @@ func RemoveImage(ctx context.Context, imageRef string) error {
   return err
 }
 
+// RetagImage 将镜像重命名：打新 tag，删除旧 tag
+func RetagImage(ctx context.Context, sourceRef, targetRef string) error {
+  if err := cli.ImageTag(ctx, sourceRef, targetRef); err != nil {
+    return fmt.Errorf("重命名镜像失败: %w", err)
+  }
+  // 删除旧 tag（不影响镜像层，因为新 tag 仍引用同一镜像）
+  _, _ = cli.ImageRemove(ctx, sourceRef, image.RemoveOptions{})
+  return nil
+}
+
 // ListLocalTags 列出本地镜像的所有标签（按镜像名过滤，返回纯 tag 列表）
 func ListLocalTags(ctx context.Context, imageName string) ([]string, error) {
   imgs, err := ListLocalImages(ctx, imageName)

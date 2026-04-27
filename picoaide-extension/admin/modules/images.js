@@ -61,16 +61,13 @@ export async function init(ctx) {
     const progress = $('#pull-progress');
     const nameEl = $('#pull-image-name');
 
-    const imageName = 'ghcr.io/picoaide/picoaide';
-    const fullRef = imageName + ':' + tag;
-    nameEl.textContent = fullRef;
+    nameEl.textContent = tag;
     progress.innerHTML = '';
     modal.classList.remove('hidden');
 
-    // 使用 EventSource 进行 SSE
     const csrf = await getCSRF();
     const formData = new FormData();
-    formData.append('image', fullRef);
+    formData.append('tag', tag);
     formData.append('csrf_token', csrf);
 
     try {

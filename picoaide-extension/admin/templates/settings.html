@@ -25,7 +25,12 @@
 
 <div class="card">
   <div class="card-header">容器镜像</div>
-  <div class="field"><label>镜像名称</label><input type="text" data-path="image.name" placeholder="ghcr.io/picoaide/picoaide"></div>
+  <div class="field"><label>镜像仓库</label>
+    <select data-path="image.registry">
+      <option value="github">GitHub (ghcr.io)</option>
+      <option value="tencent">腾讯云 (hkccr.ccs.tencentyun.com)</option>
+    </select>
+  </div>
   <div class="field"><label>时区</label><input type="text" data-path="image.timezone" placeholder="Asia/Shanghai"></div>
 </div>
 

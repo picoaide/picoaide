@@ -313,39 +313,60 @@ func (s *Server) handleAdminImagePull(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  imageRef := r.FormValue("image")
-  if imageRef == "" {
-    writeError(w, http.StatusBadRequest, "镜像参数不能为空")
+  tag := r.FormValue("tag")
+  if tag == "" {
+    writeError(w, http.StatusBadRequest, "标签参数不能为空")
     return
   }
 
-  ctx := context.Background()
-  reader, err := dockerpkg.ImagePull(ctx, imageRef)
-  if err != nil {
-    writeError(w, http.StatusInternalServerError, "拉取镜像失败: "+err.Error())
-    return
-  }
-  defer reader.Close()
+  pullRef := s.cfg.Image.PullRef(tag)
+  unifiedRef := s.cfg.Image.UnifiedRef(tag)
 
   // SSE 响应
   w.Header().Set("Content-Type", "text/event-stream")
   w.Header().Set("Cache-Control", "no-cache")
   w.Header().Set("Connection", "keep-alive")
 
+  flush := func() {
+    if f, ok := w.(http.Flusher); ok {
+      f.Flush()
+    }
+  }
+
+  ctx := context.Background()
+  reader, err := dockerpkg.ImagePull(ctx, pullRef)
+  if err != nil {
+    fmt.Fprintf(w, "data: {\"status\":\"error\",\"error\":\"%s\"}\n\n", err.Error())
+    flush()
+    return
+  }
+  defer reader.Close()
+
   buf := make([]byte, 4096)
   for {
     n, err := reader.Read(buf)
     if n > 0 {
       fmt.Fprintf(w, "data: %s\n\n", buf[:n])
-      if f, ok := w.(http.Flusher); ok {
-        f.Flush()
-      }
+      flush()
     }
     if err != nil {
       break
     }
   }
+
+  // 腾讯云模式：拉取后 retag 为统一名称
+  if s.cfg.Image.IsTencent() && pullRef != unifiedRef {
+    fmt.Fprintf(w, "data: {\"status\":\"重命名镜像: %s -> %s\"}\n\n", pullRef, unifiedRef)
+    flush()
+    if err := dockerpkg.RetagImage(ctx, pullRef, unifiedRef); err != nil {
+      fmt.Fprintf(w, "data: {\"status\":\"error\",\"error\":\"重命名失败: %s\"}\n\n", err.Error())
+      flush()
+      return
+    }
+  }
+
   fmt.Fprintf(w, "data: {\"status\":\"done\"}\n\n")
+  flush()
 }
 
 // handleAdminImageDelete 删除本地镜像（检查用户依赖）

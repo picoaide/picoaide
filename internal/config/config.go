@@ -39,6 +39,7 @@ ldap:
 image:
   name: "ghcr.io/picoaide/picoaide"
   timezone: "Asia/Shanghai"
+  registry: "github"
 
 users_root: "./users"
 archive_root: "./archive"
@@ -116,6 +117,25 @@ type LDAPConfig struct {
 type ImageConfig struct {
   Name     string `yaml:"name"`
   Timezone string `yaml:"timezone"`
+  Registry string `yaml:"registry"` // "github" | "tencent"
+}
+
+// IsTencent 是否使用腾讯云镜像仓库
+func (i ImageConfig) IsTencent() bool {
+  return i.Registry == "tencent"
+}
+
+// PullRef 根据配置返回实际拉取地址
+func (i ImageConfig) PullRef(tag string) string {
+  if i.IsTencent() {
+    return "hkccr.ccs.tencentyun.com/picoaide/picoaide:" + tag
+  }
+  return "ghcr.io/picoaide/picoaide:" + tag
+}
+
+// UnifiedRef 返回统一名称（ghcr.io/picoaide/picoaide:tag）
+func (i ImageConfig) UnifiedRef(tag string) string {
+  return "ghcr.io/picoaide/picoaide:" + tag
 }
 
 type WebConfig struct {

@@ -46,6 +46,10 @@ export async function init(ctx) {
       var val = deepGet(rawConfig, input.dataset.path);
       if (val !== undefined && val !== null) input.value = val;
     });
+    $$('select[data-path]').forEach(function(sel) {
+      var val = deepGet(rawConfig, sel.dataset.path);
+      if (val !== undefined && val !== null) sel.value = val;
+    });
     var ldapOn = rawConfig.web?.ldap_enabled !== false;
     // 支持 auth_mode 字段：如果 auth_mode 为 "local"，视为 LDAP 关闭
     if (rawConfig.web?.auth_mode === 'local') ldapOn = false;
@@ -158,6 +162,9 @@ export async function init(ctx) {
   function collectFields() {
     $$('input[data-path]').forEach(function(input) {
       deepSet(rawConfig, input.dataset.path, input.value);
+    });
+    $$('select[data-path]').forEach(function(sel) {
+      deepSet(rawConfig, sel.dataset.path, sel.value);
     });
   }
 }
