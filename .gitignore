@@ -23,7 +23,6 @@ vendor/
 .ssh_ports.json
 
 # Claude Code 配置
-CLAUDE.md
 .claude/
 
 # IDE
