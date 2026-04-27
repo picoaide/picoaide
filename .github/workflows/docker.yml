@@ -83,7 +83,7 @@ jobs:
         if: vars.TENCENT_REGISTRY_ENABLED == 'true'
         uses: docker/login-action@v4
         with:
-          registry: ccr.ccs.tencentyun.com
+          registry: hkccr.ccs.tencentyun.com
           username: ${{ secrets.TENCENT_REGISTRY_USERNAME }}
           password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
 
@@ -93,7 +93,7 @@ jobs:
           VERSION="${{ needs.check-version.outputs.version }}"
           TAGS="ghcr.io/picoaide/picoaide:${VERSION}"
           if [ "${{ vars.TENCENT_REGISTRY_ENABLED }}" = "true" ]; then
-            TAGS="${TAGS},ccr.ccs.tencentyun.com/picoaide/picoaide:${VERSION}"
+            TAGS="${TAGS},hkccr.ccs.tencentyun.com/picoaide/picoaide:${VERSION}"
           fi
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
 
