@@ -11,10 +11,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/PicoAide/PicoAide/internal/auth"
-	"github.com/PicoAide/PicoAide/internal/config"
-	"github.com/PicoAide/PicoAide/internal/ldap"
-	"github.com/PicoAide/PicoAide/internal/util"
+	"github.com/picoaide/picoaide/internal/auth"
+	"github.com/picoaide/picoaide/internal/config"
+	"github.com/picoaide/picoaide/internal/ldap"
+	"github.com/picoaide/picoaide/internal/util"
 )
 
 // ============================================================

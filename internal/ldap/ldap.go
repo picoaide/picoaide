@@ -5,7 +5,7 @@ import (
   "sort"
 
   "github.com/go-ldap/ldap/v3"
-  "github.com/PicoAide/PicoAide/internal/config"
+  "github.com/picoaide/picoaide/internal/config"
 )
 
 // ============================================================

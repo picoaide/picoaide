@@ -1,4 +1,4 @@
-module github.com/PicoAide/PicoAide
+module github.com/picoaide/picoaide
 
 go 1.26.2
 

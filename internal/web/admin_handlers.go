@@ -14,11 +14,11 @@ import (
   "sync"
   "time"
 
-  "github.com/PicoAide/PicoAide/internal/auth"
-  "github.com/PicoAide/PicoAide/internal/config"
-  dockerpkg "github.com/PicoAide/PicoAide/internal/docker"
-  "github.com/PicoAide/PicoAide/internal/user"
-  "github.com/PicoAide/PicoAide/internal/util"
+  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/config"
+  dockerpkg "github.com/picoaide/picoaide/internal/docker"
+  "github.com/picoaide/picoaide/internal/user"
+  "github.com/picoaide/picoaide/internal/util"
   "gopkg.in/yaml.v3"
 )
 

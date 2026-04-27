@@ -4,7 +4,7 @@ import (
   "context"
   "net/http"
 
-  "github.com/PicoAide/PicoAide/internal/config"
+  "github.com/picoaide/picoaide/internal/config"
 )
 
 type contextKey string

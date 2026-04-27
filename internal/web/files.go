@@ -9,8 +9,8 @@ import (
   "sort"
   "strings"
 
-  "github.com/PicoAide/PicoAide/internal/user"
-  "github.com/PicoAide/PicoAide/internal/util"
+  "github.com/picoaide/picoaide/internal/user"
+  "github.com/picoaide/picoaide/internal/util"
 )
 
 // ============================================================
