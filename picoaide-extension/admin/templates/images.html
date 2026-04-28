@@ -3,7 +3,7 @@
 <h3>本地镜像</h3>
 <div id="images-local-msg" class="msg"></div>
 <table>
-  <thead><tr><th>镜像</th><th>标签</th><th>大小</th><th>操作</th></tr></thead>
+  <thead><tr><th>镜像标签</th><th>Image ID</th><th>大小</th><th>创建时间</th><th>依赖用户</th><th>操作</th></tr></thead>
   <tbody id="images-local"></tbody>
 </table>
 <p id="images-local-empty" class="text-muted text-center mt-1 hidden">暂无本地镜像</p>
@@ -14,7 +14,7 @@
 </div>
 <div id="images-registry-msg" class="msg"></div>
 <table>
-  <thead><tr><th>标签</th><th>操作</th></tr></thead>
+  <thead><tr><th>标签</th><th>状态</th><th>操作</th></tr></thead>
   <tbody id="images-registry"></tbody>
 </table>
 <p id="images-registry-empty" class="text-muted text-center mt-1 hidden">暂无远程标签</p>
@@ -28,6 +28,25 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" id="pull-close-btn">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div id="image-migrate-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">镜像迁移<button id="migrate-modal-close">&times;</button></div>
+    <div class="modal-body">
+      <p>以下用户正在使用此镜像：</p>
+      <div id="migrate-users" style="margin:8px 0"></div>
+      <div class="field">
+        <label>迁移到目标镜像</label>
+        <select id="migrate-target" style="width:100%;padding:6px 8px;border-radius:4px;border:1px solid #ccc"></select>
+      </div>
+      <div id="migrate-msg" class="msg"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="migrate-cancel-btn">取消</button>
+      <button class="btn btn-primary" id="migrate-confirm-btn">迁移并删除旧镜像</button>
     </div>
   </div>
 </div>

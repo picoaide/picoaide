@@ -429,6 +429,15 @@ func UpdateContainerID(username, containerID string) error {
   return err
 }
 
+// UpdateContainerImage 更新用户容器镜像引用
+func UpdateContainerImage(username, imageRef string) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
+  _, err := db.Exec("UPDATE containers SET image = ?, updated_at = datetime('now','localtime') WHERE username = ?", imageRef, username)
+  return err
+}
+
 // AllocateNextIP 分配下一个可用 IP（100.64.0.2 起）
 func AllocateNextIP() (string, error) {
   if err := ensureDB(); err != nil {

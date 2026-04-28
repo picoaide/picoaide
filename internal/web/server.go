@@ -248,6 +248,7 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/admin/images", s.secureHeaders(s.handleAdminImages))
   mux.HandleFunc("/api/admin/images/pull", s.secureHeaders(s.handleAdminImagePull))
   mux.HandleFunc("/api/admin/images/delete", s.secureHeaders(s.handleAdminImageDelete))
+  mux.HandleFunc("/api/admin/images/migrate", s.secureHeaders(s.handleAdminImageMigrate))
   mux.HandleFunc("/api/admin/images/registry", s.secureHeaders(s.handleAdminImageRegistry))
   mux.HandleFunc("/api/admin/images/local-tags", s.secureHeaders(s.handleAdminLocalTags))
 
@@ -264,7 +265,7 @@ func contextWithTimeout(sec int) context.Context {
 // 镜像管理 Handler
 // ============================================================
 
-// handleAdminImages 列出本地镜像
+// handleAdminImages 列出本地镜像（含 Image ID、创建时间、用户依赖）
 func (s *Server) handleAdminImages(w http.ResponseWriter, r *http.Request) {
   if s.requireSuperadmin(w, r) == "" {
     return
@@ -285,22 +286,59 @@ func (s *Server) handleAdminImages(w http.ResponseWriter, r *http.Request) {
     return
   }
 
+  // 查询所有用户的镜像引用，统计每个镜像的依赖用户
+  containers, _ := auth.GetAllContainers()
+  imageUsers := make(map[string][]string)
+  for _, c := range containers {
+    if c.Image != "" {
+      imageUsers[c.Image] = append(imageUsers[c.Image], c.Username)
+    }
+  }
+
   type ImageInfo struct {
     ID         string   `json:"id"`
+    FullID     string   `json:"full_id"`
     RepoTags   []string `json:"repo_tags"`
     Size       int64    `json:"size"`
     SizeStr    string   `json:"size_str"`
     Created    int64    `json:"created"`
+    CreatedStr string   `json:"created_str"`
+    UserCount  int      `json:"user_count"`
+    Users      []string `json:"users"`
   }
 
   var list []ImageInfo
   for _, img := range images {
+    // 短 ID（去掉 sha256: 前缀，取 12 位）
+    shortID := img.ID
+    if strings.HasPrefix(shortID, "sha256:") {
+      shortID = shortID[7:]
+    }
+    if len(shortID) > 12 {
+      shortID = shortID[:12]
+    }
+
+    createdStr := ""
+    if img.Created > 0 {
+      createdStr = time.Unix(img.Created, 0).Format("2006-01-02 15:04")
+    }
+
+    // 统计此镜像所有 tag 的用户依赖
+    var users []string
+    for _, tag := range img.RepoTags {
+      users = append(users, imageUsers[tag]...)
+    }
+
     list = append(list, ImageInfo{
-      ID:       img.ID,
-      RepoTags: img.RepoTags,
-      Size:     img.Size,
-      SizeStr:  formatSize(img.Size),
-      Created:  img.Created,
+      ID:         shortID,
+      FullID:     img.ID,
+      RepoTags:   img.RepoTags,
+      Size:       img.Size,
+      SizeStr:    formatSize(img.Size),
+      Created:    img.Created,
+      CreatedStr: createdStr,
+      UserCount:  len(users),
+      Users:      users,
     })
   }
   if list == nil {
@@ -424,11 +462,26 @@ func (s *Server) handleAdminImageDelete(w http.ResponseWriter, r *http.Request) 
     }
   }
   if len(dependentUsers) > 0 {
+    // 查找本地其他可用镜像作为迁移目标
+    ctxList := contextWithTimeout(10)
+    localImgs, _ := dockerpkg.ListLocalImages(ctxList, s.cfg.Image.Name)
+    var alternatives []string
+    for _, img := range localImgs {
+      for _, tag := range img.RepoTags {
+        if tag != imageRef {
+          alternatives = append(alternatives, tag)
+        }
+      }
+    }
+    if alternatives == nil {
+      alternatives = []string{}
+    }
     writeJSON(w, http.StatusConflict, struct {
-      Success bool     `json:"success"`
-      Error   string   `json:"error"`
-      Users   []string `json:"users"`
-    }{false, "以下用户正在使用此镜像，请先升级或降级后再删除", dependentUsers})
+      Success      bool     `json:"success"`
+      Error        string   `json:"error"`
+      Users        []string `json:"users"`
+      Alternatives []string `json:"alternatives"`
+    }{false, "以下用户正在使用此镜像", dependentUsers, alternatives})
     return
   }
 
@@ -445,6 +498,122 @@ func (s *Server) handleAdminImageDelete(w http.ResponseWriter, r *http.Request) 
   }
 
   writeSuccess(w, "镜像 "+imageRef+" 已删除")
+}
+
+// handleAdminImageMigrate 将用户从旧镜像迁移到新镜像（更新 DB + 重建容器）
+func (s *Server) handleAdminImageMigrate(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if !s.dockerAvailable {
+    writeError(w, http.StatusServiceUnavailable, "Docker 服务不可用")
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+
+  oldImage := r.FormValue("image")
+  newImage := r.FormValue("target")
+  if oldImage == "" || newImage == "" {
+    writeError(w, http.StatusBadRequest, "必须指定旧镜像和新镜像")
+    return
+  }
+  if oldImage == newImage {
+    writeError(w, http.StatusBadRequest, "新旧镜像不能相同")
+    return
+  }
+
+  // 检查新镜像是否存在
+  ctx := context.Background()
+  if !dockerpkg.ImageExists(ctx, newImage) {
+    writeError(w, http.StatusBadRequest, "新镜像 "+newImage+" 不存在，请先拉取")
+    return
+  }
+
+  // 找出依赖旧镜像的用户
+  containers, err := auth.GetAllContainers()
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, "查询用户列表失败")
+    return
+  }
+
+  // 支持指定特定用户列表
+  userFilter := r.FormValue("users")
+  var targetUsers []string
+  for _, c := range containers {
+    if c.Image != oldImage {
+      continue
+    }
+    if userFilter != "" {
+      found := false
+      for _, u := range strings.Split(userFilter, ",") {
+        if strings.TrimSpace(u) == c.Username {
+          found = true
+          break
+        }
+      }
+      if !found {
+        continue
+      }
+    }
+    targetUsers = append(targetUsers, c.Username)
+  }
+
+  if len(targetUsers) == 0 {
+    writeError(w, http.StatusBadRequest, "没有用户使用旧镜像 "+oldImage)
+    return
+  }
+
+  var success []string
+  var failed []string
+
+  for _, username := range targetUsers {
+    // 更新 DB 中的镜像引用
+    if err := auth.UpdateContainerImage(username, newImage); err != nil {
+      failed = append(failed, username+"(更新失败)")
+      continue
+    }
+
+    // 如果容器正在运行，重建容器以使用新镜像
+    rec, _ := auth.GetContainerByUsername(username)
+    if rec == nil {
+      failed = append(failed, username+"(记录不存在)")
+      continue
+    }
+    if rec.ContainerID != "" {
+      _ = dockerpkg.Stop(ctx, rec.ContainerID)
+      _ = dockerpkg.Remove(ctx, rec.ContainerID)
+      auth.UpdateContainerID(username, "")
+    }
+    // 只有原来是 running 状态才重新启动
+    if rec.Status == "running" {
+      ud := user.UserDir(s.cfg, username)
+      cid, createErr := dockerpkg.CreateContainer(ctx, username, newImage, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
+      if createErr != nil {
+        failed = append(failed, username+"(创建失败)")
+        continue
+      }
+      auth.UpdateContainerID(username, cid)
+      if err := dockerpkg.Start(ctx, cid); err != nil {
+        failed = append(failed, username+"(启动失败)")
+        continue
+      }
+      auth.UpdateContainerStatus(username, "running")
+    }
+    success = append(success, username)
+  }
+
+  msg := fmt.Sprintf("迁移完成：%d 成功", len(success))
+  if len(failed) > 0 {
+    msg += fmt.Sprintf("，%d 失败：%s", len(failed), strings.Join(failed, ", "))
+  }
+  writeSuccess(w, msg)
 }
 
 // handleAdminImageRegistry 列出 PicoAide 远程仓库标签

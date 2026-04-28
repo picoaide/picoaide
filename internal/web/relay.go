@@ -131,13 +131,7 @@ func (h *RelayHub) relay(pair *RelayPair) {
 
   close(done)
 
-  // 关闭双方连接
-  pair.browser.ws.WriteControl(websocket.CloseMessage,
-    websocket.FormatCloseMessage(websocket.CloseNormalClosure, "对端断开"),
-    time.Now().Add(time.Second))
-  pair.mcp.ws.WriteControl(websocket.CloseMessage,
-    websocket.FormatCloseMessage(websocket.CloseNormalClosure, "对端断开"),
-    time.Now().Add(time.Second))
+  // 关闭双方连接（让阻塞的 ReadMessage 返回错误）
   pair.browser.ws.Close()
   pair.mcp.ws.Close()
 
@@ -151,12 +145,6 @@ func (h *RelayHub) relay(pair *RelayPair) {
 // copy 从 src 读取消息写入 dst
 func (h *RelayHub) copy(dst, src *websocket.Conn, done chan struct{}) error {
   for {
-    select {
-    case <-done:
-      return nil
-    default:
-    }
-
     src.SetReadDeadline(time.Now().Add(300 * time.Second))
     mt, data, err := src.ReadMessage()
     if err != nil {

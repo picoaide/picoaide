@@ -1,29 +1,42 @@
 export async function init(ctx) {
   const { Api, esc, showMsg, $ } = ctx;
 
+  let localImages = [];
+
   await loadLocalImages();
   loadRegistryTags();
 
   $('#images-refresh-registry')?.addEventListener('click', loadRegistryTags);
-
   $('#pull-modal-close')?.addEventListener('click', closePullModal);
   $('#pull-close-btn')?.addEventListener('click', closePullModal);
+  $('#migrate-modal-close')?.addEventListener('click', closeMigrateModal);
+  $('#migrate-cancel-btn')?.addEventListener('click', closeMigrateModal);
 
   async function loadLocalImages() {
     const data = await Api.get('/api/admin/images').catch(() => ({ images: [] }));
     const tbody = $('#images-local');
     tbody.innerHTML = '';
-    const images = data.images || [];
-    if (images.length === 0) {
+    localImages = data.images || [];
+    if (localImages.length === 0) {
       $('#images-local-empty')?.classList.remove('hidden');
       return;
     }
     $('#images-local-empty')?.classList.add('hidden');
-    for (const img of images) {
+    for (const img of localImages) {
       const tags = (img.repo_tags || []).join(', ') || '(无标签)';
+      const users = img.users || [];
+      const userHtml = users.length > 0
+        ? users.map(u => '<span class="tag">' + esc(u) + '</span>').join(' ')
+        : '<small class="text-muted">-</small>';
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td style="font-family:monospace;font-size:13px">' + esc(tags) + '</td><td>' + esc(img.repo_tags?.[0]?.split(':')[1] || '-') + '</td><td>' + esc(img.size_str) + '</td><td></td>';
-      // 为每个 tag 添加删除按钮
+      const actionsTd = '<td></td>';
+      tr.innerHTML =
+        '<td style="font-family:monospace;font-size:12px;word-break:break-all">' + esc(tags) + '</td>' +
+        '<td style="font-family:monospace;font-size:12px">' + esc(img.id || '-') + '</td>' +
+        '<td>' + esc(img.size_str) + '</td>' +
+        '<td style="white-space:nowrap">' + esc(img.created_str || '-') + '</td>' +
+        '<td>' + userHtml + '</td>' +
+        actionsTd;
       for (const tag of (img.repo_tags || [])) {
         const btn = document.createElement('button');
         btn.className = 'btn btn-sm btn-danger';
@@ -46,9 +59,26 @@ export async function init(ctx) {
       return;
     }
     $('#images-registry-empty')?.classList.add('hidden');
+
+    // 收集本地已有的 tag
+    const localTags = new Set();
+    for (const img of localImages) {
+      for (const t of (img.repo_tags || [])) {
+        const idx = t.lastIndexOf(':');
+        if (idx > 0) localTags.add(t.substring(idx + 1));
+      }
+    }
+
     for (const tag of tags) {
+      const exists = localTags.has(tag);
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td style="font-family:monospace">' + esc(tag) + '</td><td><button class="btn btn-sm btn-primary" data-tag="' + esc(tag) + '">拉取</button></td>';
+      const statusHtml = exists
+        ? '<span class="badge badge-ok">已存在</span>'
+        : '<span class="badge badge-muted">未拉取</span>';
+      tr.innerHTML =
+        '<td style="font-family:monospace">' + esc(tag) + '</td>' +
+        '<td>' + statusHtml + '</td>' +
+        '<td><button class="btn btn-sm btn-primary" data-tag="' + esc(tag) + '">' + (exists ? '重新拉取' : '拉取') + '</button></td>';
       tbody.appendChild(tr);
     }
     tbody.querySelectorAll('[data-tag]').forEach(btn => {
@@ -103,6 +133,7 @@ export async function init(ctx) {
               if (obj.status === 'done') {
                 progress.innerHTML += '<div style="color:#2ecc71">拉取完成!</div>';
                 await loadLocalImages();
+                loadRegistryTags();
                 break;
               }
               if (obj.status) {
@@ -126,8 +157,7 @@ export async function init(ctx) {
   }
 
   async function deleteImage(imageRef) {
-    if (!confirm('确定要删除镜像 ' + imageRef + ' 吗？')) return;
-
+    // 先尝试删除
     const csrf = await getCSRF();
     const serverBase = await getServerUrl();
     try {
@@ -143,19 +173,108 @@ export async function init(ctx) {
       if (data.success) {
         showMsg('#images-local-msg', data.message || '删除成功', true);
         await loadLocalImages();
-      } else {
-        let msg = data.error || '删除失败';
-        if (data.users && data.users.length > 0) {
-          msg += '\n依赖用户: ' + data.users.join(', ');
-        }
-        showMsg('#images-local-msg', msg, false);
+        loadRegistryTags();
+        return;
       }
+
+      // 有用户依赖 — 弹出迁移对话框
+      if (resp.status === 409 && data.users && data.users.length > 0) {
+        openMigrateModal(imageRef, data.users, data.alternatives || []);
+        return;
+      }
+
+      let msg = data.error || '删除失败';
+      showMsg('#images-local-msg', msg, false);
     } catch (err) {
       showMsg('#images-local-msg', '删除失败: ' + err.message, false);
     }
   }
 
+  function openMigrateModal(oldImage, users, alternatives) {
+    const modal = $('#image-migrate-modal');
+    const usersDiv = $('#migrate-users');
+    const select = $('#migrate-target');
+    const msgEl = $('#migrate-msg');
+
+    msgEl.textContent = '';
+    msgEl.className = 'msg';
+
+    // 显示依赖用户
+    usersDiv.innerHTML = users.map(u => '<span class="tag">' + esc(u) + '</span>').join(' ');
+
+    // 填充目标镜像下拉
+    select.innerHTML = '';
+    if (alternatives.length === 0) {
+      select.innerHTML = '<option value="">无可用目标镜像</option>';
+    } else {
+      for (const alt of alternatives) {
+        const opt = document.createElement('option');
+        opt.value = alt;
+        opt.textContent = alt;
+        select.appendChild(opt);
+      }
+    }
+
+    modal.classList.remove('hidden');
+
+    // 绑定确认按钮
+    const confirmBtn = $('#migrate-confirm-btn');
+    const newConfirmBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+    newConfirmBtn.addEventListener('click', async () => {
+      const target = select.value;
+      if (!target) {
+        showMsg('#migrate-msg', '请选择目标镜像', false);
+        return;
+      }
+      newConfirmBtn.disabled = true;
+      newConfirmBtn.textContent = '迁移中...';
+      showMsg('#migrate-msg', '正在迁移用户并重建容器...', true);
+
+      try {
+        // 1. 迁移用户
+        const res = await Api.post('/api/admin/images/migrate', {
+          image: oldImage,
+          target: target,
+          users: users.join(','),
+        });
+        if (!res.success) {
+          showMsg('#migrate-msg', res.error || res.message || '迁移失败', false);
+          newConfirmBtn.disabled = false;
+          newConfirmBtn.textContent = '迁移并删除旧镜像';
+          return;
+        }
+
+        // 2. 删除旧镜像
+        const csrf = await getCSRF();
+        const formData = new FormData();
+        formData.append('image', oldImage);
+        formData.append('csrf_token', csrf);
+        const serverBase = await getServerUrl();
+        const delResp = await fetch(serverBase + '/api/admin/images/delete', {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+        });
+        const delData = await delResp.json();
+
+        showMsg('#migrate-msg', (res.message || '迁移成功') + (delData.success ? '，旧镜像已删除' : '，删除旧镜像: ' + (delData.error || '未知错误')), delData.success);
+        await loadLocalImages();
+        loadRegistryTags();
+        setTimeout(() => closeMigrateModal(), 2000);
+      } catch (err) {
+        showMsg('#migrate-msg', err.message, false);
+        newConfirmBtn.disabled = false;
+        newConfirmBtn.textContent = '迁移并删除旧镜像';
+      }
+    });
+  }
+
   function closePullModal() {
     $('#image-pull-modal')?.classList.add('hidden');
+  }
+
+  function closeMigrateModal() {
+    $('#image-migrate-modal')?.classList.add('hidden');
   }
 }

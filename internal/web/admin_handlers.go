@@ -259,7 +259,7 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
 
   switch action {
   case "start":
-    // 如果容器未创建，先创建
+    // 如果容器不存在，创建容器
     if rec.ContainerID == "" || !dockerpkg.ContainerExists(ctx, username) {
       ud := user.UserDir(s.cfg, username)
       cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
@@ -280,7 +280,6 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
     picoclawDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw")
     configPath := filepath.Join(picoclawDir, "config.json")
     if _, err := os.Stat(configPath); err == nil {
-      // config.json 已存在，直接下发（文件挂载，无需重启）
       if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
         log.Printf("[config] %s: 下发配置失败: %v", username, err)
       }
@@ -288,31 +287,51 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
         log.Printf("[config] %s: 下发安全配置失败: %v", username, err)
       }
     } else {
-      // config.json 尚未生成，异步等待后下发并重启
       go s.applyConfigAsync(username, picoclawDir, rec.ContainerID)
     }
 
   case "stop":
-    if rec.ContainerID == "" {
-      writeError(w, http.StatusBadRequest, "容器未创建")
-      return
+    // 停止并删除容器（类似 docker compose down）
+    if rec.ContainerID != "" {
+      _ = dockerpkg.Stop(ctx, rec.ContainerID)
+      _ = dockerpkg.Remove(ctx, rec.ContainerID)
     }
-    if err := dockerpkg.Stop(ctx, rec.ContainerID); err != nil {
-      writeError(w, http.StatusInternalServerError, err.Error())
-      return
-    }
+    auth.UpdateContainerID(username, "")
     auth.UpdateContainerStatus(username, "stopped")
 
   case "restart":
-    if rec.ContainerID == "" || !dockerpkg.ContainerExists(ctx, username) {
-      writeError(w, http.StatusBadRequest, "容器未创建")
+    // 停止+删除旧容器，重新创建并启动
+    if rec.ContainerID != "" {
+      _ = dockerpkg.Stop(ctx, rec.ContainerID)
+      _ = dockerpkg.Remove(ctx, rec.ContainerID)
+      auth.UpdateContainerID(username, "")
+    }
+    ud := user.UserDir(s.cfg, username)
+    cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
+    if createErr != nil {
+      writeError(w, http.StatusInternalServerError, "创建容器失败: "+createErr.Error())
       return
     }
-    if err := dockerpkg.Restart(ctx, rec.ContainerID); err != nil {
+    auth.UpdateContainerID(username, cid)
+    if err := dockerpkg.Start(ctx, cid); err != nil {
       writeError(w, http.StatusInternalServerError, err.Error())
       return
     }
     auth.UpdateContainerStatus(username, "running")
+
+    // 配置下发
+    picoclawDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw")
+    configPath := filepath.Join(picoclawDir, "config.json")
+    if _, err := os.Stat(configPath); err == nil {
+      if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
+        log.Printf("[config] %s: 下发配置失败: %v", username, err)
+      }
+      if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
+        log.Printf("[config] %s: 下发安全配置失败: %v", username, err)
+      }
+    } else {
+      go s.applyConfigAsync(username, picoclawDir, cid)
+    }
   }
 
   labels := map[string]string{"start": "启动", "stop": "停止", "restart": "重启"}

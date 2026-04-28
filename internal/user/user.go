@@ -350,8 +350,10 @@ func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config
   wsHeaders := fmt.Sprintf(`{"Authorization":"Bearer %s"}`, mcpToken)
   servers["chrome-devtools"] = map[string]interface{}{
     "enabled": true,
-    "command": "npx",
+    "command": "node",
     "args": []string{
+      "/usr/local/bin/mcp-proxy.js",
+      "npx",
       "chrome-devtools-mcp@latest",
       "--ws-endpoint",
       "ws://" + host + "/api/mcp/cdp",
