@@ -108,6 +108,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
     return
   }
 
+  // 异步同步用户的 LDAP 组
+  if s.cfg.LDAP.GroupSearchMode != "" {
+    go func() {
+      if groups, err := ldap.FetchUserGroups(s.cfg, username); err == nil && len(groups) > 0 {
+        auth.SyncUserGroups(username, groups)
+      }
+    }()
+  }
+
   s.setSessionCookie(w, s.createSessionToken(username), 86400)
   writeJSON(w, http.StatusOK, struct {
     Success  bool   `json:"success"`

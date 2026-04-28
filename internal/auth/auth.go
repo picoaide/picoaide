@@ -3,6 +3,7 @@ package auth
 import (
   "crypto/rand"
   "database/sql"
+  "encoding/hex"
   "fmt"
   "math/big"
   "os"
@@ -100,12 +101,15 @@ func createTables() error {
     ip TEXT,
     cpu_limit REAL DEFAULT 0,
     memory_limit INTEGER DEFAULT 0,
+    mcp_token TEXT DEFAULT '',
     created_at DATETIME DEFAULT (datetime('now','localtime')),
     updated_at DATETIME DEFAULT (datetime('now','localtime'))
   )`)
   if err != nil {
     return err
   }
+  // 迁移：已有表添加 mcp_token 字段
+  db.Exec(`ALTER TABLE containers ADD COLUMN mcp_token TEXT DEFAULT ''`)
   _, err = db.Exec(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT '',
@@ -130,6 +134,42 @@ func createTables() error {
     username TEXT NOT NULL UNIQUE,
     added_by TEXT NOT NULL DEFAULT 'system',
     added_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    source TEXT NOT NULL DEFAULT 'local',
+    description TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS user_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    UNIQUE(username, group_id)
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_user_groups_username ON user_groups(username)`)
+  if err != nil {
+    return err
+  }
+  _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_user_groups_group_id ON user_groups(group_id)`)
+  if err != nil {
+    return err
+  }
+  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS group_skills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    skill_name TEXT NOT NULL,
+    UNIQUE(group_id, skill_name)
   )`)
   return err
 }
@@ -300,6 +340,7 @@ type ContainerRecord struct {
   IP          string
   CPULimit    float64
   MemoryLimit int64
+  MCPToken    string
   CreatedAt   string
   UpdatedAt   string
 }
@@ -329,8 +370,8 @@ func GetContainerByUsername(username string) (*ContainerRecord, error) {
     return nil, err
   }
   var r ContainerRecord
-  err := db.QueryRow(`SELECT id, username, container_id, image, status, ip, cpu_limit, memory_limit, created_at, updated_at
-    FROM containers WHERE username = ?`, username).Scan(&r.ID, &r.Username, &r.ContainerID, &r.Image, &r.Status, &r.IP, &r.CPULimit, &r.MemoryLimit, &r.CreatedAt, &r.UpdatedAt)
+  err := db.QueryRow(`SELECT id, username, container_id, image, status, ip, cpu_limit, memory_limit, mcp_token, created_at, updated_at
+    FROM containers WHERE username = ?`, username).Scan(&r.ID, &r.Username, &r.ContainerID, &r.Image, &r.Status, &r.IP, &r.CPULimit, &r.MemoryLimit, &r.MCPToken, &r.CreatedAt, &r.UpdatedAt)
   if err == sql.ErrNoRows {
     return nil, nil
   }
@@ -345,7 +386,7 @@ func GetAllContainers() ([]ContainerRecord, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
-  rows, err := db.Query(`SELECT id, username, container_id, image, status, ip, cpu_limit, memory_limit, created_at, updated_at FROM containers ORDER BY id`)
+  rows, err := db.Query(`SELECT id, username, container_id, image, status, ip, cpu_limit, memory_limit, mcp_token, created_at, updated_at FROM containers ORDER BY id`)
   if err != nil {
     return nil, err
   }
@@ -353,7 +394,7 @@ func GetAllContainers() ([]ContainerRecord, error) {
   var list []ContainerRecord
   for rows.Next() {
     var r ContainerRecord
-    if err := rows.Scan(&r.ID, &r.Username, &r.ContainerID, &r.Image, &r.Status, &r.IP, &r.CPULimit, &r.MemoryLimit, &r.CreatedAt, &r.UpdatedAt); err != nil {
+    if err := rows.Scan(&r.ID, &r.Username, &r.ContainerID, &r.Image, &r.Status, &r.IP, &r.CPULimit, &r.MemoryLimit, &r.MCPToken, &r.CreatedAt, &r.UpdatedAt); err != nil {
       return nil, err
     }
     list = append(list, r)
@@ -409,4 +450,273 @@ func AllocateNextIP() (string, error) {
   }
   last++
   return fmt.Sprintf("%s.%s.%s.%d", parts[0], parts[1], parts[2], last), nil
+}
+
+// ============================================================
+// 用户组管理
+// ============================================================
+
+// GroupInfo 组信息（包含成员数和绑定技能数）
+type GroupInfo struct {
+  ID          int64  `json:"id"`
+  Name        string `json:"name"`
+  Source      string `json:"source"`
+  Description string `json:"description"`
+  MemberCount int    `json:"member_count"`
+  SkillCount  int    `json:"skill_count"`
+}
+
+// CreateGroup 创建组
+func CreateGroup(name, source, description string) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
+  _, err := db.Exec("INSERT INTO groups (name, source, description) VALUES (?, ?, ?)", name, source, description)
+  if err != nil {
+    return fmt.Errorf("创建组失败: %w", err)
+  }
+  return nil
+}
+
+// DeleteGroup 删除组（级联删除成员和技能绑定）
+func DeleteGroup(name string) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
+  result, err := db.Exec("DELETE FROM groups WHERE name = ?", name)
+  if err != nil {
+    return fmt.Errorf("删除组失败: %w", err)
+  }
+  n, _ := result.RowsAffected()
+  if n == 0 {
+    return fmt.Errorf("组 %s 不存在", name)
+  }
+  return nil
+}
+
+// ListGroups 列出所有组及其统计
+func ListGroups() ([]GroupInfo, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
+  rows, err := db.Query(`SELECT g.id, g.name, g.source, g.description,
+    (SELECT COUNT(*) FROM user_groups ug WHERE ug.group_id = g.id) AS member_count,
+    (SELECT COUNT(*) FROM group_skills gs WHERE gs.group_id = g.id) AS skill_count
+    FROM groups g ORDER BY g.name`)
+  if err != nil {
+    return nil, err
+  }
+  defer rows.Close()
+  var list []GroupInfo
+  for rows.Next() {
+    var g GroupInfo
+    if err := rows.Scan(&g.ID, &g.Name, &g.Source, &g.Description, &g.MemberCount, &g.SkillCount); err != nil {
+      return nil, err
+    }
+    list = append(list, g)
+  }
+  return list, nil
+}
+
+// GetGroupID 根据组名获取组 ID
+func GetGroupID(name string) (int64, error) {
+  if err := ensureDB(); err != nil {
+    return 0, err
+  }
+  var id int64
+  err := db.QueryRow("SELECT id FROM groups WHERE name = ?", name).Scan(&id)
+  if err == sql.ErrNoRows {
+    return 0, fmt.Errorf("组 %s 不存在", name)
+  }
+  return id, err
+}
+
+// AddUsersToGroup 批量添加用户到组
+func AddUsersToGroup(groupName string, usernames []string) error {
+  gid, err := GetGroupID(groupName)
+  if err != nil {
+    return err
+  }
+  for _, u := range usernames {
+    db.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", u, gid)
+  }
+  return nil
+}
+
+// RemoveUserFromGroup 从组移除用户
+func RemoveUserFromGroup(groupName, username string) error {
+  gid, err := GetGroupID(groupName)
+  if err != nil {
+    return err
+  }
+  _, err = db.Exec("DELETE FROM user_groups WHERE group_id = ? AND username = ?", gid, username)
+  return err
+}
+
+// GetGroupMembers 获取组成员列表
+func GetGroupMembers(groupName string) ([]string, error) {
+  gid, err := GetGroupID(groupName)
+  if err != nil {
+    return nil, err
+  }
+  rows, err := db.Query("SELECT username FROM user_groups WHERE group_id = ? ORDER BY username", gid)
+  if err != nil {
+    return nil, err
+  }
+  defer rows.Close()
+  var list []string
+  for rows.Next() {
+    var u string
+    if err := rows.Scan(&u); err != nil {
+      return nil, err
+    }
+    list = append(list, u)
+  }
+  return list, nil
+}
+
+// GetGroupsForUser 获取用户所属的组名列表
+func GetGroupsForUser(username string) ([]string, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
+  rows, err := db.Query(`SELECT g.name FROM groups g JOIN user_groups ug ON g.id = ug.group_id WHERE ug.username = ? ORDER BY g.name`, username)
+  if err != nil {
+    return nil, err
+  }
+  defer rows.Close()
+  var list []string
+  for rows.Next() {
+    var n string
+    if err := rows.Scan(&n); err != nil {
+      return nil, err
+    }
+    list = append(list, n)
+  }
+  return list, nil
+}
+
+// SyncUserGroups 差量更新用户的组关系（传入用户应属于的组名列表）
+func SyncUserGroups(username string, groupNames []string) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
+  tx, err := db.Begin()
+  if err != nil {
+    return err
+  }
+  defer tx.Rollback()
+
+  // 确保所有组存在
+  for _, name := range groupNames {
+    tx.Exec("INSERT OR IGNORE INTO groups (name, source) VALUES (?, 'ldap')", name)
+  }
+
+  // 删除用户当前所有组关系
+  tx.Exec("DELETE FROM user_groups WHERE username = ?", username)
+
+  // 添加新的组关系
+  for _, name := range groupNames {
+    var gid int64
+    if err := tx.QueryRow("SELECT id FROM groups WHERE name = ?", name).Scan(&gid); err != nil {
+      continue
+    }
+    tx.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", username, gid)
+  }
+
+  return tx.Commit()
+}
+
+// BindSkillToGroup 绑定技能到组
+func BindSkillToGroup(groupName, skillName string) error {
+  gid, err := GetGroupID(groupName)
+  if err != nil {
+    return err
+  }
+  _, err = db.Exec("INSERT OR IGNORE INTO group_skills (group_id, skill_name) VALUES (?, ?)", gid, skillName)
+  return err
+}
+
+// UnbindSkillFromGroup 解绑技能
+func UnbindSkillFromGroup(groupName, skillName string) error {
+  gid, err := GetGroupID(groupName)
+  if err != nil {
+    return err
+  }
+  _, err = db.Exec("DELETE FROM group_skills WHERE group_id = ? AND skill_name = ?", gid, skillName)
+  return err
+}
+
+// GetGroupSkills 获取组绑定的技能列表
+func GetGroupSkills(groupName string) ([]string, error) {
+  gid, err := GetGroupID(groupName)
+  if err != nil {
+    return nil, err
+  }
+  rows, err := db.Query("SELECT skill_name FROM group_skills WHERE group_id = ? ORDER BY skill_name", gid)
+  if err != nil {
+    return nil, err
+  }
+  defer rows.Close()
+  var list []string
+  for rows.Next() {
+    var s string
+    if err := rows.Scan(&s); err != nil {
+      return nil, err
+    }
+    list = append(list, s)
+  }
+  return list, nil
+}
+
+// GetGroupMembersForDeploy 获取组成员的用户名列表（用于技能部署）
+func GetGroupMembersForDeploy(groupName string) ([]string, error) {
+  return GetGroupMembers(groupName)
+}
+
+// GenerateMCPToken 为用户生成 MCP token（用户名:随机hex）并存入 DB
+func GenerateMCPToken(username string) (string, error) {
+  if err := ensureDB(); err != nil {
+    return "", err
+  }
+  b := make([]byte, 32)
+  if _, err := rand.Read(b); err != nil {
+    return "", fmt.Errorf("生成随机数失败: %w", err)
+  }
+  token := username + ":" + hex.EncodeToString(b)
+  _, err := db.Exec(`UPDATE containers SET mcp_token = ? WHERE username = ?`, token, username)
+  if err != nil {
+    return "", fmt.Errorf("保存 MCP token 失败: %w", err)
+  }
+  return token, nil
+}
+
+// GetMCPToken 获取用户的 MCP token
+func GetMCPToken(username string) (string, error) {
+  if err := ensureDB(); err != nil {
+    return "", err
+  }
+  var token string
+  err := db.QueryRow(`SELECT mcp_token FROM containers WHERE username = ?`, username).Scan(&token)
+  if err == sql.ErrNoRows {
+    return "", nil
+  }
+  return token, err
+}
+
+// ValidateMCPToken 验证 MCP token，返回用户名
+func ValidateMCPToken(token string) (string, bool) {
+  if token == "" {
+    return "", false
+  }
+  parts := strings.SplitN(token, ":", 2)
+  if len(parts) != 2 {
+    return "", false
+  }
+  username := parts[0]
+  stored, err := GetMCPToken(username)
+  if err != nil || stored != token {
+    return "", false
+  }
+  return username, true
 }

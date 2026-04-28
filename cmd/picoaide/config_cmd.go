@@ -114,7 +114,7 @@ func ConfigApply(cfg *config.GlobalConfig, targetUser string) error {
     }
 
     if configExists {
-      if err := user.ApplyConfigToJSON(cfg, picoclawDir); err != nil {
+      if err := user.ApplyConfigToJSON(cfg, picoclawDir, username); err != nil {
         return fmt.Errorf("更新 config.json 失败: %w", err)
       }
     }

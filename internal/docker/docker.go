@@ -198,6 +198,69 @@ func GetContainerIDByName(ctx context.Context, username string) (string, error) 
   return inspect.ID, nil
 }
 
+// ContainerLogs 获取容器日志
+func ContainerLogs(ctx context.Context, containerID string, tail string) (string, error) {
+  if tail == "" {
+    tail = "100"
+  }
+  opts := container.LogsOptions{
+    ShowStdout: true,
+    ShowStderr: true,
+    Tail:       tail,
+    Timestamps: true,
+  }
+  reader, err := cli.ContainerLogs(ctx, containerID, opts)
+  if err != nil {
+    return "", fmt.Errorf("获取容器日志失败: %w", err)
+  }
+  defer reader.Close()
+
+  // Docker 日志流使用 8 字节头（stream type + padding + size），需要跳过
+  var result strings.Builder
+  buf := make([]byte, 8)
+  for {
+    _, err := io.ReadFull(reader, buf)
+    if err != nil {
+      break
+    }
+    size := int(buf[4])<<24 | int(buf[5])<<16 | int(buf[6])<<8 | int(buf[7])
+    if size == 0 {
+      continue
+    }
+    line := make([]byte, size)
+    _, err = io.ReadFull(reader, line)
+    if err != nil {
+      break
+    }
+    result.Write(line)
+  }
+  // 清理 ANSI 转义序列
+  cleaned := stripANSI(result.String())
+  return cleaned, nil
+}
+
+// stripANSI 移除 ANSI 转义序列
+func stripANSI(s string) string {
+  var b strings.Builder
+  b.Grow(len(s))
+  i := 0
+  for i < len(s) {
+    if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+      j := i + 2
+      for j < len(s) && ((s[j] >= '0' && s[j] <= '9') || s[j] == ';' || s[j] == '?') {
+        j++
+      }
+      if j < len(s) {
+        i = j + 1
+        continue
+      }
+    }
+    b.WriteByte(s[i])
+    i++
+  }
+  return b.String()
+}
+
 // ImageExists 检查镜像是否已存在于本地
 func ImageExists(ctx context.Context, imageRef string) bool {
   _, _, err := cli.ImageInspectWithRaw(ctx, imageRef)

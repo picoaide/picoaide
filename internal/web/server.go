@@ -197,6 +197,7 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/dingtalk", s.secureHeaders(s.handleDingTalk))
   // 配置管理（超管）
   mux.HandleFunc("/api/config", s.secureHeaders(s.handleConfig))
+  mux.HandleFunc("/api/admin/config/apply", s.secureHeaders(s.handleAdminConfigApply))
   // 文件管理
   mux.HandleFunc("/api/files", s.secureHeaders(s.handleFiles))
   mux.HandleFunc("/api/files/upload", s.secureHeaders(s.handleFileUpload))
@@ -206,6 +207,9 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/files/edit", s.secureHeaders(s.handleFileEdit))
   // CSRF token
   mux.HandleFunc("/api/csrf", s.secureHeaders(s.handleCSRF))
+  // MCP WebSocket 中继
+  mux.HandleFunc("/api/mcp/token", s.secureHeaders(s.handleMCPToken))
+  mux.HandleFunc("/api/mcp/cdp", s.secureHeaders(s.handleMCPCDP))
   // 超管 - 用户管理
   mux.HandleFunc("/api/admin/users", s.secureHeaders(s.handleAdminUsers))
   mux.HandleFunc("/api/admin/users/create", s.secureHeaders(s.handleAdminUserCreate))
@@ -213,11 +217,22 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/admin/container/start", s.secureHeaders(s.handleAdminContainerStart))
   mux.HandleFunc("/api/admin/container/stop", s.secureHeaders(s.handleAdminContainerStop))
   mux.HandleFunc("/api/admin/container/restart", s.secureHeaders(s.handleAdminContainerRestart))
+  mux.HandleFunc("/api/admin/container/logs", s.secureHeaders(s.handleAdminContainerLogs))
   // 超管 - 白名单
   mux.HandleFunc("/api/admin/whitelist", s.secureHeaders(s.handleAdminWhitelist))
   // 超管 - 认证配置
   mux.HandleFunc("/api/admin/auth/test-ldap", s.secureHeaders(s.handleAdminAuthTestLDAP))
   mux.HandleFunc("/api/admin/auth/ldap-users", s.secureHeaders(s.handleAdminAuthLDAPUsers))
+  mux.HandleFunc("/api/admin/auth/sync-groups", s.secureHeaders(s.handleAdminAuthSyncGroups))
+  // 超管 - 用户组
+  mux.HandleFunc("/api/admin/groups", s.secureHeaders(s.handleAdminGroups))
+  mux.HandleFunc("/api/admin/groups/create", s.secureHeaders(s.handleAdminGroupCreate))
+  mux.HandleFunc("/api/admin/groups/delete", s.secureHeaders(s.handleAdminGroupDelete))
+  mux.HandleFunc("/api/admin/groups/members", s.secureHeaders(s.handleAdminGroupMembers))
+  mux.HandleFunc("/api/admin/groups/members/add", s.secureHeaders(s.handleAdminGroupMembersAdd))
+  mux.HandleFunc("/api/admin/groups/members/remove", s.secureHeaders(s.handleAdminGroupMembersRemove))
+  mux.HandleFunc("/api/admin/groups/skills/bind", s.secureHeaders(s.handleAdminGroupSkillsBind))
+  mux.HandleFunc("/api/admin/groups/skills/unbind", s.secureHeaders(s.handleAdminGroupSkillsUnbind))
   // 超管 - 技能库
   mux.HandleFunc("/api/admin/skills", s.secureHeaders(s.handleAdminSkills))
   mux.HandleFunc("/api/admin/skills/deploy", s.secureHeaders(s.handleAdminSkillsDeploy))

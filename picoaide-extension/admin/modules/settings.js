@@ -305,6 +305,16 @@ export async function init(ctx) {
     } catch (e) { showMsg('#settings-msg', e.message, false); }
   }
 
+  // 下发配置到全部用户
+  $('#apply-all-btn').addEventListener('click', async function() {
+    if (!confirm('确定要下发配置到所有用户并重启其容器吗？')) return;
+    showMsg('#settings-msg', '正在下发配置...', true);
+    try {
+      var res = await Api.post('/api/admin/config/apply', {});
+      showMsg('#settings-msg', res.message || res.error, res.success);
+    } catch (e) { showMsg('#settings-msg', e.message, false); }
+  });
+
   function collectFields() {
     $$('input[data-path]').forEach(function(input) {
       deepSet(rawConfig, input.dataset.path, input.value);

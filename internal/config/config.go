@@ -71,12 +71,7 @@ picoclaw:
       max_inline_text_chars: 8192
       servers:
         chrome-devtools:
-          enabled: true
-          command: npx
-          args:
-            - chrome-devtools-mcp@latest
-            - '--browser-url=http://127.0.0.1:9222'
-            - '--autoConnect'
+          enabled: false
   gateway:
     host: "0.0.0.0"
     port: 18790
@@ -108,12 +103,16 @@ users: []
 // ============================================================
 
 type LDAPConfig struct {
-  Host              string `yaml:"host"`
-  BindDN            string `yaml:"bind_dn"`
-  BindPassword      string `yaml:"bind_password"`
-  BaseDN            string `yaml:"base_dn"`
-  Filter            string `yaml:"filter"`
-  UsernameAttribute string `yaml:"username_attribute"`
+  Host                string `yaml:"host"`
+  BindDN              string `yaml:"bind_dn"`
+  BindPassword        string `yaml:"bind_password"`
+  BaseDN              string `yaml:"base_dn"`
+  Filter              string `yaml:"filter"`
+  UsernameAttribute   string `yaml:"username_attribute"`
+  GroupSearchMode     string `yaml:"group_search_mode"`     // "member_of" | "group_search"
+  GroupBaseDN         string `yaml:"group_base_dn"`
+  GroupFilter         string `yaml:"group_filter"`
+  GroupMemberAttribute string `yaml:"group_member_attribute"`
 }
 
 type ImageConfig struct {
@@ -632,6 +631,10 @@ func LoadFromDB() (*GlobalConfig, error) {
   cfg.LDAP.BaseDN = kv["ldap.base_dn"]
   cfg.LDAP.Filter = kv["ldap.filter"]
   cfg.LDAP.UsernameAttribute = kv["ldap.username_attribute"]
+  cfg.LDAP.GroupSearchMode = kv["ldap.group_search_mode"]
+  cfg.LDAP.GroupBaseDN = kv["ldap.group_base_dn"]
+  cfg.LDAP.GroupFilter = kv["ldap.group_filter"]
+  cfg.LDAP.GroupMemberAttribute = kv["ldap.group_member_attribute"]
   cfg.Image.Name = kv["image.name"]
   cfg.Image.Timezone = kv["image.timezone"]
   cfg.Image.Registry = kv["image.registry"]
@@ -687,6 +690,10 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
   kv["ldap.base_dn"] = cfg.LDAP.BaseDN
   kv["ldap.filter"] = cfg.LDAP.Filter
   kv["ldap.username_attribute"] = cfg.LDAP.UsernameAttribute
+  kv["ldap.group_search_mode"] = cfg.LDAP.GroupSearchMode
+  kv["ldap.group_base_dn"] = cfg.LDAP.GroupBaseDN
+  kv["ldap.group_filter"] = cfg.LDAP.GroupFilter
+  kv["ldap.group_member_attribute"] = cfg.LDAP.GroupMemberAttribute
   kv["image.name"] = cfg.Image.Name
   kv["image.timezone"] = cfg.Image.Timezone
   kv["image.registry"] = cfg.Image.Registry

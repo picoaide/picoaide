@@ -77,9 +77,14 @@ RUN echo 'export NVM_DIR="/root/.nvm"' > /etc/profile.d/nvm.sh && \
     echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' >> /etc/profile.d/nvm.sh && \
     chmod +x /etc/profile.d/nvm.sh
 
-# 设置静态Node.js路径 (v22是当前LTS版本)
-ENV PATH="/root/.nvm/versions/node/v22.12.0/bin:$PATH" \
-    NODE_PATH="/root/.nvm/versions/node/v22.12.0/lib/node_modules"
+# 设置Node.js路径（通过nvm默认版本动态查找）
+RUN NODE_BIN=$(find /root/.nvm/versions/node -name node -path "*/bin/node" 2>/dev/null | head -1) && \
+    NODE_DIR=$(dirname "$(dirname "$NODE_BIN")") && \
+    echo "NODE_DIR=$NODE_DIR" && \
+    echo "export PATH=\"${NODE_DIR}/bin:\$PATH\"" >> /etc/profile.d/nvm.sh && \
+    echo "export NODE_PATH=\"${NODE_DIR}/lib/node_modules\"" >> /etc/profile.d/nvm.sh
+ENV PATH="/root/.nvm/versions/node/v24.15.0/bin:$PATH" \
+    NODE_PATH="/root/.nvm/versions/node/v24.15.0/lib/node_modules"
 
 # 安装 picoclaw
 ARG PICOCLAW_VERSION

@@ -39,6 +39,7 @@ const loginBtn = document.getElementById('login-btn');
 const userDisplay = document.getElementById('user-display');
 const logoutBtn = document.getElementById('logout-btn');
 const syncBtn = document.getElementById('sync-btn');
+const cdpBtn = document.getElementById('cdp-btn');
 const manageBtn = document.getElementById('manage-btn');
 const adminBtn = document.getElementById('admin-btn');
 
@@ -53,6 +54,7 @@ function showMain(username) {
   userDisplay.textContent = username;
   setStatus('已连接', 'ok');
   checkAdminRole();
+  updateCdpUI();
 }
 
 async function checkAdminRole() {
@@ -138,6 +140,60 @@ manageBtn.addEventListener('click', () => {
 // --- 管理后台（超管）---
 adminBtn.addEventListener('click', () => {
   chrome.tabs.create({ url: chrome.runtime.getURL('admin/index.html') });
+});
+
+// --- AI 浏览器控制（通过 background service worker）---
+
+// 查询 background 获取当前 CDP 状态并更新 UI
+async function updateCdpUI() {
+  try {
+    const status = await chrome.runtime.sendMessage({ action: 'cdpStatus' });
+    if (status.active) {
+      cdpBtn.textContent = '停止AI控制';
+      cdpBtn.style.background = '#e74c3c';
+      cdpBtn.style.color = '#fff';
+      setStatus('AI 浏览器控制已开启', 'ok');
+    } else {
+      resetCdpBtn();
+    }
+  } catch {
+    resetCdpBtn();
+  }
+}
+
+function resetCdpBtn() {
+  cdpBtn.textContent = '授权AI控制当前标签页';
+  cdpBtn.style.background = '';
+  cdpBtn.style.color = '';
+}
+
+cdpBtn.addEventListener('click', async () => {
+  setStatus('处理中...', '');
+  try {
+    const result = await chrome.runtime.sendMessage({ action: 'cdpToggle' });
+    if (result.active) {
+      cdpBtn.textContent = '停止AI控制';
+      cdpBtn.style.background = '#e74c3c';
+      cdpBtn.style.color = '#fff';
+      setStatus('AI 浏览器控制已开启', 'ok');
+    } else if (result.error) {
+      resetCdpBtn();
+      // 如果错误是 debugger 已附加，提示用户清理
+      if (result.error.includes('already attached') || result.error.includes('debugger')) {
+        setStatus('调试器残留，正在清理...', 'err');
+        await chrome.runtime.sendMessage({ action: 'cdpForceCleanup' });
+        setStatus('已清理，请重试', '');
+      } else {
+        setStatus(result.error, 'err');
+      }
+    } else {
+      resetCdpBtn();
+      setStatus('已断开AI控制', '');
+    }
+  } catch (e) {
+    resetCdpBtn();
+    setStatus('通信失败: ' + e.message, 'err');
+  }
 });
 
 // --- 自动检测登录状态 ---

@@ -3,6 +3,7 @@ package ldap
 import (
   "fmt"
   "sort"
+  "strings"
 
   "github.com/go-ldap/ldap/v3"
   "github.com/picoaide/picoaide/internal/config"
@@ -47,6 +48,222 @@ func FetchUsers(cfg *config.GlobalConfig) ([]string, error) {
 
   sort.Strings(users)
   return users, nil
+}
+
+// FetchUserGroups 获取单个用户所属的 LDAP 组名列表
+func FetchUserGroups(cfg *config.GlobalConfig, username string) ([]string, error) {
+  if cfg.LDAP.GroupSearchMode == "group_search" {
+    return fetchGroupsBySearch(cfg, username)
+  }
+  return fetchGroupsByMemberOf(cfg, username)
+}
+
+// fetchGroupsByMemberOf 从用户条目的 memberOf 属性读取组（AD 风格）
+func fetchGroupsByMemberOf(cfg *config.GlobalConfig, username string) ([]string, error) {
+  l, err := ldap.DialURL(cfg.LDAP.Host)
+  if err != nil {
+    return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
+  }
+  defer l.Close()
+
+  if err := l.Bind(cfg.LDAP.BindDN, cfg.LDAP.BindPassword); err != nil {
+    return nil, fmt.Errorf("LDAP 认证失败: %w", err)
+  }
+
+  searchRequest := ldap.NewSearchRequest(
+    cfg.LDAP.BaseDN,
+    ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 1, 0, false,
+    fmt.Sprintf("(%s=%s)", cfg.LDAP.UsernameAttribute, ldap.EscapeFilter(username)),
+    []string{"memberOf"},
+    nil,
+  )
+
+  sr, err := l.Search(searchRequest)
+  if err != nil || len(sr.Entries) == 0 {
+    return nil, fmt.Errorf("搜索用户失败")
+  }
+
+  var groups []string
+  for _, dn := range sr.Entries[0].GetAttributeValues("memberOf") {
+    name := extractCN(dn)
+    if name != "" {
+      groups = append(groups, name)
+    }
+  }
+  return groups, nil
+}
+
+// fetchGroupsBySearch 搜索 groupOfNames 条目查找包含用户的组（OpenLDAP 风格）
+func fetchGroupsBySearch(cfg *config.GlobalConfig, username string) ([]string, error) {
+  l, err := ldap.DialURL(cfg.LDAP.Host)
+  if err != nil {
+    return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
+  }
+  defer l.Close()
+
+  if err := l.Bind(cfg.LDAP.BindDN, cfg.LDAP.BindPassword); err != nil {
+    return nil, fmt.Errorf("LDAP 认证失败: %w", err)
+  }
+
+  // 先获取用户 DN
+  userSearch := ldap.NewSearchRequest(
+    cfg.LDAP.BaseDN,
+    ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 1, 0, false,
+    fmt.Sprintf("(%s=%s)", cfg.LDAP.UsernameAttribute, ldap.EscapeFilter(username)),
+    []string{"dn"},
+    nil,
+  )
+  userSR, err := l.Search(userSearch)
+  if err != nil || len(userSR.Entries) == 0 {
+    return nil, fmt.Errorf("搜索用户 DN 失败")
+  }
+  userDN := userSR.Entries[0].DN
+
+  // 搜索包含该用户 DN 的组
+  groupBaseDN := cfg.LDAP.GroupBaseDN
+  if groupBaseDN == "" {
+    groupBaseDN = cfg.LDAP.BaseDN
+  }
+  groupFilter := cfg.LDAP.GroupFilter
+  if groupFilter == "" {
+    groupFilter = "(objectClass=groupOfNames)"
+  }
+  memberAttr := cfg.LDAP.GroupMemberAttribute
+  if memberAttr == "" {
+    memberAttr = "member"
+  }
+
+  combinedFilter := fmt.Sprintf("(&%s(%s=%s))", groupFilter, memberAttr, ldap.EscapeFilter(userDN))
+  groupSearch := ldap.NewSearchRequest(
+    groupBaseDN,
+    ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+    combinedFilter,
+    []string{"cn"},
+    nil,
+  )
+  groupSR, err := l.Search(groupSearch)
+  if err != nil {
+    return nil, fmt.Errorf("搜索组失败: %w", err)
+  }
+
+  var groups []string
+  for _, entry := range groupSR.Entries {
+    name := entry.GetAttributeValue("cn")
+    if name != "" {
+      groups = append(groups, name)
+    }
+  }
+  return groups, nil
+}
+
+// FetchAllGroupsWithMembers 获取所有 LDAP 组及其成员（用于手动全量同步）
+func FetchAllGroupsWithMembers(cfg *config.GlobalConfig) (map[string][]string, error) {
+  if cfg.LDAP.GroupSearchMode == "group_search" {
+    return fetchAllGroupsBySearch(cfg)
+  }
+  return fetchAllGroupsByMemberOf(cfg)
+}
+
+// fetchAllGroupsByMemberOf 遍历用户读取 memberOf
+func fetchAllGroupsByMemberOf(cfg *config.GlobalConfig) (map[string][]string, error) {
+  users, err := FetchUsers(cfg)
+  if err != nil {
+    return nil, err
+  }
+  result := make(map[string][]string)
+  for _, u := range users {
+    groups, err := fetchGroupsByMemberOf(cfg, u)
+    if err != nil {
+      continue
+    }
+    for _, g := range groups {
+      result[g] = append(result[g], u)
+    }
+  }
+  return result, nil
+}
+
+// fetchAllGroupsBySearch 搜索所有组条目并读取成员
+func fetchAllGroupsBySearch(cfg *config.GlobalConfig) (map[string][]string, error) {
+  l, err := ldap.DialURL(cfg.LDAP.Host)
+  if err != nil {
+    return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
+  }
+  defer l.Close()
+
+  if err := l.Bind(cfg.LDAP.BindDN, cfg.LDAP.BindPassword); err != nil {
+    return nil, fmt.Errorf("LDAP 认证失败: %w", err)
+  }
+
+  groupBaseDN := cfg.LDAP.GroupBaseDN
+  if groupBaseDN == "" {
+    groupBaseDN = cfg.LDAP.BaseDN
+  }
+  groupFilter := cfg.LDAP.GroupFilter
+  if groupFilter == "" {
+    groupFilter = "(objectClass=groupOfNames)"
+  }
+  memberAttr := cfg.LDAP.GroupMemberAttribute
+  if memberAttr == "" {
+    memberAttr = "member"
+  }
+
+  searchRequest := ldap.NewSearchRequest(
+    groupBaseDN,
+    ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+    groupFilter,
+    []string{"cn", memberAttr},
+    nil,
+  )
+  sr, err := l.Search(searchRequest)
+  if err != nil {
+    return nil, fmt.Errorf("搜索组失败: %w", err)
+  }
+
+  result := make(map[string][]string)
+  for _, entry := range sr.Entries {
+    groupName := entry.GetAttributeValue("cn")
+    if groupName == "" {
+      continue
+    }
+    for _, memberDN := range entry.GetAttributeValues(memberAttr) {
+      uid := extractAttrValue(memberDN, cfg.LDAP.UsernameAttribute)
+      if uid != "" {
+        result[groupName] = append(result[groupName], uid)
+      }
+    }
+  }
+  return result, nil
+}
+
+// extractCN 从 DN 中提取 CN 值
+func extractCN(dn string) string {
+  parsed, err := ldap.ParseDN(dn)
+  if err != nil || len(parsed.RDNs) == 0 {
+    return ""
+  }
+  for _, attr := range parsed.RDNs[0].Attributes {
+    if strings.EqualFold(attr.Type, "cn") {
+      return attr.Value
+    }
+  }
+  return ""
+}
+
+// extractAttrValue 从 DN 中提取指定属性的值
+func extractAttrValue(dn, attrType string) string {
+  parsed, err := ldap.ParseDN(dn)
+  if err != nil {
+    return ""
+  }
+  for _, rdn := range parsed.RDNs {
+    for _, attr := range rdn.Attributes {
+      if strings.EqualFold(attr.Type, attrType) {
+        return attr.Value
+      }
+    }
+  }
+  return ""
 }
 
 // TestConnection 使用指定参数测试 LDAP 连接，返回用户数量

@@ -41,6 +41,30 @@
   </div>
 
   <div class="card">
+    <div class="card-header">LDAP 组配置</div>
+    <div class="grid-2">
+      <div class="field">
+        <label>组搜索方式</label>
+        <select id="ldap-group-mode">
+          <option value="">不启用组同步</option>
+          <option value="member_of">memberOf（AD 风格）</option>
+          <option value="group_search">groupOfNames（OpenLDAP 风格）</option>
+        </select>
+      </div>
+      <div class="field"><label>组 Base DN</label><input type="text" id="ldap-group-base-dn" placeholder="留空使用用户 Base DN"></div>
+    </div>
+    <div class="grid-2">
+      <div class="field"><label>组过滤条件</label><input type="text" id="ldap-group-filter" placeholder="(objectClass=groupOfNames)"></div>
+      <div class="field"><label>组成员属性</label><input type="text" id="ldap-group-member-attr" placeholder="member"></div>
+    </div>
+    <div class="row mt-1">
+      <button class="btn btn-outline btn-sm" id="sync-groups-btn">同步 LDAP 组</button>
+      <button class="btn btn-primary btn-sm" id="save-group-config-btn">保存组配置</button>
+    </div>
+    <div id="sync-groups-msg" class="msg"></div>
+  </div>
+
+  <div class="card">
     <div class="card-header">白名单</div>
     <p class="text-sm text-muted">白名单为空时所有用户均可使用。修改后需手动运行 sync 同步。</p>
     <div id="wl-tags" class="mt-1"></div>

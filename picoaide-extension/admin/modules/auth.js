@@ -24,6 +24,8 @@ export async function init(ctx) {
   $('#save-auth-btn').addEventListener('click', saveAuthConfig);
   $('#save-ldap-btn').addEventListener('click', saveLDAPConfig);
   $('#test-ldap-btn').addEventListener('click', testLDAP);
+  $('#save-group-config-btn').addEventListener('click', saveGroupConfig);
+  $('#sync-groups-btn').addEventListener('click', syncLDAPGroups);
   $('#wl-add-btn').addEventListener('click', addWhitelistUser);
   $('#wl-search-btn').addEventListener('click', searchLDAPUsers);
 
@@ -57,6 +59,11 @@ export async function init(ctx) {
     $('#ldap-filter').value = rawConfig.ldap?.filter || '';
     $('#ldap-username-attr').value = rawConfig.ldap?.username_attribute || '';
 
+    $('#ldap-group-mode').value = rawConfig.ldap?.group_search_mode || '';
+    $('#ldap-group-base-dn').value = rawConfig.ldap?.group_base_dn || '';
+    $('#ldap-group-filter').value = rawConfig.ldap?.group_filter || '';
+    $('#ldap-group-member-attr').value = rawConfig.ldap?.group_member_attribute || '';
+
     if (ldapOn) loadWhitelist();
   }
 
@@ -72,13 +79,6 @@ export async function init(ctx) {
     rawConfig.web.ldap_enabled = ldapOn;
     rawConfig.web.auth_mode = ldapOn ? 'ldap' : 'local';
     rawConfig.web.password = $('#session-secret').value;
-    if (!rawConfig.ldap) rawConfig.ldap = {};
-    rawConfig.ldap.host = $('#ldap-host').value;
-    rawConfig.ldap.bind_dn = $('#ldap-bind-dn').value;
-    rawConfig.ldap.bind_password = $('#ldap-bind-password').value;
-    rawConfig.ldap.base_dn = $('#ldap-base-dn').value;
-    rawConfig.ldap.filter = $('#ldap-filter').value;
-    rawConfig.ldap.username_attribute = $('#ldap-username-attr').value;
     try {
       var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
       showMsg('#auth-msg', res.message || res.error, res.success);
@@ -98,6 +98,27 @@ export async function init(ctx) {
       var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
       showMsg('#auth-msg', res.message || res.error, res.success);
     } catch (e) { showMsg('#auth-msg', e.message, false); }
+  }
+
+  async function saveGroupConfig() {
+    showMsg('#sync-groups-msg', '保存中...', true);
+    if (!rawConfig.ldap) rawConfig.ldap = {};
+    rawConfig.ldap.group_search_mode = $('#ldap-group-mode').value;
+    rawConfig.ldap.group_base_dn = $('#ldap-group-base-dn').value;
+    rawConfig.ldap.group_filter = $('#ldap-group-filter').value;
+    rawConfig.ldap.group_member_attribute = $('#ldap-group-member-attr').value;
+    try {
+      var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
+      showMsg('#sync-groups-msg', res.message || res.error, res.success);
+    } catch (e) { showMsg('#sync-groups-msg', e.message, false); }
+  }
+
+  async function syncLDAPGroups() {
+    showMsg('#sync-groups-msg', '同步中...', true);
+    try {
+      var res = await Api.post('/api/admin/auth/sync-groups', {});
+      showMsg('#sync-groups-msg', res.message || res.error, res.success);
+    } catch (e) { showMsg('#sync-groups-msg', e.message, false); }
   }
 
   async function testLDAP() {

@@ -147,7 +147,7 @@ func Sync(cfg *config.GlobalConfig) error {
         continue
       }
 
-      if err := user.ApplyConfigToJSON(cfg, picoclawDir); err != nil {
+      if err := user.ApplyConfigToJSON(cfg, picoclawDir, u); err != nil {
         fmt.Fprintf(os.Stderr, "  [失败] %s: %v\n", u, err)
         continue
       }

@@ -7,6 +7,7 @@ import (
   "path/filepath"
   "regexp"
   "sort"
+  "strings"
   "time"
 
   "gopkg.in/yaml.v3"
@@ -165,6 +166,10 @@ func InitUser(cfg *config.GlobalConfig, username string, imageTag string) error 
     if err := auth.UpsertContainer(rec); err != nil {
       return fmt.Errorf("写入数据库失败 %s: %w", username, err)
     }
+    // 生成 MCP token
+    if _, err := auth.GenerateMCPToken(username); err != nil {
+      fmt.Printf("  [警告] %s: 生成 MCP token 失败: %v\n", username, err)
+    }
   }
 
   if existing {
@@ -283,8 +288,8 @@ func GetArchivedUsers(cfg *config.GlobalConfig) ([]string, error) {
 // 用户配置文件操作
 // ============================================================
 
-// ApplyConfigToJSON 将全局 picoclaw 配置合并到用户的 config.json
-func ApplyConfigToJSON(cfg *config.GlobalConfig, picoclawDir string) error {
+// ApplyConfigToJSON 将全局 picoclaw 配置合并到用户的 config.json，并注入 MCP 配置
+func ApplyConfigToJSON(cfg *config.GlobalConfig, picoclawDir string, username string) error {
   configPath := filepath.Join(picoclawDir, "config.json")
 
   existing := make(map[string]interface{})
@@ -303,12 +308,57 @@ func ApplyConfigToJSON(cfg *config.GlobalConfig, picoclawDir string) error {
 
   merged := util.MergeMap(existing, globalPico)
 
+  // 注入 chrome-devtools-mcp 配置
+  mcpToken, _ := auth.GetMCPToken(username)
+  if mcpToken != "" {
+    injectMCPConfig(merged, mcpToken, cfg)
+  }
+
   jsonData, err := json.MarshalIndent(merged, "", "  ")
   if err != nil {
     return fmt.Errorf("格式化 config.json 失败: %w", err)
   }
 
   return os.WriteFile(configPath, jsonData, 0644)
+}
+
+// injectMCPConfig 向 config.json 注入 chrome-devtools-mcp 的 wsEndpoint + wsHeaders
+func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config.GlobalConfig) {
+  tools, _ := config["tools"].(map[string]interface{})
+  if tools == nil {
+    tools = make(map[string]interface{})
+    config["tools"] = tools
+  }
+  mcp, _ := tools["mcp"].(map[string]interface{})
+  if mcp == nil {
+    mcp = make(map[string]interface{})
+    tools["mcp"] = mcp
+  }
+  servers, _ := mcp["servers"].(map[string]interface{})
+  if servers == nil {
+    servers = make(map[string]interface{})
+    mcp["servers"] = servers
+  }
+
+  // 获取 PicoAide 监听地址作为容器内的网关地址
+  listenAddr := cfg.Web.Listen
+  host := "100.64.0.1"
+  if parts := strings.SplitN(listenAddr, ":", 2); len(parts) == 2 && parts[0] != "" && parts[0] != ":" {
+    host = parts[0]
+  }
+
+  wsHeaders := fmt.Sprintf(`{"Authorization":"Bearer %s"}`, mcpToken)
+  servers["chrome-devtools"] = map[string]interface{}{
+    "enabled": true,
+    "command": "npx",
+    "args": []string{
+      "chrome-devtools-mcp@latest",
+      "--ws-endpoint",
+      "ws://" + host + "/api/mcp/cdp",
+      "--ws-headers",
+      wsHeaders,
+    },
+  }
 }
 
 // ApplySecurityToYAML 将全局安全配置合并到用户的 .security.yml

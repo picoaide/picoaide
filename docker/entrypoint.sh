@@ -11,14 +11,9 @@ if [ -f ~/.zshrc ] && ! grep -q "NVM_DIR" ~/.zshrc; then
     echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' >> ~/.zshrc
 fi
 
-# 检查 /root 目录是否为空或只包含挂载的目录
-# 如果是，从备份目录复制所有文件
-file_count=$(ls -la /root | wc -l)
-if [ "$file_count" -le 3 ]; then
-    echo "Initializing /root directory from backup..."
-    cp -a /root.original/. /root/
-    truncate -s 0 /root/.ssh/authorized_keys
-fi
+# 从备份目录复制文件到 /root（不覆盖已有文件，包括隐藏目录）
+cp -an /root.original/. /root/
+truncate -s 0 /root/.ssh/authorized_keys
 
 # 生成RSA密钥（如果不存在）
 if [ ! -f /root/.ssh/id_rsa ]; then

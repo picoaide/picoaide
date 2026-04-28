@@ -11,7 +11,11 @@
 <h3>部署技能</h3>
 <div class="row">
   <select id="deploy-skill"><option value="">所有技能</option></select>
-  <select id="deploy-user"><option value="">所有用户</option></select>
+  <select id="deploy-target">
+    <option value="all">所有用户</option>
+    <optgroup label="按用户" id="deploy-user-group"></optgroup>
+    <optgroup label="按组" id="deploy-group-group"></optgroup>
+  </select>
   <button class="btn btn-primary" id="deploy-btn">部署</button>
 </div>
 <div id="deploy-msg" class="msg"></div>

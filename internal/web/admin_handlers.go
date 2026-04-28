@@ -6,6 +6,7 @@ import (
   "encoding/json"
   "fmt"
   "io"
+  "log"
   "net/http"
   "os"
   "os/exec"
@@ -275,6 +276,22 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
     }
     auth.UpdateContainerStatus(username, "running")
 
+    // 配置下发：确保 config.json 包含全局配置和 MCP 注入
+    picoclawDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw")
+    configPath := filepath.Join(picoclawDir, "config.json")
+    if _, err := os.Stat(configPath); err == nil {
+      // config.json 已存在，直接下发（文件挂载，无需重启）
+      if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
+        log.Printf("[config] %s: 下发配置失败: %v", username, err)
+      }
+      if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
+        log.Printf("[config] %s: 下发安全配置失败: %v", username, err)
+      }
+    } else {
+      // config.json 尚未生成，异步等待后下发并重启
+      go s.applyConfigAsync(username, picoclawDir, rec.ContainerID)
+    }
+
   case "stop":
     if rec.ContainerID == "" {
       writeError(w, http.StatusBadRequest, "容器未创建")
@@ -300,6 +317,188 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
 
   labels := map[string]string{"start": "启动", "stop": "停止", "restart": "重启"}
   writeSuccess(w, fmt.Sprintf("容器已%s", labels[action]))
+}
+
+// applyConfigAsync 异步等待 config.json 生成后下发配置并重启容器
+func (s *Server) applyConfigAsync(username, picoclawDir, containerID string) {
+  configPath := filepath.Join(picoclawDir, "config.json")
+  log.Printf("[config] %s: 等待 config.json 生成...", username)
+
+  // 轮询等待 config.json 出现，最多 60 秒
+  for i := 0; i < 30; i++ {
+    time.Sleep(2 * time.Second)
+    if _, err := os.Stat(configPath); err == nil {
+      break
+    }
+    if i == 29 {
+      log.Printf("[config] %s: 等待超时，config.json 未生成", username)
+      return
+    }
+  }
+
+  // 下发配置
+  if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
+    log.Printf("[config] %s: 下发配置失败: %v", username, err)
+    return
+  }
+  if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
+    log.Printf("[config] %s: 下发安全配置失败: %v", username, err)
+  }
+  log.Printf("[config] %s: 配置已下发", username)
+
+  // 重启容器使配置生效
+  ctx := context.Background()
+  if err := dockerpkg.Restart(ctx, containerID); err != nil {
+    log.Printf("[config] %s: 重启失败: %v", username, err)
+    return
+  }
+  log.Printf("[config] %s: 容器已重启，配置生效", username)
+}
+
+// applyConfigToUser 向单个用户下发配置并重启容器
+func (s *Server) applyConfigToUser(username string) error {
+  picoclawDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw")
+  configPath := filepath.Join(picoclawDir, "config.json")
+
+  // config.json 不存在说明容器还没启动过，跳过
+  if _, err := os.Stat(configPath); err != nil {
+    return fmt.Errorf("config.json 不存在")
+  }
+
+  if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
+    return fmt.Errorf("下发配置失败: %w", err)
+  }
+  if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
+    log.Printf("[config] %s: 下发安全配置失败: %v", username, err)
+  }
+
+  // 重启容器使配置生效
+  rec, err := auth.GetContainerByUsername(username)
+  if err != nil || rec == nil || rec.ContainerID == "" {
+    return fmt.Errorf("容器记录不存在")
+  }
+  if rec.Status != "running" {
+    return nil // 容器未运行，下次启动时自动下发
+  }
+  ctx := context.Background()
+  if err := dockerpkg.Restart(ctx, rec.ContainerID); err != nil {
+    return fmt.Errorf("重启失败: %w", err)
+  }
+  return nil
+}
+
+// handleAdminConfigApply 下发配置到指定用户/组/全部用户并重启容器
+func (s *Server) handleAdminConfigApply(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+
+  username := r.FormValue("username")
+  group := r.FormValue("group")
+
+  var targets []string
+  var err error
+
+  switch {
+  case username != "":
+    targets = []string{username}
+  case group != "":
+    targets, err = auth.GetGroupMembers(group)
+    if err != nil {
+      writeError(w, http.StatusBadRequest, "获取组成员失败: "+err.Error())
+      return
+    }
+    if len(targets) == 0 {
+      writeError(w, http.StatusBadRequest, "组 "+group+" 没有成员")
+      return
+    }
+  default:
+    // 不指定用户和组时，下发到所有用户
+    targets, err = user.GetUserList(s.cfg)
+    if err != nil {
+      writeError(w, http.StatusInternalServerError, "获取用户列表失败: "+err.Error())
+      return
+    }
+  }
+
+  var success []string
+  var failed []string
+
+  for _, u := range targets {
+    if err := s.applyConfigToUser(u); err != nil {
+      log.Printf("[config] %s: 下发失败: %v", u, err)
+      failed = append(failed, u+"("+err.Error()+")")
+    } else {
+      log.Printf("[config] %s: 配置已下发并重启", u)
+      success = append(success, u)
+    }
+  }
+
+  msg := fmt.Sprintf("配置下发完成：%d 成功", len(success))
+  if len(failed) > 0 {
+    msg += fmt.Sprintf("，%d 失败：%s", len(failed), strings.Join(failed, ", "))
+  }
+  writeSuccess(w, msg)
+}
+
+// handleAdminContainerLogs 返回容器日志
+func (s *Server) handleAdminContainerLogs(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "GET" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+    return
+  }
+  if !s.dockerAvailable {
+    writeError(w, http.StatusServiceUnavailable, "Docker 服务不可用")
+    return
+  }
+
+  username := r.URL.Query().Get("username")
+  if username == "" {
+    writeError(w, http.StatusBadRequest, "用户名不能为空")
+    return
+  }
+
+  rec, err := auth.GetContainerByUsername(username)
+  if err != nil || rec == nil {
+    writeError(w, http.StatusBadRequest, "用户 "+username+" 未初始化")
+    return
+  }
+  if rec.ContainerID == "" {
+    writeError(w, http.StatusBadRequest, "容器未创建")
+    return
+  }
+
+  tail := r.URL.Query().Get("tail")
+
+  ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+  defer cancel()
+
+  logs, err := dockerpkg.ContainerLogs(ctx, rec.ContainerID, tail)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, err.Error())
+    return
+  }
+
+  writeJSON(w, http.StatusOK, struct {
+    Success  bool   `json:"success"`
+    Username string `json:"username"`
+    Logs     string `json:"logs"`
+  }{
+    Success:  true,
+    Username: username,
+    Logs:     logs,
+  })
 }
 
 // ============================================================
@@ -534,6 +733,7 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
 
   skillName := strings.TrimSpace(r.FormValue("skill_name"))
   targetUser := strings.TrimSpace(r.FormValue("username"))
+  targetGroup := strings.TrimSpace(r.FormValue("group_name"))
 
   skillDir := config.SkillsDirPath()
   entries, err := os.ReadDir(skillDir)
@@ -574,6 +774,15 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
     if err := deployFn(targetUser); err != nil {
       writeError(w, http.StatusInternalServerError, err.Error())
       return
+    }
+  } else if targetGroup != "" {
+    members, err := auth.GetGroupMembersForDeploy(targetGroup)
+    if err != nil {
+      writeError(w, http.StatusBadRequest, "获取组成员失败: "+err.Error())
+      return
+    }
+    for _, m := range members {
+      deployFn(m)
     }
   } else {
     if err := user.ForEachUser(s.cfg, deployFn); err != nil {
@@ -924,6 +1133,307 @@ func (s *Server) handleAdminSkillsReposList(w http.ResponseWriter, r *http.Reque
     Success bool         `json:"success"`
     Skills  []SkillEntry `json:"skills"`
   }{true, skills})
+}
+
+// ============================================================
+// 用户组管理
+// ============================================================
+
+func (s *Server) handleAdminGroups(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "GET" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+    return
+  }
+  groups, err := auth.ListGroups()
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, err.Error())
+    return
+  }
+  if groups == nil {
+    groups = []auth.GroupInfo{}
+  }
+  writeJSON(w, http.StatusOK, struct {
+    Success bool              `json:"success"`
+    Groups  []auth.GroupInfo  `json:"groups"`
+  }{true, groups})
+}
+
+func (s *Server) handleAdminGroupCreate(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+  name := strings.TrimSpace(r.FormValue("name"))
+  description := strings.TrimSpace(r.FormValue("description"))
+  if name == "" {
+    writeError(w, http.StatusBadRequest, "组名不能为空")
+    return
+  }
+  if err := auth.CreateGroup(name, "local", description); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+  writeSuccess(w, "组 "+name+" 创建成功")
+}
+
+func (s *Server) handleAdminGroupDelete(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+  name := strings.TrimSpace(r.FormValue("name"))
+  if name == "" {
+    writeError(w, http.StatusBadRequest, "组名不能为空")
+    return
+  }
+  if err := auth.DeleteGroup(name); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+  writeSuccess(w, "组 "+name+" 已删除")
+}
+
+func (s *Server) handleAdminGroupMembersAdd(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+  groupName := strings.TrimSpace(r.FormValue("group_name"))
+  usersStr := strings.TrimSpace(r.FormValue("usernames"))
+  if groupName == "" || usersStr == "" {
+    writeError(w, http.StatusBadRequest, "组名和用户名不能为空")
+    return
+  }
+  usernames := strings.Split(usersStr, ",")
+  var trimmed []string
+  for _, u := range usernames {
+    u = strings.TrimSpace(u)
+    if u != "" {
+      trimmed = append(trimmed, u)
+    }
+  }
+  if len(trimmed) == 0 {
+    writeError(w, http.StatusBadRequest, "用户名不能为空")
+    return
+  }
+  if err := auth.AddUsersToGroup(groupName, trimmed); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+  writeSuccess(w, fmt.Sprintf("已添加 %d 个用户到组 %s", len(trimmed), groupName))
+}
+
+func (s *Server) handleAdminGroupMembersRemove(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+  groupName := strings.TrimSpace(r.FormValue("group_name"))
+  username := strings.TrimSpace(r.FormValue("username"))
+  if groupName == "" || username == "" {
+    writeError(w, http.StatusBadRequest, "组名和用户名不能为空")
+    return
+  }
+  if err := auth.RemoveUserFromGroup(groupName, username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+  writeSuccess(w, "已从组 "+groupName+" 移除 "+username)
+}
+
+func (s *Server) handleAdminGroupSkillsBind(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+  groupName := strings.TrimSpace(r.FormValue("group_name"))
+  skillName := strings.TrimSpace(r.FormValue("skill_name"))
+  if groupName == "" || skillName == "" {
+    writeError(w, http.StatusBadRequest, "组名和技能名不能为空")
+    return
+  }
+  if err := auth.BindSkillToGroup(groupName, skillName); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+
+  // 绑定后立即部署到组内所有用户
+  members, err := auth.GetGroupMembersForDeploy(groupName)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, "绑定成功但获取组成员失败: "+err.Error())
+    return
+  }
+  skillDir := config.SkillsDirPath()
+  userCount := 0
+  for _, username := range members {
+    targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills")
+    srcPath := filepath.Join(skillDir, skillName)
+    dstPath := filepath.Join(targetDir, skillName)
+    if err := util.CopyDir(srcPath, dstPath); err == nil {
+      userCount++
+    }
+  }
+
+  writeJSON(w, http.StatusOK, struct {
+    Success    bool   `json:"success"`
+    Message    string `json:"message"`
+    UserCount  int    `json:"user_count"`
+  }{true, fmt.Sprintf("技能 %s 已绑定到组 %s 并部署到 %d 个用户", skillName, groupName, userCount), userCount})
+}
+
+func (s *Server) handleAdminGroupSkillsUnbind(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+  groupName := strings.TrimSpace(r.FormValue("group_name"))
+  skillName := strings.TrimSpace(r.FormValue("skill_name"))
+  if groupName == "" || skillName == "" {
+    writeError(w, http.StatusBadRequest, "组名和技能名不能为空")
+    return
+  }
+  if err := auth.UnbindSkillFromGroup(groupName, skillName); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+  writeSuccess(w, "已从组 "+groupName+" 解绑技能 "+skillName)
+}
+
+func (s *Server) handleAdminGroupMembers(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "GET" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+    return
+  }
+  groupName := r.URL.Query().Get("name")
+  if groupName == "" {
+    writeError(w, http.StatusBadRequest, "组名不能为空")
+    return
+  }
+  members, err := auth.GetGroupMembers(groupName)
+  if err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+  skills, err := auth.GetGroupSkills(groupName)
+  if err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+  if members == nil {
+    members = []string{}
+  }
+  if skills == nil {
+    skills = []string{}
+  }
+  writeJSON(w, http.StatusOK, struct {
+    Success  bool     `json:"success"`
+    Members  []string `json:"members"`
+    Skills   []string `json:"skills"`
+  }{true, members, skills})
+}
+
+// handleAdminAuthSyncGroups 手动触发 LDAP 组同步
+func (s *Server) handleAdminAuthSyncGroups(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+  if !s.cfg.LDAPEnabled() {
+    writeError(w, http.StatusBadRequest, "LDAP 未启用")
+    return
+  }
+
+  groupMap, err := ldap.FetchAllGroupsWithMembers(s.cfg)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, "获取 LDAP 组失败: "+err.Error())
+    return
+  }
+
+  // 获取白名单
+  whitelist, _ := user.LoadWhitelist()
+
+  groupCount := 0
+  userCount := 0
+  for groupName, members := range groupMap {
+    // 创建组（如果不存在）
+    auth.CreateGroup(groupName, "ldap", "")
+    groupCount++
+
+    // 过滤白名单用户
+    var filtered []string
+    for _, m := range members {
+      if whitelist == nil || whitelist[m] {
+        filtered = append(filtered, m)
+      }
+    }
+
+    if len(filtered) > 0 {
+      auth.AddUsersToGroup(groupName, filtered)
+      userCount += len(filtered)
+    }
+  }
+
+  writeJSON(w, http.StatusOK, struct {
+    Success     bool   `json:"success"`
+    Message     string `json:"message"`
+    GroupCount  int    `json:"group_count"`
+    MemberCount int    `json:"member_count"`
+  }{true, fmt.Sprintf("同步完成，发现 %d 个组，共 %d 个组成员关系", groupCount, userCount), groupCount, userCount})
 }
 
 // ============================================================

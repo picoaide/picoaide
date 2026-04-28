@@ -45,18 +45,38 @@ export async function init(ctx) {
 
     try {
       const uData = await Api.get('/api/admin/users');
-      const userSel = ctx.$('#deploy-user');
-      userSel.innerHTML = '<option value="">所有用户</option>';
-      for (const u of (uData.users || [])) userSel.innerHTML += '<option value="' + esc(u.username) + '">' + esc(u.username) + '</option>';
+      const userGroup = ctx.$('#deploy-user-group');
+      userGroup.innerHTML = '';
+      for (const u of (uData.users || [])) {
+        const opt = document.createElement('option');
+        opt.value = 'user:' + u.username;
+        opt.textContent = u.username;
+        userGroup.appendChild(opt);
+      }
+    } catch {}
+
+    try {
+      const gData = await Api.get('/api/admin/groups');
+      const groupGroup = ctx.$('#deploy-group-group');
+      groupGroup.innerHTML = '';
+      for (const g of (gData.groups || [])) {
+        const opt = document.createElement('option');
+        opt.value = 'group:' + g.name;
+        opt.textContent = g.name;
+        groupGroup.appendChild(opt);
+      }
     } catch {}
   }
 
   async function deploySkills() {
     const params = {};
     const skill = ctx.$('#deploy-skill').value;
-    const username = ctx.$('#deploy-user').value;
+    const target = ctx.$('#deploy-target').value;
     if (skill) params.skill_name = skill;
-    if (username) params.username = username;
+    if (target && target !== 'all') {
+      if (target.startsWith('user:')) params.username = target.slice(5);
+      else if (target.startsWith('group:')) params.group_name = target.slice(6);
+    }
     const res = await Api.post('/api/admin/skills/deploy', params);
     showMsg('#deploy-msg', res.message || res.error, res.success);
   }
