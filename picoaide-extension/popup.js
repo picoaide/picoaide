@@ -54,7 +54,6 @@ function showMain(username) {
   userDisplay.textContent = username;
   setStatus('已连接', 'ok');
   checkAdminRole();
-  updateCdpUI();
 }
 
 async function checkAdminRole() {
@@ -65,11 +64,13 @@ async function checkAdminRole() {
       syncBtn.style.display = 'none';
       cdpBtn.style.display = 'none';
       manageBtn.style.display = 'none';
+      setStatus('超级管理员', 'ok');
     } else {
       adminBtn.style.display = 'none';
       syncBtn.style.display = '';
       cdpBtn.style.display = '';
       manageBtn.style.display = '';
+      updateCdpUI();
     }
   } catch {
     adminBtn.style.display = 'none';
