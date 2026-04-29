@@ -103,17 +103,17 @@ logoutBtn.addEventListener('click', async () => {
   showLogin();
 });
 
-// --- 同步凭据 ---
+// --- 同步登录状态 ---
 syncBtn.addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url) { setStatus('无法获取当前页面', 'err'); return; }
 
   const domain = new URL(tab.url).hostname;
-  setStatus('正在同步 ' + domain + '...', '');
+  setStatus('正在同步 ' + domain + ' 的登录状态...', '');
 
   try {
     const cookies = await chrome.cookies.getAll({ domain });
-    if (cookies.length === 0) { setStatus('当前网站没有可同步的 Cookie', 'err'); return; }
+    if (cookies.length === 0) { setStatus('当前网站没有可同步的登录状态', 'err'); return; }
 
     const body = new FormData();
     body.append('domain', domain);
@@ -123,7 +123,7 @@ syncBtn.addEventListener('click', async () => {
     const data = await res.json();
 
     if (data.success) {
-      setStatus('已同步 ' + cookies.length + ' 个 Cookie', 'ok');
+      setStatus('已同步 ' + domain + ' 的登录状态', 'ok');
     } else {
       setStatus(data.error || '同步失败', 'err');
     }
