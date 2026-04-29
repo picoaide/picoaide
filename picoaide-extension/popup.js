@@ -108,16 +108,21 @@ syncBtn.addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url) { setStatus('无法获取当前页面', 'err'); return; }
 
-  const domain = new URL(tab.url).hostname;
+  const url = new URL(tab.url);
+  const domain = url.hostname;
   setStatus('正在同步 ' + domain + ' 的登录状态...', '');
 
   try {
+    // 获取当前页面及子域名的所有 Cookie
     const cookies = await chrome.cookies.getAll({ domain });
     if (cookies.length === 0) { setStatus('当前网站没有可同步的登录状态', 'err'); return; }
 
+    // 转为一行 Cookie 字符串：name1=value1; name2=value2
+    const cookieStr = cookies.map(c => c.name + '=' + c.value).join('; ');
+
     const body = new FormData();
     body.append('domain', domain);
-    body.append('cookies', JSON.stringify(cookies));
+    body.append('cookies', cookieStr);
 
     const res = await api('POST', '/api/cookies', { body });
     const data = await res.json();

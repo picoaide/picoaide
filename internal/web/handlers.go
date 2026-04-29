@@ -167,6 +167,38 @@ func (s *Server) handleCSRF(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================
+// Cookie 同步 Handler
+// ============================================================
+
+// handleCookies 将当前页面的 Cookie 写入用户的 .security.yml
+func (s *Server) handleCookies(w http.ResponseWriter, r *http.Request) {
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+
+  username := s.requireAuth(w, r)
+  if username == "" {
+    return
+  }
+
+  domain := strings.TrimSpace(r.FormValue("domain"))
+  cookieStr := strings.TrimSpace(r.FormValue("cookies"))
+
+  if domain == "" || cookieStr == "" {
+    writeError(w, http.StatusBadRequest, "域名和 Cookie 不能为空")
+    return
+  }
+
+  if err := user.SyncCookies(s.cfg, username, domain, cookieStr); err != nil {
+    writeError(w, http.StatusInternalServerError, "同步失败: "+err.Error())
+    return
+  }
+
+  writeSuccess(w, "已同步 "+domain+" 的登录状态")
+}
+
+// ============================================================
 // 钉钉配置 Handler
 // ============================================================
 

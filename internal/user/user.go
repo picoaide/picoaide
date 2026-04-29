@@ -293,6 +293,37 @@ func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config
   delete(servers, "chrome-devtools")
 }
 
+// SyncCookies 将域名对应的 Cookie 字符串写入用户的 .security.yml
+// 格式：cookies: { domain.com: "name1=val1; name2=val2" }
+func SyncCookies(cfg *config.GlobalConfig, username, domain, cookieStr string) error {
+  picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
+  if err := os.MkdirAll(picoclawDir, 0755); err != nil {
+    return fmt.Errorf("创建目录失败: %w", err)
+  }
+
+  securityPath := filepath.Join(picoclawDir, ".security.yml")
+
+  secMap := make(map[string]interface{})
+  if data, err := os.ReadFile(securityPath); err == nil {
+    yaml.Unmarshal(data, &secMap)
+  }
+
+  cookiesMap, _ := secMap["cookies"].(map[string]interface{})
+  if cookiesMap == nil {
+    cookiesMap = make(map[string]interface{})
+  }
+
+  cookiesMap[domain] = cookieStr
+  secMap["cookies"] = cookiesMap
+
+  data, err := yaml.Marshal(secMap)
+  if err != nil {
+    return fmt.Errorf("序列化失败: %w", err)
+  }
+
+  return os.WriteFile(securityPath, data, 0600)
+}
+
 // ApplySecurityToYAML 将全局安全配置合并到用户的 .security.yml
 func ApplySecurityToYAML(cfg *config.GlobalConfig, picoclawDir string) error {
   securityPath := filepath.Join(picoclawDir, ".security.yml")

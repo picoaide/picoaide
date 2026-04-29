@@ -205,6 +205,8 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/files/delete", s.secureHeaders(s.handleFileDelete))
   mux.HandleFunc("/api/files/mkdir", s.secureHeaders(s.handleFileMkdir))
   mux.HandleFunc("/api/files/edit", s.secureHeaders(s.handleFileEdit))
+  // Cookie 同步（写入用户 .security.yml）
+  mux.HandleFunc("/api/cookies", s.secureHeaders(s.handleCookies))
   // CSRF token
   mux.HandleFunc("/api/csrf", s.secureHeaders(s.handleCSRF))
   // MCP token（Extension 获取认证 token）
