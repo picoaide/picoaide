@@ -3,6 +3,7 @@
 
 let ws = null;
 let keepaliveTimer = null;
+let swPort = null; // 长连接端口，保持 Service Worker 存活
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'offscreen-connect') {
@@ -29,6 +30,32 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
+// 保持 Service Worker 存活：建立长连接端口
+function connectSWKeepalive() {
+  try {
+    swPort = chrome.runtime.connect({ name: 'sw-keepalive' });
+    swPort.onDisconnect.addListener(() => {
+      swPort = null;
+      // Service Worker 被杀，尝试重连（会唤醒 SW）
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        setTimeout(connectSWKeepalive, 1000);
+      }
+    });
+  } catch {
+    swPort = null;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      setTimeout(connectSWKeepalive, 2000);
+    }
+  }
+}
+
+function disconnectSWKeepalive() {
+  if (swPort) {
+    try { swPort.disconnect(); } catch {}
+    swPort = null;
+  }
+}
+
 function connectWebSocket(url) {
   if (ws) {
     try { ws.close(); } catch {}
@@ -43,6 +70,7 @@ function connectWebSocket(url) {
   }
 
   ws.onopen = () => {
+    connectSWKeepalive();
     chrome.runtime.sendMessage({ type: 'offscreen-open' });
     startKeepalive();
   };
@@ -52,6 +80,7 @@ function connectWebSocket(url) {
   };
 
   ws.onclose = (event) => {
+    disconnectSWKeepalive();
     stopKeepalive();
     chrome.runtime.sendMessage({ type: 'offscreen-close', code: event.code });
     ws = null;
@@ -63,6 +92,7 @@ function connectWebSocket(url) {
 }
 
 function disconnectWebSocket() {
+  disconnectSWKeepalive();
   stopKeepalive();
   if (ws) {
     try { ws.close(); } catch {}

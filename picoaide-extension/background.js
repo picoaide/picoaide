@@ -487,6 +487,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return false;
 });
 
+// ─── Service Worker 存活保持 ────────────────────────────────────────────────────
+
+// offscreen 通过 chrome.runtime.connect 建立长连接端口，保持 Service Worker 存活
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'sw-keepalive') {
+    // 端口存在期间 Service Worker 不会被杀
+    port.onDisconnect.addListener(() => {});
+  }
+});
+
 // ─── Service Worker 启动时恢复状态 ──────────────────────────────────────────────
 
 // 恢复状态 Promise，cdpStatus 等待它完成后再响应
