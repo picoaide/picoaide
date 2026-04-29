@@ -448,12 +448,23 @@ async function cdpDisable() {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.action === 'cdpStatus') {
-    sendResponse({
-      active,
-      connectedTabIds: currentTabId ? [currentTabId] : [],
-      tabCount: currentTabId ? 1 : 0,
+    if (_restoreDone) {
+      sendResponse({
+        active,
+        connectedTabIds: currentTabId ? [currentTabId] : [],
+        tabCount: currentTabId ? 1 : 0,
+      });
+      return false;
+    }
+    // 等待状态恢复完成
+    _restoreP.then(() => {
+      sendResponse({
+        active,
+        connectedTabIds: currentTabId ? [currentTabId] : [],
+        tabCount: currentTabId ? 1 : 0,
+      });
     });
-    return false;
+    return true;
   }
 
   if (msg.action === 'cdpToggle') {
@@ -476,6 +487,38 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return false;
 });
 
-// ─── Service Worker 启动时清理残留标签组 ────────────────────────────────────────
+// ─── Service Worker 启动时恢复状态 ──────────────────────────────────────────────
 
-cleanupStaleGroups().catch(() => {});
+// 恢复状态 Promise，cdpStatus 等待它完成后再响应
+let _restoreDone = false;
+let _restoreResolve;
+const _restoreP = new Promise(r => { _restoreResolve = r; });
+
+async function restoreState() {
+  try {
+    // 检查 offscreen document 是否存在
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: [chrome.runtime.getURL('offscreen.html')]
+    });
+    if (contexts.length === 0) return;
+
+    // 检查 WebSocket 是否仍连接
+    const resp = await chrome.runtime.sendMessage({ type: 'offscreen-status' });
+    if (resp && resp.connected) {
+      active = true;
+      updateBadgeConnected();
+      if (currentTabId) {
+        addTabToGroup(currentTabId).catch(() => {});
+        updateTabBadge(currentTabId).catch(() => {});
+      }
+    }
+  } catch {}
+}
+
+(async () => {
+  await restoreState();
+  if (!active) cleanupStaleGroups().catch(() => {});
+  _restoreDone = true;
+  _restoreResolve();
+})();
