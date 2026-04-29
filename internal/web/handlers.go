@@ -108,6 +108,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
     return
   }
 
+  // 首次登录自动初始化（创建容器记录，分配 IP）
+  if rec, _ := auth.GetContainerByUsername(username); rec == nil {
+    go user.InitUser(s.cfg, username, "")
+  }
+
   // 异步同步用户的 LDAP 组
   if s.cfg.LDAP.GroupSearchMode != "" {
     go func() {

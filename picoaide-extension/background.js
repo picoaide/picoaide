@@ -130,6 +130,10 @@ function updateBadgeConnected() {
 
 function updateBadgeOff() {
   chrome.action.setBadgeText({ text: '' });
+  // 清除特定标签页的徽章覆盖（updateTabBadge 设置的）
+  if (currentTabId) {
+    chrome.action.setBadgeText({ tabId: currentTabId, text: '' }).catch(() => {});
+  }
 }
 
 async function updateTabBadge(tabId) {
@@ -433,10 +437,10 @@ async function cdpEnable() {
 }
 
 async function cdpDisable() {
+  if (!active) return;
+  active = false;
   sendToOffscreen('offscreen-disconnect', {});
   await ungroupAll();
-  active = false;
-  // 断线重连时保留 currentTabId
   updateBadgeOff();
 }
 
