@@ -6,7 +6,7 @@ export async function init(ctx) {
     Api.get('/api/admin/skills').catch(() => ({ skills: [] })),
   ]);
 
-  const users = usersData.users || [];
+  const users = (usersData.users || []).filter(u => u.role !== 'superadmin');
   const running = users.filter(u => u.status && u.status.startsWith('Up')).length;
   const noImage = users.filter(u => !u.image_ready).length;
 
