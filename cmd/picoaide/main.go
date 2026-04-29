@@ -397,6 +397,11 @@ func runFirstRun(reader *bufio.Reader) {
   }
   fmt.Println()
 
+  // 默认本地认证模式
+  cfg.Web.AuthMode = "local"
+  falseVal := false
+  cfg.Web.LDAPEnabled = &falseVal
+
   // 保存配置
   if err := config.SaveToDB(cfg, "system"); err != nil {
     fmt.Fprintf(os.Stderr, "保存配置失败: %v\n", err)
