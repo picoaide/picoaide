@@ -382,7 +382,67 @@ func ListRegistryTags(ctx context.Context, repo string) ([]string, error) {
   return result.Tags, nil
 }
 
-// parseWWWAuthenticate 从 WWW-Authenticate 头提取 token URL
+// ListTencentRegistryTags 从腾讯云仓库获取镜像标签
+func ListTencentRegistryTags(ctx context.Context, repo string) ([]string, error) {
+  url := fmt.Sprintf("https://hkccr.ccs.tencentyun.com/v2/%s/tags/list", repo)
+  req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+  if err != nil {
+    return nil, err
+  }
+  resp, err := http.DefaultClient.Do(req)
+  if err != nil {
+    return nil, fmt.Errorf("请求腾讯云仓库失败: %w", err)
+  }
+  defer resp.Body.Close()
+
+  if resp.StatusCode == 401 {
+    authHeader := resp.Header.Get("Www-Authenticate")
+    tokenURL := parseWWWAuthenticate(authHeader)
+    if tokenURL == "" {
+      return nil, fmt.Errorf("腾讯云仓库需要认证但无法解析认证信息")
+    }
+    tReq, _ := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
+    tResp, err := http.DefaultClient.Do(tReq)
+    if err != nil {
+      return nil, fmt.Errorf("获取腾讯云 token 失败: %w", err)
+    }
+    defer tResp.Body.Close()
+    var tokenData struct {
+      Token string `json:"token"`
+    }
+    if err := json.NewDecoder(tResp.Body).Decode(&tokenData); err != nil || tokenData.Token == "" {
+      return nil, fmt.Errorf("解析腾讯云 token 失败")
+    }
+    req, _ = http.NewRequestWithContext(ctx, "GET", url, nil)
+    req.Header.Set("Authorization", "Bearer "+tokenData.Token)
+    resp, err = http.DefaultClient.Do(req)
+    if err != nil {
+      return nil, fmt.Errorf("请求腾讯云仓库失败: %w", err)
+    }
+    defer resp.Body.Close()
+  }
+
+  if resp.StatusCode != 200 {
+    body, _ := io.ReadAll(resp.Body)
+    return nil, fmt.Errorf("腾讯云返回 %d: %s", resp.StatusCode, string(body))
+  }
+
+  var result struct {
+    Tags []string `json:"tags"`
+  }
+  if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+    return nil, fmt.Errorf("解析标签列表失败: %w", err)
+  }
+  return result.Tags, nil
+}
+
+// ListRegistryTagsForConfig 根据配置的 registry 类型查询远程标签
+func ListRegistryTagsForConfig(ctx context.Context, repo string, registry string) ([]string, error) {
+  if registry == "tencent" {
+    return ListTencentRegistryTags(ctx, repo)
+  }
+  return ListRegistryTags(ctx, repo)
+}
 func parseWWWAuthenticate(header string) string {
   // Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:repo:pull"
   parts := strings.Split(header, ",")

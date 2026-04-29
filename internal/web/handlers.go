@@ -80,8 +80,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
       // 统一认证模式下，非超管本地用户禁止登录
     } else {
       // 首次登录自动初始化（创建容器记录，分配 IP）
+      // 超管不需要容器
       if rec, _ := auth.GetContainerByUsername(username); rec == nil {
-        go user.InitUser(s.cfg, username, "")
+        if !auth.IsSuperadmin(username) {
+          go user.InitUser(s.cfg, username, "")
+        }
       }
 
       s.setSessionCookie(w, s.createSessionToken(username), 86400)
@@ -115,7 +118,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
   // 首次登录自动初始化（创建容器记录，分配 IP）
   if rec, _ := auth.GetContainerByUsername(username); rec == nil {
-    go user.InitUser(s.cfg, username, "")
+    if !auth.IsSuperadmin(username) {
+      go user.InitUser(s.cfg, username, "")
+    }
   }
 
   // 异步同步用户的 LDAP 组

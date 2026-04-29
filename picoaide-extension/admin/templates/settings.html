@@ -24,6 +24,17 @@
 <div class="card">
   <div class="card-header">Web 服务</div>
   <div class="field"><label>监听地址</label><input type="text" data-path="web.listen" placeholder=":80"></div>
+  <div class="field"><label>启用 HTTPS</label>
+    <select data-path="web.tls.enabled">
+      <option value="false">关闭</option>
+      <option value="true">开启</option>
+    </select>
+  </div>
+  <div class="grid-2">
+    <div class="field"><label>证书文件 (PEM)</label><input type="text" data-path="web.tls.cert_file" placeholder="/path/to/cert.pem"></div>
+    <div class="field"><label>私钥文件 (PEM)</label><input type="text" data-path="web.tls.key_file" placeholder="/path/to/key.pem"></div>
+  </div>
+  <p class="text-sm text-muted">启用 HTTPS 后需重启服务生效。监听地址改为 :443 可自动启用 80→443 重定向。</p>
 </div>
 
 <div class="card">

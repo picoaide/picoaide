@@ -171,8 +171,20 @@ func (s *Server) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  // 获取镜像标签参数
+  // 获取镜像标签参数，未指定时自动使用本地最新标签
   imageTag := r.FormValue("image_tag")
+  if imageTag == "" && s.dockerAvailable {
+    ctx := contextWithTimeout(10)
+    localTags, err := dockerpkg.ListLocalTags(ctx, s.cfg.Image.Name)
+    if err == nil && len(localTags) > 0 {
+      imageTag = localTags[len(localTags)-1]
+    }
+  }
+  if imageTag == "" {
+    auth.DeleteUser(username)
+    writeError(w, http.StatusBadRequest, "未指定镜像标签且本地无可用镜像，请先拉取镜像")
+    return
+  }
 
   // 创建用户容器目录
   if err := user.InitUser(s.cfg, username, imageTag); err != nil {
@@ -182,12 +194,17 @@ func (s *Server) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
     return
   }
 
+  // 异步启动容器并下发配置
+  if s.dockerAvailable {
+    go s.autoStartUserContainer(username)
+  }
+
   writeJSON(w, http.StatusOK, struct {
     Success  bool   `json:"success"`
     Message  string `json:"message"`
     Username string `json:"username"`
     Password string `json:"password"`
-  }{true, "用户创建成功", username, password})
+  }{true, "用户创建成功，容器启动中", username, password})
 }
 
 func (s *Server) handleAdminUserDelete(w http.ResponseWriter, r *http.Request) {
@@ -368,6 +385,39 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
 
   labels := map[string]string{"start": "启动", "stop": "停止", "restart": "重启"}
   writeSuccess(w, fmt.Sprintf("容器已%s", labels[action]))
+}
+
+// autoStartUserContainer 为新创建的用户自动启动容器并下发配置
+func (s *Server) autoStartUserContainer(username string) {
+  rec, err := auth.GetContainerByUsername(username)
+  if err != nil || rec == nil || rec.Image == "" {
+    log.Printf("[init] %s: 无容器记录或镜像未配置，跳过自动启动", username)
+    return
+  }
+
+  ctx := context.Background()
+  if !dockerpkg.ImageExists(ctx, rec.Image) {
+    log.Printf("[init] %s: 镜像 %s 不存在，跳过自动启动", username, rec.Image)
+    return
+  }
+
+  ud := user.UserDir(s.cfg, username)
+  cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
+  if createErr != nil {
+    log.Printf("[init] %s: 创建容器失败: %v", username, createErr)
+    return
+  }
+  auth.UpdateContainerID(username, cid)
+
+  if err := dockerpkg.Start(ctx, cid); err != nil {
+    log.Printf("[init] %s: 启动容器失败: %v", username, err)
+    return
+  }
+  auth.UpdateContainerStatus(username, "running")
+  log.Printf("[init] %s: 容器已启动", username)
+
+  picoclawDir := filepath.Join(ud, ".picoclaw")
+  s.applyConfigAsync(username, picoclawDir, cid)
 }
 
 // applyConfigAsync 异步等待 config.json 生成后下发配置并重启容器

@@ -49,6 +49,10 @@ archive_root: "./archive"
 web:
   listen: ":80"
   password: "change-me-to-a-random-secret"
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
 
 picoclaw:
   agents:
@@ -139,11 +143,18 @@ func (i ImageConfig) UnifiedRef(tag string) string {
   return "ghcr.io/picoaide/picoaide:" + tag
 }
 
+type TLSConfig struct {
+  Enabled  bool   `yaml:"enabled"`
+  CertFile string `yaml:"cert_file"`
+  KeyFile  string `yaml:"key_file"`
+}
+
 type WebConfig struct {
-  Listen      string `yaml:"listen"`
-  Password    string `yaml:"password"`
-  LDAPEnabled *bool  `yaml:"ldap_enabled"`
-  AuthMode    string `yaml:"auth_mode"` // "ldap" | "oidc" | "local"（默认根据 ldap_enabled 推断）
+  Listen      string    `yaml:"listen"`
+  Password    string    `yaml:"password"`
+  LDAPEnabled *bool     `yaml:"ldap_enabled"`
+  AuthMode    string    `yaml:"auth_mode"` // "ldap" | "oidc" | "local"（默认根据 ldap_enabled 推断）
+  TLS         TLSConfig `yaml:"tls"`
 }
 
 type SkillRepo struct {
@@ -652,6 +663,11 @@ func LoadFromDB() (*GlobalConfig, error) {
     }
   }
 
+  // TLS 配置
+  cfg.Web.TLS.Enabled, _ = strconv.ParseBool(kv["web.tls.enabled"])
+  cfg.Web.TLS.CertFile = kv["web.tls.cert_file"]
+  cfg.Web.TLS.KeyFile = kv["web.tls.key_file"]
+
   // 结构化字段从 JSON 反序列化
   if v, ok := kv["picoclaw"]; ok && v != "" {
     var picoclaw interface{}
@@ -706,6 +722,11 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
   if cfg.Web.LDAPEnabled != nil {
     kv["web.ldap_enabled"] = strconv.FormatBool(*cfg.Web.LDAPEnabled)
   }
+
+  // TLS 配置
+  kv["web.tls.enabled"] = strconv.FormatBool(cfg.Web.TLS.Enabled)
+  kv["web.tls.cert_file"] = cfg.Web.TLS.CertFile
+  kv["web.tls.key_file"] = cfg.Web.TLS.KeyFile
 
   // 结构化字段序列化为 JSON
   if cfg.PicoClaw != nil {
@@ -1016,6 +1037,7 @@ func buildNested(flat map[string]string) map[string]interface{} {
   // 需要作为 bool 返回的键
   boolKeys := map[string]bool{
     "web.ldap_enabled": true,
+    "web.tls.enabled":  true,
   }
 
   result := make(map[string]interface{})

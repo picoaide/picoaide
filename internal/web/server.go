@@ -120,14 +120,18 @@ func (s *Server) secureHeaders(next http.HandlerFunc) http.HandlerFunc {
 
 // setSessionCookie 设置 session cookie
 func (s *Server) setSessionCookie(w http.ResponseWriter, value string, maxAge int) {
-  http.SetCookie(w, &http.Cookie{
+  cookie := &http.Cookie{
     Name:     "session",
     Value:    value,
     Path:     "/",
     HttpOnly: true,
     SameSite: http.SameSiteLaxMode,
     MaxAge:   maxAge,
-  })
+  }
+  if s.cfg.Web.TLS.Enabled {
+    cookie.Secure = true
+  }
+  http.SetCookie(w, cookie)
 }
 
 // Serve 创建并启动 Web 管理面板服务器
@@ -257,6 +261,36 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/admin/images/migrate", s.secureHeaders(s.handleAdminImageMigrate))
   mux.HandleFunc("/api/admin/images/registry", s.secureHeaders(s.handleAdminImageRegistry))
   mux.HandleFunc("/api/admin/images/local-tags", s.secureHeaders(s.handleAdminLocalTags))
+
+  if cfg.Web.TLS.Enabled && cfg.Web.TLS.CertFile != "" && cfg.Web.TLS.KeyFile != "" {
+    if _, err := os.Stat(cfg.Web.TLS.CertFile); err != nil {
+      return fmt.Errorf("证书文件不存在: %s", cfg.Web.TLS.CertFile)
+    }
+    if _, err := os.Stat(cfg.Web.TLS.KeyFile); err != nil {
+      return fmt.Errorf("私钥文件不存在: %s", cfg.Web.TLS.KeyFile)
+    }
+
+    // 如果监听 443，额外启动 80 端口 HTTP→HTTPS 重定向
+    if strings.HasSuffix(listenAddr, ":443") {
+      go func() {
+        redirectMux := http.NewServeMux()
+        redirectMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+          target := "https://" + r.Host + r.URL.Path
+          if r.URL.RawQuery != "" {
+            target += "?" + r.URL.RawQuery
+          }
+          http.Redirect(w, r, target, http.StatusMovedPermanently)
+        })
+        fmt.Fprintf(os.Stderr, "HTTP→HTTPS 重定向: :80\n")
+        if err := http.ListenAndServe(":80", redirectMux); err != nil {
+          fmt.Fprintf(os.Stderr, "重定向服务错误: %v\n", err)
+        }
+      }()
+    }
+
+    fmt.Printf("PicoClaw 管理面板启动: https://%s\n", listenAddr)
+    return http.ListenAndServeTLS(listenAddr, cfg.Web.TLS.CertFile, cfg.Web.TLS.KeyFile, mux)
+  }
 
   fmt.Printf("PicoClaw 管理面板启动: http://%s\n", listenAddr)
   return http.ListenAndServe(listenAddr, mux)
@@ -638,7 +672,7 @@ func (s *Server) handleAdminImageRegistry(w http.ResponseWriter, r *http.Request
 
   // 固定查询 picoaide/picoaide 仓库
   ctx := contextWithTimeout(15)
-  tags, err := dockerpkg.ListRegistryTags(ctx, "picoaide/picoaide")
+  tags, err := dockerpkg.ListRegistryTagsForConfig(ctx, "picoaide/picoaide", s.cfg.Image.Registry)
   if err != nil {
     writeError(w, http.StatusInternalServerError, "获取远程标签失败: "+err.Error())
     return

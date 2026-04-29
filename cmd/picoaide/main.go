@@ -2,18 +2,24 @@ package main
 
 import (
   "bufio"
+  "context"
   "fmt"
+  "io"
+  "net"
   "os"
   "path/filepath"
+  "strconv"
   "strings"
   "syscall"
+  "time"
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
+  dockerpkg "github.com/picoaide/picoaide/internal/docker"
   "github.com/picoaide/picoaide/internal/ldap"
   "github.com/picoaide/picoaide/internal/user"
-  "github.com/picoaide/picoaide/internal/web"
   "github.com/picoaide/picoaide/internal/util"
+  "github.com/picoaide/picoaide/internal/web"
   "golang.org/x/term"
 )
 
@@ -279,6 +285,8 @@ func runFirstRun(reader *bufio.Reader) {
   fmt.Println("=== PicoAide 首次运行引导 ===")
   fmt.Println()
 
+  // 步骤 1: 数据目录
+  fmt.Println("--- 步骤 1/4: 数据目录 ---")
   fmt.Print("请输入数据目录 (默认: /data/picoaide): ")
   dataDir, _ := reader.ReadString('\n')
   dataDir = strings.TrimSpace(dataDir)
@@ -308,62 +316,146 @@ func runFirstRun(reader *bufio.Reader) {
     os.Exit(1)
   }
 
-  fmt.Printf("数据目录: %s\n", dataDir)
-  fmt.Println()
-
   if err := auth.InitDB(dataDir); err != nil {
     fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
     os.Exit(1)
   }
 
-  fmt.Print("是否启用员工统一登录 (LDAP)? [Y/n]: ")
-  ldapAnswer, _ := reader.ReadString('\n')
-  ldapAnswer = strings.TrimSpace(strings.ToLower(ldapAnswer))
+  fmt.Printf("数据目录: %s\n", dataDir)
+  fmt.Println()
 
-  if ldapAnswer == "n" || ldapAnswer == "no" {
-    if err := config.InitDBDefaults(); err != nil {
-      fmt.Fprintf(os.Stderr, "初始化默认配置失败: %v\n", err)
-      os.Exit(1)
-    }
-
-    cfg, err := config.LoadFromDB()
-    if err != nil {
-      fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
-      os.Exit(1)
-    }
-
-    falseVal := false
-    cfg.Web.LDAPEnabled = &falseVal
-
-    if err := config.SaveToDB(cfg, "system"); err != nil {
-      fmt.Fprintf(os.Stderr, "保存配置失败: %v\n", err)
-      os.Exit(1)
-    }
-
-    if err := setupSuperAdmin(reader, dataDir); err != nil {
-      fmt.Fprintf(os.Stderr, "超管设置失败: %v\n", err)
-      os.Exit(1)
-    }
-
-    if err := config.InstallService(cfg); err != nil {
-      fmt.Fprintf(os.Stderr, "服务安装失败: %v\n", err)
-      os.Exit(1)
-    }
-
-    fmt.Println()
-    fmt.Println("=== 初始化完成 ===")
-    fmt.Printf("数据目录: %s\n", dataDir)
-    fmt.Println("服务已启动，可通过浏览器访问 API")
-  } else {
-    if err := config.InitDBDefaults(); err != nil {
-      fmt.Fprintf(os.Stderr, "初始化默认配置失败: %v\n", err)
-      os.Exit(1)
-    }
-
-    fmt.Println()
-    fmt.Println("已初始化默认配置。")
-    fmt.Println("请通过管理面板修改 LDAP 连接信息后，重新运行: picoaide init")
+  // 步骤 2: 超管账户
+  fmt.Println("--- 步骤 2/4: 超管账户 ---")
+  if err := setupSuperAdmin(reader, dataDir); err != nil {
+    fmt.Fprintf(os.Stderr, "超管设置失败: %v\n", err)
+    os.Exit(1)
   }
+  fmt.Println()
+
+  // 初始化默认配置
+  if err := config.InitDBDefaults(); err != nil {
+    fmt.Fprintf(os.Stderr, "初始化默认配置失败: %v\n", err)
+    os.Exit(1)
+  }
+
+  cfg, err := config.LoadFromDB()
+  if err != nil {
+    fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
+    os.Exit(1)
+  }
+
+  // 步骤 3: 网络端口
+  fmt.Println("--- 步骤 3/4: 网络端口 ---")
+  port80 := checkPort(80)
+  port443 := checkPort(443)
+  if port80 {
+    fmt.Println("  端口 80: 可用")
+  } else {
+    fmt.Println("  端口 80: 已被占用")
+  }
+  if port443 {
+    fmt.Println("  端口 443: 可用")
+  } else {
+    fmt.Println("  端口 443: 已被占用")
+  }
+
+  fmt.Print("监听地址 (默认: :80): ")
+  listenAddr, _ := reader.ReadString('\n')
+  listenAddr = strings.TrimSpace(listenAddr)
+  if listenAddr == "" {
+    listenAddr = ":80"
+  }
+  cfg.Web.Listen = listenAddr
+  fmt.Println()
+
+  // 步骤 4: 镜像仓库
+  fmt.Println("--- 步骤 4/4: 镜像仓库 ---")
+  fmt.Println("  1) GitHub (ghcr.io)")
+  fmt.Println("  2) 腾讯云 (hkccr.ccs.tencentyun.com)")
+  fmt.Print("请选择 [1]: ")
+  registryAnswer, _ := reader.ReadString('\n')
+  registryAnswer = strings.TrimSpace(registryAnswer)
+  if registryAnswer == "2" {
+    cfg.Image.Registry = "tencent"
+    fmt.Println("已选择: 腾讯云")
+  } else {
+    cfg.Image.Registry = "github"
+    fmt.Println("已选择: GitHub")
+  }
+
+  fmt.Print("是否立即拉取最新镜像? [Y/n]: ")
+  pullAnswer, _ := reader.ReadString('\n')
+  pullAnswer = strings.TrimSpace(strings.ToLower(pullAnswer))
+
+  if pullAnswer != "n" && pullAnswer != "no" {
+    if err := dockerpkg.InitClient(); err != nil {
+      fmt.Fprintf(os.Stderr, "Docker 不可用，跳过镜像拉取: %v\n", err)
+    } else {
+      pullAndListTags(reader, cfg)
+      dockerpkg.CloseClient()
+    }
+  }
+  fmt.Println()
+
+  // 保存配置
+  if err := config.SaveToDB(cfg, "system"); err != nil {
+    fmt.Fprintf(os.Stderr, "保存配置失败: %v\n", err)
+    os.Exit(1)
+  }
+
+  if err := config.InstallService(cfg); err != nil {
+    fmt.Fprintf(os.Stderr, "服务安装失败: %v\n", err)
+    os.Exit(1)
+  }
+
+  fmt.Println("=== 初始化完成 ===")
+  fmt.Printf("数据目录: %s\n", dataDir)
+  fmt.Printf("监听地址: %s\n", listenAddr)
+  fmt.Println("认证模式: 本地认证")
+  fmt.Println()
+  fmt.Println("安装浏览器插件后，访问管理面板完成后续配置")
+}
+
+func pullAndListTags(reader *bufio.Reader, cfg *config.GlobalConfig) {
+  ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+  defer cancel()
+
+  // 获取远程标签
+  tags, err := dockerpkg.ListRegistryTagsForConfig(ctx, "picoaide/picoaide", cfg.Image.Registry)
+  if err != nil {
+    fmt.Fprintf(os.Stderr, "获取远程标签失败: %v\n", err)
+    return
+  }
+  if len(tags) == 0 {
+    fmt.Println("远程仓库无可用标签")
+    return
+  }
+
+  // 选最新标签
+  latestTag := tags[len(tags)-1]
+  pullRef := cfg.Image.PullRef(latestTag)
+  unifiedRef := cfg.Image.UnifiedRef(latestTag)
+
+  fmt.Printf("正在拉取镜像 %s ...\n", pullRef)
+  pullCtx := context.Background()
+  pullReader, err := dockerpkg.ImagePull(pullCtx, pullRef)
+  if err != nil {
+    fmt.Fprintf(os.Stderr, "拉取失败: %v\n", err)
+    return
+  }
+  defer pullReader.Close()
+  io.Copy(os.Stdout, pullReader)
+  fmt.Println()
+
+  // 腾讯云模式 retag
+  if cfg.Image.IsTencent() && pullRef != unifiedRef {
+    fmt.Printf("重命名镜像: %s -> %s\n", pullRef, unifiedRef)
+    if err := dockerpkg.RetagImage(pullCtx, pullRef, unifiedRef); err != nil {
+      fmt.Fprintf(os.Stderr, "重命名失败: %v\n", err)
+    }
+  }
+
+  fmt.Printf("镜像 %s 拉取完成\n", latestTag)
 }
 
 func runInitExisting(cfg *config.GlobalConfig) {
@@ -385,6 +477,19 @@ func runInitExisting(cfg *config.GlobalConfig) {
   }
 
   fmt.Println("初始化完成")
+}
+
+// ============================================================
+// 辅助函数
+// ============================================================
+
+func checkPort(port int) bool {
+  ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
+  if err != nil {
+    return false
+  }
+  ln.Close()
+  return true
 }
 
 // ============================================================

@@ -44,17 +44,21 @@ export async function init(ctx) {
       const groups = groupMap[u.username] || [];
       const groupTags = groups.map(g => '<span class="tag">' + esc(g) + '</span>').join(' ');
       const tr = document.createElement('tr');
-      let actions = '<div class="btn-group">';
-      if (!isUnifiedAuth) {
+      const isSuperadmin = u.role === 'superadmin';
+      let actions;
+      if (isSuperadmin) {
+        actions = '<span class="badge badge-muted">超管</span>';
+      } else {
+        actions = '<div class="btn-group">';
         actions += '<button class="btn btn-sm btn-danger" data-action="delete" data-user="' + esc(u.username) + '">删除</button>';
+        actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="start" data-user="' + esc(u.username) + '">启动</button>';
+        actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="restart" data-user="' + esc(u.username) + '">重启</button>';
+        actions += '<button class="btn btn-sm btn-outline" data-action="stop" data-user="' + esc(u.username) + '">停止</button>';
+        actions += '<button class="btn btn-sm btn-outline" data-action="apply" data-user="' + esc(u.username) + '">下发配置</button>';
+        actions += '<button class="btn btn-sm btn-outline" data-action="logs" data-user="' + esc(u.username) + '">日志</button>';
+        actions += '</div>';
       }
-      actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="start" data-user="' + esc(u.username) + '">启动</button>';
-      actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="restart" data-user="' + esc(u.username) + '">重启</button>';
-      actions += '<button class="btn btn-sm btn-outline" data-action="stop" data-user="' + esc(u.username) + '">停止</button>';
-      actions += '<button class="btn btn-sm btn-outline" data-action="apply" data-user="' + esc(u.username) + '">下发配置</button>';
-      actions += '<button class="btn btn-sm btn-outline" data-action="logs" data-user="' + esc(u.username) + '">日志</button>';
-      actions += '</div>';
-      tr.innerHTML = '<td><strong>' + esc(u.username) + '</strong></td><td>' + (groupTags || '<small class="text-muted">-</small>') + '</td><td><span class="badge ' + statusCls + '">' + esc(u.status) + '</span></td><td>' + esc(u.image_tag) + ' ' + imgBadge + '</td><td>' + esc(u.ip || '-') + '</td><td>' + actions + '</td>';
+      tr.innerHTML = '<td><strong>' + esc(u.username) + '</strong>' + (isSuperadmin ? ' <span class="badge badge-ok">超管</span>' : '') + '</td><td>' + (groupTags || '<small class="text-muted">-</small>') + '</td><td><span class="badge ' + statusCls + '">' + esc(u.status) + '</span></td><td>' + esc(u.image_tag) + ' ' + imgBadge + '</td><td>' + esc(u.ip || '-') + '</td><td>' + actions + '</td>';
       tbody.appendChild(tr);
     }
 

@@ -62,8 +62,14 @@ async function checkAdminRole() {
     const info = await apiJSON('GET', '/api/user/info');
     if (info.success && info.role === 'superadmin') {
       adminBtn.style.display = '';
+      syncBtn.style.display = 'none';
+      cdpBtn.style.display = 'none';
+      manageBtn.style.display = 'none';
     } else {
       adminBtn.style.display = 'none';
+      syncBtn.style.display = '';
+      cdpBtn.style.display = '';
+      manageBtn.style.display = '';
     }
   } catch {
     adminBtn.style.display = 'none';
