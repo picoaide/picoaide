@@ -12,6 +12,7 @@ import (
   "os/exec"
   "path/filepath"
   "sort"
+  "strconv"
   "strings"
   "sync"
   "time"
@@ -625,6 +626,10 @@ func (s *Server) handleAdminAuthTestLDAP(w http.ResponseWriter, r *http.Request)
   baseDN := r.FormValue("base_dn")
   filter := r.FormValue("filter")
   usernameAttr := r.FormValue("username_attribute")
+  groupSearchMode := r.FormValue("group_search_mode")
+  groupBaseDN := r.FormValue("group_base_dn")
+  groupFilter := r.FormValue("group_filter")
+  groupMemberAttr := r.FormValue("group_member_attribute")
 
   if host == "" || bindDN == "" || baseDN == "" {
     writeError(w, http.StatusBadRequest, "LDAP 地址、Bind DN 和 Base DN 不能为空")
@@ -637,12 +642,19 @@ func (s *Server) handleAdminAuthTestLDAP(w http.ResponseWriter, r *http.Request)
     return
   }
 
+  // 测试组查询
+  groups, _ := ldap.TestGroups(host, bindDN, bindPassword, baseDN, groupSearchMode, groupBaseDN, groupFilter, groupMemberAttr, usernameAttr)
+  if groups == nil {
+    groups = []ldap.GroupPreview{}
+  }
+
   writeJSON(w, http.StatusOK, struct {
-    Success   bool     `json:"success"`
-    Message   string   `json:"message"`
-    UserCount int      `json:"user_count"`
-    Users     []string `json:"users"`
-  }{true, fmt.Sprintf("连接成功，找到 %d 个用户", len(users)), len(users), users})
+    Success   bool                `json:"success"`
+    Message   string              `json:"message"`
+    UserCount int                 `json:"user_count"`
+    Users     []string            `json:"users"`
+    Groups    []ldap.GroupPreview `json:"groups"`
+  }{true, fmt.Sprintf("连接成功，找到 %d 个用户", len(users)), len(users), users, groups})
 }
 
 func (s *Server) handleAdminAuthLDAPUsers(w http.ResponseWriter, r *http.Request) {
@@ -1276,11 +1288,21 @@ func (s *Server) handleAdminGroupCreate(w http.ResponseWriter, r *http.Request) 
   }
   name := strings.TrimSpace(r.FormValue("name"))
   description := strings.TrimSpace(r.FormValue("description"))
+  parentIDStr := strings.TrimSpace(r.FormValue("parent_id"))
   if name == "" {
     writeError(w, http.StatusBadRequest, "组名不能为空")
     return
   }
-  if err := auth.CreateGroup(name, "local", description); err != nil {
+  var parentID *int64
+  if parentIDStr != "" {
+    pid, err := strconv.ParseInt(parentIDStr, 10, 64)
+    if err != nil {
+      writeError(w, http.StatusBadRequest, "无效的父组 ID")
+      return
+    }
+    parentID = &pid
+  }
+  if err := auth.CreateGroup(name, "local", description, parentID); err != nil {
     writeError(w, http.StatusBadRequest, err.Error())
     return
   }
@@ -1512,7 +1534,7 @@ func (s *Server) handleAdminAuthSyncGroups(w http.ResponseWriter, r *http.Reques
   userCount := 0
   for groupName, members := range groupMap {
     // 创建组（如果不存在）
-    auth.CreateGroup(groupName, "ldap", "")
+    auth.CreateGroup(groupName, "ldap", "", nil)
     groupCount++
 
     // 过滤白名单用户

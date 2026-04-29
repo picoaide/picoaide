@@ -141,6 +141,7 @@ func createTables() error {
   _, err = db.Exec(`CREATE TABLE IF NOT EXISTS groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
+    parent_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
     source TEXT NOT NULL DEFAULT 'local',
     description TEXT NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
@@ -171,7 +172,14 @@ func createTables() error {
     skill_name TEXT NOT NULL,
     UNIQUE(group_id, skill_name)
   )`)
-  return err
+  if err != nil {
+    return err
+  }
+
+  // 迁移：旧数据库 groups 表没有 parent_id 列
+  db.Exec(`ALTER TABLE groups ADD COLUMN parent_id INTEGER REFERENCES groups(id) ON DELETE SET NULL`)
+
+  return nil
 }
 
 // CreateUser 创建本地用户
@@ -517,18 +525,19 @@ func AllocateNextIP() (string, error) {
 type GroupInfo struct {
   ID          int64  `json:"id"`
   Name        string `json:"name"`
+  ParentID    *int64 `json:"parent_id"`
   Source      string `json:"source"`
   Description string `json:"description"`
   MemberCount int    `json:"member_count"`
   SkillCount  int    `json:"skill_count"`
 }
 
-// CreateGroup 创建组
-func CreateGroup(name, source, description string) error {
+// CreateGroup 创建组，parentID 为 nil 表示顶级组
+func CreateGroup(name, source, description string, parentID *int64) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  _, err := db.Exec("INSERT INTO groups (name, source, description) VALUES (?, ?, ?)", name, source, description)
+  _, err := db.Exec("INSERT INTO groups (name, parent_id, source, description) VALUES (?, ?, ?, ?)", name, parentID, source, description)
   if err != nil {
     return fmt.Errorf("创建组失败: %w", err)
   }
@@ -556,7 +565,7 @@ func ListGroups() ([]GroupInfo, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
-  rows, err := db.Query(`SELECT g.id, g.name, g.source, g.description,
+  rows, err := db.Query(`SELECT g.id, g.name, g.parent_id, g.source, g.description,
     (SELECT COUNT(*) FROM user_groups ug WHERE ug.group_id = g.id) AS member_count,
     (SELECT COUNT(*) FROM group_skills gs WHERE gs.group_id = g.id) AS skill_count
     FROM groups g ORDER BY g.name`)
@@ -567,7 +576,7 @@ func ListGroups() ([]GroupInfo, error) {
   var list []GroupInfo
   for rows.Next() {
     var g GroupInfo
-    if err := rows.Scan(&g.ID, &g.Name, &g.Source, &g.Description, &g.MemberCount, &g.SkillCount); err != nil {
+    if err := rows.Scan(&g.ID, &g.Name, &g.ParentID, &g.Source, &g.Description, &g.MemberCount, &g.SkillCount); err != nil {
       return nil, err
     }
     list = append(list, g)
@@ -726,9 +735,91 @@ func GetGroupSkills(groupName string) ([]string, error) {
   return list, nil
 }
 
-// GetGroupMembersForDeploy 获取组成员的用户名列表（用于技能部署）
+// GetGroupMembersForDeploy 获取组成员的用户名列表（递归包含所有子组成员）
 func GetGroupMembersForDeploy(groupName string) ([]string, error) {
-  return GetGroupMembers(groupName)
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
+
+  var groupID int64
+  if err := db.QueryRow("SELECT id FROM groups WHERE name = ?", groupName).Scan(&groupID); err != nil {
+    return nil, fmt.Errorf("组 %s 不存在", groupName)
+  }
+
+  // 收集目标组及所有子组 ID
+  ids := []int64{groupID}
+  subIDs, err := GetSubGroupIDs(groupID)
+  if err != nil {
+    return nil, err
+  }
+  ids = append(ids, subIDs...)
+
+  // 批量查询所有组的成员
+  seen := make(map[string]bool)
+  var members []string
+  for _, gid := range ids {
+    rows, err := db.Query("SELECT username FROM user_groups WHERE group_id = ?", gid)
+    if err != nil {
+      continue
+    }
+    for rows.Next() {
+      var u string
+      if rows.Scan(&u) == nil && !seen[u] {
+        seen[u] = true
+        members = append(members, u)
+      }
+    }
+    rows.Close()
+  }
+  return members, nil
+}
+
+// GetSubGroupIDs 递归获取所有子组 ID
+func GetSubGroupIDs(groupID int64) ([]int64, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
+  var result []int64
+  var walk func(pid int64) error
+  walk = func(pid int64) error {
+    rows, err := db.Query("SELECT id FROM groups WHERE parent_id = ?", pid)
+    if err != nil {
+      return err
+    }
+    defer rows.Close()
+    for rows.Next() {
+      var id int64
+      if err := rows.Scan(&id); err != nil {
+        continue
+      }
+      result = append(result, id)
+      walk(id)
+    }
+    return nil
+  }
+  if err := walk(groupID); err != nil {
+    return nil, err
+  }
+  return result, nil
+}
+
+// SetGroupParent 设置组的父组
+func SetGroupParent(groupName string, parentID *int64) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
+  _, err := db.Exec("UPDATE groups SET parent_id = ? WHERE name = ?", parentID, groupName)
+  return err
+}
+
+// GetGroupIDByName 根据组名获取 ID
+func GetGroupIDByName(name string) (int64, error) {
+  if err := ensureDB(); err != nil {
+    return 0, err
+  }
+  var id int64
+  err := db.QueryRow("SELECT id FROM groups WHERE name = ?", name).Scan(&id)
+  return id, err
 }
 
 // GenerateMCPToken 为用户生成 MCP token（用户名:随机hex）并存入 DB

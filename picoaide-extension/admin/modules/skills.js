@@ -59,12 +59,27 @@ export async function init(ctx) {
       const gData = await Api.get('/api/admin/groups');
       const groupGroup = ctx.$('#deploy-group-group');
       groupGroup.innerHTML = '';
-      for (const g of (gData.groups || [])) {
-        const opt = document.createElement('option');
-        opt.value = 'group:' + g.name;
-        opt.textContent = g.name;
-        groupGroup.appendChild(opt);
+      const groups = gData.groups || [];
+      // 构建树状结构
+      const byParent = {};
+      const byId = {};
+      for (const g of groups) {
+        byId[g.id] = g;
+        const pid = g.parent_id || 'root';
+        if (!byParent[pid]) byParent[pid] = [];
+        byParent[pid].push(g);
       }
+      function addTreeOptions(parentId, depth) {
+        const children = byParent[parentId] || [];
+        for (const g of children) {
+          const opt = document.createElement('option');
+          opt.value = 'group:' + g.name;
+          opt.textContent = '\u00A0\u00A0'.repeat(depth) + (depth > 0 ? '└ ' : '') + g.name + ' (' + g.member_count + '人)';
+          groupGroup.appendChild(opt);
+          addTreeOptions(g.id, depth + 1);
+        }
+      }
+      addTreeOptions('root', 0);
     } catch {}
   }
 

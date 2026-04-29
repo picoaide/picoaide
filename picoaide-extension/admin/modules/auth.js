@@ -123,6 +123,9 @@ export async function init(ctx) {
 
   async function testLDAP() {
     showMsg('#auth-msg', '测试连接中...', true);
+    var resultDiv = $('#ldap-test-result');
+    resultDiv.classList.add('hidden');
+    resultDiv.innerHTML = '';
     try {
       var res = await Api.post('/api/admin/auth/test-ldap', {
         host: $('#ldap-host').value,
@@ -130,10 +133,34 @@ export async function init(ctx) {
         bind_password: $('#ldap-bind-password').value,
         base_dn: $('#ldap-base-dn').value,
         filter: $('#ldap-filter').value,
-        username_attribute: $('#ldap-username-attr').value
+        username_attribute: $('#ldap-username-attr').value,
+        group_search_mode: $('#ldap-group-mode').value,
+        group_base_dn: $('#ldap-group-base-dn').value,
+        group_filter: $('#ldap-group-filter').value,
+        group_member_attribute: $('#ldap-group-member-attr').value
       });
       if (res.success) {
-        showMsg('#auth-msg', res.message + '（用户: ' + (res.users || []).slice(0, 5).join(', ') + (res.user_count > 5 ? '...' : '') + ')', true);
+        showMsg('#auth-msg', '', true);
+        var html = '<div style="color:var(--ok)">✓ 连接成功，找到 ' + res.user_count + ' 个用户</div>';
+        var users = res.users || [];
+        var userPreview = users.slice(0, 5).join(', ');
+        if (res.user_count > 5) userPreview += '...';
+        html += '<div style="margin-left:1em;color:var(--muted)">前 5 个用户: ' + ctx.esc(userPreview) + '</div>';
+
+        var groups = res.groups || [];
+        if (groups.length > 0) {
+          html += '<div style="color:var(--ok);margin-top:0.5em">✓ 找到 ' + groups.length + ' 个组</div>';
+          var groupPreview = groups.slice(0, 5).map(function(g) {
+            var info = ctx.esc(g.name) + ' (' + g.member_count + '人';
+            if (g.sub_groups && g.sub_groups.length > 0) info += ', 含 ' + g.sub_groups.length + ' 个子组';
+            info += ')';
+            return info;
+          }).join(', ');
+          if (groups.length > 5) groupPreview += '...';
+          html += '<div style="margin-left:1em;color:var(--muted)">' + groupPreview + '</div>';
+        }
+        resultDiv.innerHTML = html;
+        resultDiv.classList.remove('hidden');
       } else {
         showMsg('#auth-msg', res.error, false);
       }

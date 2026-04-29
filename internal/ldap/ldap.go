@@ -343,3 +343,149 @@ func Authenticate(cfg *config.GlobalConfig, username, password string) bool {
   err = l2.Bind(userDN, password)
   return err == nil
 }
+
+// GroupPreview LDAP 组预览信息
+type GroupPreview struct {
+  Name        string   `json:"name"`
+  MemberCount int      `json:"member_count"`
+  Members     []string `json:"members"`
+  SubGroups   []string `json:"sub_groups"`
+}
+
+// TestGroups 测试 LDAP 组查询，返回组预览信息
+// groupSearchMode 为空时返回空切片不报错
+func TestGroups(host, bindDN, bindPassword, baseDN, groupSearchMode, groupBaseDN, groupFilter, groupMemberAttr, usernameAttr string) ([]GroupPreview, error) {
+  if groupSearchMode == "" {
+    return nil, nil
+  }
+
+  l, err := ldap.DialURL(host)
+  if err != nil {
+    return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
+  }
+  defer l.Close()
+
+  if err := l.Bind(bindDN, bindPassword); err != nil {
+    return nil, fmt.Errorf("LDAP 认证失败: %w", err)
+  }
+
+  if groupBaseDN == "" {
+    groupBaseDN = baseDN
+  }
+  if groupFilter == "" {
+    groupFilter = "(objectClass=groupOfNames)"
+  }
+  if groupMemberAttr == "" {
+    groupMemberAttr = "member"
+  }
+
+  if groupSearchMode == "group_search" {
+    return testGroupsBySearch(l, groupBaseDN, groupFilter, groupMemberAttr, usernameAttr)
+  }
+  return testGroupsByMemberOf(l, baseDN, groupFilter, usernameAttr)
+}
+
+// testGroupsBySearch 搜索 groupOfNames 条目
+func testGroupsBySearch(l *ldap.Conn, groupBaseDN, groupFilter, memberAttr, usernameAttr string) ([]GroupPreview, error) {
+  searchRequest := ldap.NewSearchRequest(
+    groupBaseDN,
+    ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+    groupFilter,
+    []string{"cn", memberAttr},
+    nil,
+  )
+  sr, err := l.Search(searchRequest)
+  if err != nil {
+    return nil, fmt.Errorf("搜索组失败: %w", err)
+  }
+
+  var result []GroupPreview
+  for _, entry := range sr.Entries {
+    groupName := entry.GetAttributeValue("cn")
+    if groupName == "" {
+      continue
+    }
+    var members []string
+    var subGroups []string
+    for _, dn := range entry.GetAttributeValues(memberAttr) {
+      uid := extractAttrValue(dn, usernameAttr)
+      if uid != "" {
+        members = append(members, uid)
+      }
+      // 检查是否引用了其他组（DN 的 objectClass 为组类型）
+      cn := extractCN(dn)
+      if cn != "" && uid == "" {
+        subGroups = append(subGroups, cn)
+      }
+    }
+    preview := GroupPreview{
+      Name:        groupName,
+      MemberCount: len(members),
+      Members:     firstN(members, 5),
+      SubGroups:   firstN(subGroups, 5),
+    }
+    if preview.Members == nil {
+      preview.Members = []string{}
+    }
+    if preview.SubGroups == nil {
+      preview.SubGroups = []string{}
+    }
+    result = append(result, preview)
+  }
+  sort.Slice(result, func(i, j int) bool {
+    return result[i].Name < result[j].Name
+  })
+  return result, nil
+}
+
+// testGroupsByMemberOf 从用户的 memberOf 属性聚合组
+func testGroupsByMemberOf(l *ldap.Conn, baseDN, filter, usernameAttr string) ([]GroupPreview, error) {
+  // 获取所有用户及其 memberOf
+  searchRequest := ldap.NewSearchRequest(
+    baseDN,
+    ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+    filter,
+    []string{usernameAttr, "memberOf"},
+    nil,
+  )
+  sr, err := l.Search(searchRequest)
+  if err != nil {
+    return nil, fmt.Errorf("搜索用户失败: %w", err)
+  }
+
+  groupMembers := make(map[string][]string)
+  for _, entry := range sr.Entries {
+    username := entry.GetAttributeValue(usernameAttr)
+    if username == "" {
+      continue
+    }
+    for _, dn := range entry.GetAttributeValues("memberOf") {
+      groupName := extractCN(dn)
+      if groupName != "" {
+        groupMembers[groupName] = append(groupMembers[groupName], username)
+      }
+    }
+  }
+
+  var result []GroupPreview
+  for name, members := range groupMembers {
+    preview := GroupPreview{
+      Name:        name,
+      MemberCount: len(members),
+      Members:     firstN(members, 5),
+      SubGroups:   []string{},
+    }
+    result = append(result, preview)
+  }
+  sort.Slice(result, func(i, j int) bool {
+    return result[i].Name < result[j].Name
+  })
+  return result, nil
+}
+
+func firstN(slice []string, n int) []string {
+  if len(slice) <= n {
+    return slice
+  }
+  return slice[:n]
+}
