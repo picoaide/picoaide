@@ -693,9 +693,18 @@ func GenerateMCPToken(username string) (string, error) {
     return "", fmt.Errorf("生成随机数失败: %w", err)
   }
   token := username + ":" + hex.EncodeToString(b)
-  _, err := db.Exec(`UPDATE containers SET mcp_token = ? WHERE username = ?`, token, username)
+
+  // 先尝试 UPDATE，如果无匹配行则 INSERT
+  result, err := db.Exec(`UPDATE containers SET mcp_token = ? WHERE username = ?`, token, username)
   if err != nil {
     return "", fmt.Errorf("保存 MCP token 失败: %w", err)
+  }
+  affected, _ := result.RowsAffected()
+  if affected == 0 {
+    _, err = db.Exec(`INSERT INTO containers (username, image, status, mcp_token) VALUES (?, '', 'stopped', ?)`, username, token)
+    if err != nil {
+      return "", fmt.Errorf("创建容器记录失败: %w", err)
+    }
   }
   return token, nil
 }

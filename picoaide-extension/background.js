@@ -9,6 +9,16 @@ const groupTabIds = new Set();      // 标签组成员集合
 let active = false;                 // 连接是否激活
 let eventListeners = [];            // chrome.* 事件监听器引用
 
+// Service Worker 可能被终止重启，从 session storage 恢复 currentTabId
+chrome.storage.session.get('currentTabId').then(r => {
+  if (r.currentTabId) currentTabId = r.currentTabId;
+}).catch(() => {});
+
+function setCurrentTabId(tabId) {
+  currentTabId = tabId;
+  chrome.storage.session.set({ currentTabId: tabId }).catch(() => {});
+}
+
 // ─── 常量 ─────────────────────────────────────────────────────────────────────
 
 const GROUP_TITLE = 'PicoAide';
@@ -216,9 +226,22 @@ async function handleType(params) {
       const el = document.querySelector(selector);
       if (!el) throw new Error('找不到元素: ' + selector);
       el.focus();
-      el.value = text;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+      // 选中输入框内已有文字
+      if (el.setSelectionRange) {
+        el.setSelectionRange(0, (el.value || '').length);
+      }
+      // 尝试用 execCommand 模拟键盘输入
+      const ok = document.execCommand('insertText', false, text);
+      // execCommand 失败时回退到原生 setter + 事件
+      if (!ok || !el.value) {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype, 'value'
+        ).set;
+        setter.call(el, text);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       return { success: true };
     },
     params.selector, params.text
@@ -231,7 +254,10 @@ async function handleGetContent(params) {
   return await executeContentScript(currentTabId,
     (sel) => {
       const el = document.querySelector(sel);
-      return { content: el ? el.innerText : '' };
+      if (!el) return { content: '' };
+      // input/textarea 用 value，其他元素用 innerText
+      if (typeof el.value === 'string') return { content: el.value };
+      return { content: el.innerText };
     },
     selector
   );
@@ -241,7 +267,12 @@ async function handleExecute(params) {
   if (!currentTabId) throw new Error('没有活动的标签页');
   const results = await chrome.scripting.executeScript({
     target: { tabId: currentTabId },
-    func: new Function('return (' + params.script + ')();'),
+    world: 'MAIN',
+    func: (code) => {
+      try { return eval(code); }
+      catch (e) { return { error: e.message }; }
+    },
+    args: [params.script],
   });
   return { result: results[0]?.result };
 }
@@ -257,14 +288,14 @@ async function handleTabsList() {
 
 async function handleTabNew(params) {
   const tab = await chrome.tabs.create(params.url ? { url: params.url } : {});
-  currentTabId = tab.id;
+  setCurrentTabId(tab.id);
   addTabToGroup(tab.id).catch(() => {});
   return { tabId: tab.id };
 }
 
 async function handleTabClose(params) {
   await chrome.tabs.remove(params.tabId);
-  if (currentTabId === params.tabId) currentTabId = null;
+  if (currentTabId === params.tabId) setCurrentTabId(null);
   return { success: true };
 }
 
@@ -363,7 +394,7 @@ async function cdpEnable() {
 
   // 断线重连时保留 currentTabId
   if (!currentTabId) {
-    currentTabId = tab.id;
+    setCurrentTabId(tab.id);
   }
 
   const wsUrl = base.replace(/^http/, 'ws') + '/api/browser/ws?token=' + encodeURIComponent(mcpToken);
