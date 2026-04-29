@@ -256,6 +256,27 @@ func GetAllLocalUsers() ([]LocalUser, error) {
   return list, nil
 }
 
+// GetSuperadmins 返回所有超管列表
+func GetSuperadmins() ([]string, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
+  rows, err := db.Query("SELECT username FROM local_users WHERE role = 'superadmin' ORDER BY username")
+  if err != nil {
+    return nil, err
+  }
+  defer rows.Close()
+  var list []string
+  for rows.Next() {
+    var name string
+    if err := rows.Scan(&name); err != nil {
+      return nil, err
+    }
+    list = append(list, name)
+  }
+  return list, nil
+}
+
 // HasAnySuperadmin 检查系统中是否存在超管
 func HasAnySuperadmin() bool {
   if ensureDB() != nil {

@@ -224,6 +224,11 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/admin/users", s.secureHeaders(s.handleAdminUsers))
   mux.HandleFunc("/api/admin/users/create", s.secureHeaders(s.handleAdminUserCreate))
   mux.HandleFunc("/api/admin/users/delete", s.secureHeaders(s.handleAdminUserDelete))
+  // 超管 - 超管账户管理
+  mux.HandleFunc("/api/admin/superadmins", s.secureHeaders(s.handleAdminSuperadmins))
+  mux.HandleFunc("/api/admin/superadmins/create", s.secureHeaders(s.handleAdminSuperadminCreate))
+  mux.HandleFunc("/api/admin/superadmins/delete", s.secureHeaders(s.handleAdminSuperadminDelete))
+  mux.HandleFunc("/api/admin/superadmins/reset", s.secureHeaders(s.handleAdminSuperadminReset))
   mux.HandleFunc("/api/admin/container/start", s.secureHeaders(s.handleAdminContainerStart))
   mux.HandleFunc("/api/admin/container/stop", s.secureHeaders(s.handleAdminContainerStop))
   mux.HandleFunc("/api/admin/container/restart", s.secureHeaders(s.handleAdminContainerRestart))

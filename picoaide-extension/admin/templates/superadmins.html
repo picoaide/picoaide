@@ -1,0 +1,14 @@
+<div class="row mb-1" style="align-items:center">
+  <h2 style="flex:1;margin:0">超管账户</h2>
+  <button class="btn btn-primary btn-sm" id="create-superadmin-btn">新建超管</button>
+  <button class="btn btn-outline btn-sm" id="refresh-superadmins">刷新</button>
+</div>
+
+<p class="text-sm text-muted">超管拥有管理面板完整权限，无容器。至少保留一个超管账户。</p>
+
+<table>
+  <thead><tr><th>用户名</th><th>操作</th></tr></thead>
+  <tbody id="sa-tbody"></tbody>
+</table>
+<p id="sa-empty" class="text-muted text-center mt-1 hidden">暂无超管</p>
+<div id="sa-msg" class="msg"></div>

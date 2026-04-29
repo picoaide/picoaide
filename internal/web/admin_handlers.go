@@ -1583,3 +1583,148 @@ func minInt(a, b int) int {
   }
   return b
 }
+
+// ============================================================
+// 超管账户管理
+// ============================================================
+
+// handleAdminSuperadmins 返回超管列表
+func (s *Server) handleAdminSuperadmins(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method == "GET" {
+    list, err := auth.GetSuperadmins()
+    if err != nil {
+      writeError(w, http.StatusInternalServerError, err.Error())
+      return
+    }
+    if list == nil {
+      list = []string{}
+    }
+    writeJSON(w, http.StatusOK, struct {
+      Success bool     `json:"success"`
+      Admins  []string `json:"admins"`
+    }{true, list})
+    return
+  }
+  writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+}
+
+// handleAdminSuperadminCreate 创建超管账户
+func (s *Server) handleAdminSuperadminCreate(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+
+  username := r.FormValue("username")
+  if err := user.ValidateUsername(username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+  if auth.UserExists(username) {
+    writeError(w, http.StatusBadRequest, "用户 "+username+" 已存在")
+    return
+  }
+
+  password := auth.GenerateRandomPassword(12)
+  if err := auth.CreateUser(username, password, "superadmin"); err != nil {
+    writeError(w, http.StatusInternalServerError, "创建超管失败: "+err.Error())
+    return
+  }
+
+  writeJSON(w, http.StatusOK, struct {
+    Success  bool   `json:"success"`
+    Message  string `json:"message"`
+    Username string `json:"username"`
+    Password string `json:"password"`
+  }{true, "超管创建成功", username, password})
+}
+
+// handleAdminSuperadminDelete 删除超管账户（至少保留一个）
+func (s *Server) handleAdminSuperadminDelete(w http.ResponseWriter, r *http.Request) {
+  currentUser := s.requireSuperadmin(w, r)
+  if currentUser == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+
+  username := r.FormValue("username")
+  if username == "" {
+    writeError(w, http.StatusBadRequest, "用户名不能为空")
+    return
+  }
+  if username == currentUser {
+    writeError(w, http.StatusBadRequest, "不能删除自己")
+    return
+  }
+  if !auth.IsSuperadmin(username) {
+    writeError(w, http.StatusBadRequest, username+" 不是超管")
+    return
+  }
+
+  admins, _ := auth.GetSuperadmins()
+  if len(admins) <= 1 {
+    writeError(w, http.StatusBadRequest, "至少保留一个超管账户")
+    return
+  }
+
+  if err := auth.DeleteUser(username); err != nil {
+    writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
+    return
+  }
+
+  writeSuccess(w, "超管 "+username+" 已删除")
+}
+
+// handleAdminSuperadminReset 重置超管密码
+func (s *Server) handleAdminSuperadminReset(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+
+  username := r.FormValue("username")
+  if username == "" {
+    writeError(w, http.StatusBadRequest, "用户名不能为空")
+    return
+  }
+  if !auth.IsSuperadmin(username) {
+    writeError(w, http.StatusBadRequest, username+" 不是超管")
+    return
+  }
+
+  password := auth.GenerateRandomPassword(12)
+  if err := auth.ChangePassword(username, password); err != nil {
+    writeError(w, http.StatusInternalServerError, "重置密码失败: "+err.Error())
+    return
+  }
+
+  writeJSON(w, http.StatusOK, struct {
+    Success  bool   `json:"success"`
+    Message  string `json:"message"`
+    Password string `json:"password"`
+  }{true, "密码已重置", password})
+}
