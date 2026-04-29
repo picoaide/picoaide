@@ -229,6 +229,33 @@ func UserExists(username string) bool {
   return count > 0
 }
 
+// LocalUser 记录本地用户基本信息
+type LocalUser struct {
+  Username string
+  Role     string
+}
+
+// GetAllLocalUsers 返回所有本地用户
+func GetAllLocalUsers() ([]LocalUser, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
+  rows, err := db.Query("SELECT username, role FROM local_users ORDER BY username")
+  if err != nil {
+    return nil, err
+  }
+  defer rows.Close()
+  var list []LocalUser
+  for rows.Next() {
+    var u LocalUser
+    if err := rows.Scan(&u.Username, &u.Role); err != nil {
+      return nil, err
+    }
+    list = append(list, u)
+  }
+  return list, nil
+}
+
 // HasAnySuperadmin 检查系统中是否存在超管
 func HasAnySuperadmin() bool {
   if ensureDB() != nil {

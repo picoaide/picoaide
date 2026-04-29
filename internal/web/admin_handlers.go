@@ -57,17 +57,36 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
     return
   }
 
+  // 本地用户（local_users 表）
+  localUsers, _ := auth.GetAllLocalUsers()
+  localSet := make(map[string]bool)
+  for _, u := range localUsers {
+    localSet[u.Username] = true
+  }
+
   type UserInfo struct {
     Username   string `json:"username"`
     Status     string `json:"status"`
     ImageTag   string `json:"image_tag"`
     ImageReady bool   `json:"image_ready"`
     IP         string `json:"ip"`
+    Role       string `json:"role"`
   }
 
   ctx := context.Background()
+
+  // 按 username 索引容器记录
+  containerMap := make(map[string]*auth.ContainerRecord)
+  for i := range containers {
+    containerMap[containers[i].Username] = &containers[i]
+  }
+
   var list []UserInfo
+
+  // 先输出所有有容器记录的用户
+  seen := make(map[string]bool)
   for _, c := range containers {
+    seen[c.Username] = true
     status := c.Status
     if c.ContainerID != "" {
       status = dockerpkg.ContainerStatus(ctx, c.ContainerID)
@@ -75,11 +94,14 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 
     imageRef := c.Image
     imageReady := imageRef != "" && dockerpkg.ImageExists(ctx, imageRef)
-
-    // 从镜像引用提取 tag
     imageTag := imageRef
     if parts := strings.SplitN(imageRef, ":", 2); len(parts) == 2 {
       imageTag = parts[1]
+    }
+
+    role := ""
+    if localSet[c.Username] {
+      role = "user"
     }
 
     list = append(list, UserInfo{
@@ -88,8 +110,21 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
       ImageTag:   imageTag,
       ImageReady: imageReady,
       IP:         c.IP,
+      Role:       role,
     })
   }
+
+  // 补上本地用户中没有容器记录的（如超管）
+  for _, u := range localUsers {
+    if !seen[u.Username] {
+      list = append(list, UserInfo{
+        Username: u.Username,
+        Status:   "未初始化",
+        Role:     u.Role,
+      })
+    }
+  }
+
   if list == nil {
     list = []UserInfo{}
   }
