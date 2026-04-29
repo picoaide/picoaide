@@ -29,3 +29,4 @@ vendor/
 .idea/
 .vscode/
 *.swp
+_playwright_ref/

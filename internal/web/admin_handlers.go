@@ -59,9 +59,9 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 
   // 本地用户（local_users 表）
   localUsers, _ := auth.GetAllLocalUsers()
-  localSet := make(map[string]bool)
+  localRoleMap := make(map[string]string)
   for _, u := range localUsers {
-    localSet[u.Username] = true
+    localRoleMap[u.Username] = u.Role
   }
 
   type UserInfo struct {
@@ -99,10 +99,7 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
       imageTag = parts[1]
     }
 
-    role := ""
-    if localSet[c.Username] {
-      role = "user"
-    }
+    role := localRoleMap[c.Username]
 
     list = append(list, UserInfo{
       Username:   c.Username,

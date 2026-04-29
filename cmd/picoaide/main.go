@@ -311,6 +311,11 @@ func runFirstRun(reader *bufio.Reader) {
   fmt.Printf("数据目录: %s\n", dataDir)
   fmt.Println()
 
+  if err := auth.InitDB(dataDir); err != nil {
+    fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
+    os.Exit(1)
+  }
+
   fmt.Print("是否启用员工统一登录 (LDAP)? [Y/n]: ")
   ldapAnswer, _ := reader.ReadString('\n')
   ldapAnswer = strings.TrimSpace(strings.ToLower(ldapAnswer))
@@ -387,10 +392,6 @@ func runInitExisting(cfg *config.GlobalConfig) {
 // ============================================================
 
 func setupSuperAdmin(reader *bufio.Reader, dataDir string) error {
-  if err := auth.InitDB(dataDir); err != nil {
-    return fmt.Errorf("初始化数据库失败: %w", err)
-  }
-
   if auth.HasAnySuperadmin() {
     fmt.Println("系统中已存在超管账户，跳过创建")
     return nil
