@@ -285,6 +285,33 @@ func runFirstRun(reader *bufio.Reader) {
   fmt.Println("=== PicoAide 首次运行引导 ===")
   fmt.Println()
 
+  // 环境预检
+  fmt.Println("--- 环境检查 ---")
+
+  // 1. Docker
+  if err := dockerpkg.InitClient(); err != nil {
+    fmt.Fprintf(os.Stderr, "[失败] Docker 未安装或未启动: %v\n", err)
+    fmt.Fprintln(os.Stderr, "请先安装 Docker: https://docs.docker.com/engine/install/")
+    os.Exit(1)
+  }
+  dockerpkg.CloseClient()
+  fmt.Println("  Docker: 已安装")
+
+  // 2. 端口 80
+  if !checkPort(80) {
+    fmt.Fprintf(os.Stderr, "[失败] 端口 80 已被占用，请先释放该端口\n")
+    os.Exit(1)
+  }
+  fmt.Println("  端口 80: 可用")
+
+  // 3. 端口 443（警告，不阻断）
+  if !checkPort(443) {
+    fmt.Println("  端口 443: 已被占用（如需 HTTPS 请释放）")
+  } else {
+    fmt.Println("  端口 443: 可用")
+  }
+  fmt.Println()
+
   // 步骤 1: 数据目录
   fmt.Println("--- 步骤 1/4: 数据目录 ---")
   fmt.Print("请输入数据目录 (默认: /data/picoaide): ")
@@ -292,6 +319,16 @@ func runFirstRun(reader *bufio.Reader) {
   dataDir = strings.TrimSpace(dataDir)
   if dataDir == "" {
     dataDir = "/data/picoaide"
+  }
+
+  // 检查目录是否为空
+  if entries, err := os.ReadDir(dataDir); err == nil && len(entries) > 0 {
+    fmt.Printf("[警告] 目录 %s 不为空（包含 %d 个文件），是否继续? [y/N]: ", dataDir, len(entries))
+    cont, _ := reader.ReadString('\n')
+    if strings.TrimSpace(strings.ToLower(cont)) != "y" {
+      fmt.Println("已取消")
+      os.Exit(1)
+    }
   }
 
   if err := os.MkdirAll(dataDir, 0755); err != nil {
@@ -344,21 +381,8 @@ func runFirstRun(reader *bufio.Reader) {
     os.Exit(1)
   }
 
-  // 步骤 3: 网络端口
-  fmt.Println("--- 步骤 3/4: 网络端口 ---")
-  port80 := checkPort(80)
-  port443 := checkPort(443)
-  if port80 {
-    fmt.Println("  端口 80: 可用")
-  } else {
-    fmt.Println("  端口 80: 已被占用")
-  }
-  if port443 {
-    fmt.Println("  端口 443: 可用")
-  } else {
-    fmt.Println("  端口 443: 已被占用")
-  }
-
+  // 步骤 3: 监听地址
+  fmt.Println("--- 步骤 3/4: 监听地址 ---")
   fmt.Print("监听地址 (默认: :80): ")
   listenAddr, _ := reader.ReadString('\n')
   listenAddr = strings.TrimSpace(listenAddr)
