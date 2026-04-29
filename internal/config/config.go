@@ -70,7 +70,7 @@ picoclaw:
       enabled: true
       max_inline_text_chars: 8192
       servers:
-        chrome-devtools:
+        browser:
           enabled: false
   gateway:
     host: "0.0.0.0"

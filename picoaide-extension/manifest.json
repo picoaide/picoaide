@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "PicoAide Helper",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "同步网站登录凭据到 PicoAide",
-  "permissions": ["storage", "cookies", "activeTab", "debugger"],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "permissions": ["storage", "cookies", "activeTab", "scripting", "tabs", "tabGroups", "offscreen"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },

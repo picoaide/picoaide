@@ -308,7 +308,7 @@ func ApplyConfigToJSON(cfg *config.GlobalConfig, picoclawDir string, username st
 
   merged := util.MergeMap(existing, globalPico)
 
-  // 注入 chrome-devtools-mcp 配置
+  // 注入 browser MCP 配置
   mcpToken, _ := auth.GetMCPToken(username)
   if mcpToken != "" {
     injectMCPConfig(merged, mcpToken, cfg)
@@ -322,7 +322,7 @@ func ApplyConfigToJSON(cfg *config.GlobalConfig, picoclawDir string, username st
   return os.WriteFile(configPath, jsonData, 0644)
 }
 
-// injectMCPConfig 向 config.json 注入 chrome-devtools-mcp 的 wsEndpoint + wsHeaders
+// injectMCPConfig 向 config.json 注入 browser MCP server 配置（SSE 直连 Go relay）
 func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config.GlobalConfig) {
   tools, _ := config["tools"].(map[string]interface{})
   if tools == nil {
@@ -340,27 +340,26 @@ func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config
     mcp["servers"] = servers
   }
 
-  // 获取 PicoAide 监听地址作为容器内的网关地址
   listenAddr := cfg.Web.Listen
   host := "100.64.0.1"
-  if parts := strings.SplitN(listenAddr, ":", 2); len(parts) == 2 && parts[0] != "" && parts[0] != ":" {
-    host = parts[0]
+  port := "80"
+  if parts := strings.SplitN(listenAddr, ":", 2); len(parts) == 2 {
+    if parts[0] != "" && parts[0] != ":" {
+      host = parts[0]
+    }
+    if parts[1] != "" {
+      port = parts[1]
+    }
   }
 
-  wsHeaders := fmt.Sprintf(`{"Authorization":"Bearer %s"}`, mcpToken)
-  servers["chrome-devtools"] = map[string]interface{}{
-    "enabled": true,
-    "command": "node",
-    "args": []string{
-      "/usr/local/bin/mcp-proxy.js",
-      "npx",
-      "chrome-devtools-mcp@latest",
-      "--ws-endpoint",
-      "ws://" + host + "/api/mcp/cdp",
-      "--ws-headers",
-      wsHeaders,
-    },
+  servers["browser"] = map[string]interface{}{
+    "enabled":   true,
+    "url":       fmt.Sprintf("http://%s:%s/api/browser/mcp/sse?token=%s", host, port, mcpToken),
+    "transport": "sse",
   }
+
+  // 清理旧配置
+  delete(servers, "chrome-devtools")
 }
 
 // ApplySecurityToYAML 将全局安全配置合并到用户的 .security.yml

@@ -3,8 +3,6 @@ package web
 import (
   "log"
   "net/http"
-  "strings"
-  "time"
 
   "github.com/gorilla/websocket"
 
@@ -36,8 +34,12 @@ func (s *Server) handleMCPToken(w http.ResponseWriter, r *http.Request) {
     return
   }
   if token == "" {
-    writeError(w, http.StatusNotFound, "MCP token 不存在")
-    return
+    token, err = auth.GenerateMCPToken(username)
+    if err != nil {
+      writeError(w, http.StatusInternalServerError, "生成 MCP token 失败: "+err.Error())
+      return
+    }
+    log.Printf("[mcp] 自动为 %s 生成 MCP token", username)
   }
 
   writeJSON(w, http.StatusOK, struct {
@@ -47,82 +49,4 @@ func (s *Server) handleMCPToken(w http.ResponseWriter, r *http.Request) {
     Success: true,
     Token:   token,
   })
-}
-
-// handleMCPCDP 处理 WebSocket 升级，浏览器端和容器端都连这里
-func (s *Server) handleMCPCDP(w http.ResponseWriter, r *http.Request) {
-  kind := r.URL.Query().Get("kind")
-  if kind == "" {
-    kind = "mcp"
-  }
-  if kind != "browser" && kind != "mcp" {
-    writeError(w, http.StatusBadRequest, "kind 参数必须是 browser 或 mcp")
-    return
-  }
-
-  var username string
-
-  // 统一认证：优先 token query param，其次 Authorization header，最后 session cookie
-  token := r.URL.Query().Get("token")
-  if token != "" {
-    var ok bool
-    username, ok = auth.ValidateMCPToken(token)
-    if !ok {
-      writeError(w, http.StatusForbidden, "无效的 MCP token")
-      return
-    }
-  } else {
-    authHeader := r.Header.Get("Authorization")
-    if strings.HasPrefix(authHeader, "Bearer ") {
-      var ok bool
-      username, ok = auth.ValidateMCPToken(strings.TrimPrefix(authHeader, "Bearer "))
-      if !ok {
-        writeError(w, http.StatusForbidden, "无效的 MCP token")
-        return
-      }
-    } else {
-      username = s.getSessionUser(r)
-      if username == "" {
-        writeError(w, http.StatusUnauthorized, "未登录")
-        return
-      }
-    }
-  }
-
-  // WebSocket 升级
-  ws, err := upgrader.Upgrade(w, r, nil)
-  if err != nil {
-    log.Printf("[mcp] WebSocket 升级失败 %s %s: %v", username, kind, err)
-    return
-  }
-
-  log.Printf("[mcp] %s %s 连接 (%s)", username, kind, ws.RemoteAddr())
-
-  conn := &RelayConn{
-    ws:       ws,
-    kind:     kind,
-    username: username,
-    closeCh:  make(chan struct{}),
-  }
-
-  hub.Register(conn)
-
-  // 防止 goroutine 泄漏：如果连接一直处于 pending 状态，设置超时
-  go func() {
-    time.Sleep(5 * time.Minute)
-    hub.mu.RLock()
-    if c, ok := hub.pending[username]; ok && c == conn {
-      hub.mu.RUnlock()
-      hub.mu.Lock()
-      delete(hub.pending, username)
-      hub.mu.Unlock()
-      ws.WriteControl(websocket.CloseMessage,
-        websocket.FormatCloseMessage(websocket.CloseNormalClosure, "等待超时"),
-        time.Now().Add(time.Second))
-      ws.Close()
-      log.Printf("[mcp] %s %s 等待超时断开", username, kind)
-    } else {
-      hub.mu.RUnlock()
-    }
-  }()
 }

@@ -106,15 +106,9 @@ RUN ARCH=$(uname -m) && \
     mv /tmp/picoclaw /usr/bin/ && \
     rm /tmp/picoclaw.tar.gz && \
     picoclaw version && \
-    picoclaw onboard && \
-    rm -rf /root/.picoclaw/workspace/skills/agent-browser/ && \
-    git clone --depth 1 https://github.com/ChromeDevTools/chrome-devtools-mcp.git /tmp/chrome-devtools-mcp && \
-    cp -r /tmp/chrome-devtools-mcp/skills/* /root/.picoclaw/workspace/skills/ && \
-    rm -rf /tmp/chrome-devtools-mcp
+    picoclaw onboard
 
-# 注入 chrome-devtools MCP 服务器配置到 picoclaw config（通过 mcp-proxy 代理兼容参数格式）
-RUN CONFIG="/root/.picoclaw/config.json" && \
-    jq '.tools.mcp.servers["chrome-devtools"]={"args":["/usr/local/bin/mcp-proxy.js","npx","chrome-devtools-mcp@latest","--browser-url=http://127.0.0.1:9222","--autoConnect"],"command":"node","enabled":true}' "$CONFIG" > "${CONFIG}.tmp" && mv "${CONFIG}.tmp" "$CONFIG"
+# Browser MCP server 由 PicoAide Go 服务端直接提供，通过 SSE 连接
 
 # 安装 bocha-search-mcp
 RUN git clone https://github.com/BochaAI/bocha-search-mcp.git /mcp/bocha-search-mcp
@@ -129,8 +123,8 @@ RUN mkdir -p ~/.pip && \
     echo 'index-url = https://pypi.tuna.tsinghua.edu.cn/simple' >> ~/.pip/pip.conf && \
     echo 'trusted-host = pypi.tuna.tsinghua.edu.cn' >> ~/.pip/pip.conf
 
-# 复制启动脚本和 MCP 代理
-COPY mcp-proxy.js entrypoint.sh /usr/local/bin/
+# 复制启动脚本
+COPY entrypoint.sh /usr/local/bin/
 
 RUN chmod +x /usr/local/bin/entrypoint.sh
 

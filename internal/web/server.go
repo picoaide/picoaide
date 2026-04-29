@@ -207,9 +207,13 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/files/edit", s.secureHeaders(s.handleFileEdit))
   // CSRF token
   mux.HandleFunc("/api/csrf", s.secureHeaders(s.handleCSRF))
-  // MCP WebSocket 中继
+  // MCP token（Extension 获取认证 token）
   mux.HandleFunc("/api/mcp/token", s.secureHeaders(s.handleMCPToken))
-  mux.HandleFunc("/api/mcp/cdp", s.secureHeaders(s.handleMCPCDP))
+  // Browser MCP Server（SSE + JSON-RPC）
+  mux.HandleFunc("/api/browser/mcp/sse", s.secureHeaders(s.handleBrowserMCPSSE))
+  mux.HandleFunc("/api/browser/mcp", s.secureHeaders(s.handleBrowserMCPMessage))
+  // Browser Extension WebSocket
+  mux.HandleFunc("/api/browser/ws", s.secureHeaders(s.handleBrowserWS))
   // 超管 - 用户管理
   mux.HandleFunc("/api/admin/users", s.secureHeaders(s.handleAdminUsers))
   mux.HandleFunc("/api/admin/users/create", s.secureHeaders(s.handleAdminUserCreate))

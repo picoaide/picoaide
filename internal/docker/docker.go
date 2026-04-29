@@ -6,8 +6,6 @@ import (
   "fmt"
   "io"
   "net/http"
-  "os"
-  "path/filepath"
   "strings"
   "time"
 
@@ -19,52 +17,7 @@ import (
   "github.com/docker/docker/client"
 )
 
-// mcpProxyScript 是 MCP stdio 代理脚本，用于修复 PicoClaw 与 chrome-devtools-mcp 的参数格式兼容性
-var mcpProxyScript = `#!/usr/bin/env node
-// MCP stdio proxy - fixes params.arguments format for PicoClaw compatibility
-const { spawn } = require('child_process');
-const readline = require('readline');
-
-if (process.argv.length < 3) {
-  process.stderr.write('Usage: node mcp-proxy.js <command> [args...]\n');
-  process.exit(1);
-}
-
-const child = spawn(process.argv[2], process.argv.slice(3), {
-  stdio: ['pipe', 'pipe', 'inherit'],
-  env: process.env,
-});
-
-function fixMessage(line) {
-  try {
-    const msg = JSON.parse(line);
-    if (msg.method === 'tools/call' && msg.params) {
-      const args = msg.params.arguments;
-      if (args === null || args === undefined ||
-          typeof args !== 'object' || Array.isArray(args)) {
-        msg.params.arguments = {};
-      }
-      return JSON.stringify(msg);
-    }
-  } catch {}
-  return line;
-}
-
-const input = readline.createInterface({ input: process.stdin, terminal: false });
-input.on('line', (line) => {
-  child.stdin.write(fixMessage(line) + '\n');
-});
-input.on('close', () => { try { child.stdin.end(); } catch {} });
-
-const output = readline.createInterface({ input: child.stdout, terminal: false });
-output.on('line', (line) => {
-  process.stdout.write(line + '\n');
-});
-
-child.on('exit', (code) => process.exit(code || 0));
-process.on('SIGTERM', () => child.kill('SIGTERM'));
-process.on('SIGINT', () => child.kill('SIGINT'));
-`
+// Browser MCP server 由 Go 服务端直接提供，无需 Node.js 中继
 
 const (
   NetworkName   = "picoaide-net"
@@ -152,20 +105,6 @@ func CreateContainer(ctx context.Context, username, imageRef, userDir, ip string
     Source: userDir,
     Target: "/root",
   })
-
-  // 确保 mcp-proxy.js 在宿主机上可用，然后 bind mount 到容器
-  proxyHostPath := filepath.Join(filepath.Dir(userDir), "scripts", "mcp-proxy.js")
-  if err := os.MkdirAll(filepath.Dir(proxyHostPath), 0755); err == nil {
-    if _, err := os.Stat(proxyHostPath); err != nil {
-      os.WriteFile(proxyHostPath, []byte(mcpProxyScript), 0755)
-    }
-    mounts = append(mounts, mount.Mount{
-      Type:   mount.TypeBind,
-      Source: proxyHostPath,
-      Target: "/usr/local/bin/mcp-proxy.js",
-      ReadOnly: true,
-    })
-  }
 
   hostConfig := &container.HostConfig{
     Mounts:       mounts,
