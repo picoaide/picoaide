@@ -2,7 +2,6 @@ package main
 
 import (
   "bufio"
-  "context"
   "fmt"
   "os"
   "path/filepath"
@@ -11,11 +10,10 @@ import (
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
-  dockerpkg "github.com/picoaide/picoaide/internal/docker"
   "github.com/picoaide/picoaide/internal/ldap"
   "github.com/picoaide/picoaide/internal/user"
-  "github.com/picoaide/picoaide/internal/util"
   "github.com/picoaide/picoaide/internal/web"
+  "github.com/picoaide/picoaide/internal/util"
   "golang.org/x/term"
 )
 
@@ -29,28 +27,10 @@ func printUsage() {
 用法:
   %s <command> [options]
 
-推荐工作流:
-  1. init          初始化（首次运行引导，创建配置和服务）
-  2. start         启动容器（PicoClaw 自动生成默认配置）
-  3. config apply  合并全局配置到用户配置文件
-
 命令:
-  init                                    首次运行引导 / 初始化用户目录
-  init -user <name>                       初始化单个用户目录
-  start [-user <name>]                    启动容器
-  stop [-user <name>]                     停止容器
-  down [-user <name>]                     彻底停止并清理容器
-  restart [-user <name>]                  重启容器
-  sync                                    LDAP 同步 + 镜像更新 + 滚动重启
-  upgrade [-tag <version>] [-user <name>] 升级镜像版本
-  list                                    列出所有用户及容器状态
-  config show                             查看全局配置
-  config set-model <json>                 设置模型列表
-  config set-key <model> <key>           设置 API Key
-  config set-channel <json>               设置渠道配置
-  config apply [-user <name>]             合并全局配置到用户配置文件（不覆盖已有配置）
-  skills deploy [-user <name>]            分发技能到用户目录
-  serve [-listen :80]                     启动 Web 管理面板
+  init [-user <name>]         首次运行引导 / 初始化用户目录
+  reset-password <username>   重置本地用户密码
+  serve [-listen :80]         启动 Web 管理面板
 
 全局选项:
   -config <path>    指定配置文件路径
@@ -115,7 +95,7 @@ func main() {
     configPath = configPathOverride
   }
 
-  // 初始化数据库（失败时重试一次）
+  // 初始化数据库
   wd, _ := os.Getwd()
   if err := auth.InitDB(wd); err != nil {
     fmt.Fprintf(os.Stderr, "警告: 数据库初始化失败，正在重试: %v\n", err)
@@ -126,7 +106,7 @@ func main() {
     }
   }
 
-  // 配置初始化：检查 DB 是否有配置，没有则迁移或初始化
+  // 配置初始化
   count, err := config.SettingsCount()
   if err != nil {
     fmt.Fprintf(os.Stderr, "检查配置失败: %v\n", err)
@@ -134,7 +114,6 @@ func main() {
   }
   if count == 0 {
     if configPath != "" {
-      // 从指定 config.yaml 迁移
       if _, err := os.Stat(configPath); err == nil {
         fmt.Printf("检测到配置文件 %s，正在迁移到数据库...\n", configPath)
         if err := config.MigrateFromYAML(configPath); err != nil {
@@ -143,14 +122,12 @@ func main() {
         }
       }
     } else if _, err := os.Stat("config.yaml"); err == nil {
-      // 自动检测当前目录的 config.yaml
       fmt.Println("检测到 config.yaml，正在迁移到数据库...")
       if err := config.MigrateFromYAML("config.yaml"); err != nil {
         fmt.Fprintf(os.Stderr, "迁移配置失败: %v\n", err)
         os.Exit(1)
       }
     } else {
-      // 全新安装：用默认配置初始化
       fmt.Println("首次运行，初始化默认配置...")
       if err := config.InitDBDefaults(); err != nil {
         fmt.Fprintf(os.Stderr, "初始化默认配置失败: %v\n", err)
@@ -165,146 +142,7 @@ func main() {
     os.Exit(1)
   }
 
-  // 初始化 Docker 客户端（容器操作需要）
-  needDocker := map[string]bool{
-    "start": true, "stop": true, "down": true, "restart": true,
-    "sync": true, "upgrade": true,
-  }
-  canRunWithoutDocker := map[string]bool{"list": true}
-  if !canRunWithoutDocker[command] {
-    needDocker[command] = true
-  }
-  if needDocker[command] || canRunWithoutDocker[command] {
-    if err := dockerpkg.InitClient(); err != nil {
-      if canRunWithoutDocker[command] {
-        fmt.Fprintf(os.Stderr, "警告: Docker 不可用，将以降级模式运行\n")
-      } else {
-        fmt.Fprintf(os.Stderr, "Docker 初始化失败: %v\n", err)
-        os.Exit(1)
-      }
-    } else {
-      defer dockerpkg.CloseClient()
-      ctx := context.Background()
-      if err := dockerpkg.EnsureNetwork(ctx); err != nil {
-        fmt.Fprintf(os.Stderr, "警告: 网络初始化失败: %v\n", err)
-      }
-    }
-  }
-
   switch command {
-  case "start":
-    config.PreflightChecks()
-    flags, _ := util.ParseFlags(cmdArgs)
-    targetUser := flags["-user"]
-    if targetUser != "" {
-      if err := startUser(cfg, targetUser); err != nil {
-        fmt.Fprintf(os.Stderr, "启动失败: %v\n", err)
-        os.Exit(1)
-      }
-    } else {
-      if err := user.ForEachUser(cfg, func(u string) error {
-        return startUser(cfg, u)
-      }); err != nil {
-        fmt.Fprintf(os.Stderr, "启动失败: %v\n", err)
-        os.Exit(1)
-      }
-    }
-
-  case "stop":
-    flags, _ := util.ParseFlags(cmdArgs)
-    targetUser := flags["-user"]
-    if targetUser != "" {
-      if err := stopUser(targetUser); err != nil {
-        fmt.Fprintf(os.Stderr, "停止失败: %v\n", err)
-        os.Exit(1)
-      }
-    } else {
-      if err := user.ForEachUser(cfg, func(u string) error {
-        return stopUser(u)
-      }); err != nil {
-        fmt.Fprintf(os.Stderr, "停止失败: %v\n", err)
-        os.Exit(1)
-      }
-    }
-
-  case "down":
-    flags, _ := util.ParseFlags(cmdArgs)
-    targetUser := flags["-user"]
-    if targetUser != "" {
-      if err := downUser(targetUser); err != nil {
-        fmt.Fprintf(os.Stderr, "彻底停止失败: %v\n", err)
-        os.Exit(1)
-      }
-    } else {
-      if err := user.ForEachUser(cfg, func(u string) error {
-        return downUser(u)
-      }); err != nil {
-        fmt.Fprintf(os.Stderr, "彻底停止失败: %v\n", err)
-        os.Exit(1)
-      }
-    }
-
-  case "restart":
-    flags, _ := util.ParseFlags(cmdArgs)
-    targetUser := flags["-user"]
-    if targetUser != "" {
-      if err := restartUser(cfg, targetUser); err != nil {
-        fmt.Fprintf(os.Stderr, "重启失败: %v\n", err)
-        os.Exit(1)
-      }
-    } else {
-      if err := user.ForEachUser(cfg, func(u string) error {
-        return restartUser(cfg, u)
-      }); err != nil {
-        fmt.Fprintf(os.Stderr, "重启失败: %v\n", err)
-        os.Exit(1)
-      }
-    }
-
-  case "sync":
-    config.PreflightChecks()
-    if err := Sync(cfg); err != nil {
-      fmt.Fprintf(os.Stderr, "同步失败: %v\n", err)
-      os.Exit(1)
-    }
-
-  case "upgrade":
-    flags, _ := util.ParseFlags(cmdArgs)
-    newTag := flags["-tag"]
-    targetUser := flags["-user"]
-    if err := Upgrade(cfg, configPath, newTag, targetUser); err != nil {
-      fmt.Fprintf(os.Stderr, "升级失败: %v\n", err)
-      os.Exit(1)
-    }
-
-  case "list":
-    if err := List(); err != nil {
-      fmt.Fprintf(os.Stderr, "列表失败: %v\n", err)
-      os.Exit(1)
-    }
-
-  case "skills":
-    if len(cmdArgs) == 0 {
-      fmt.Println("用法: skills <deploy> [options]")
-      fmt.Println("  skills deploy [-user <name>]  分发技能到用户目录")
-      os.Exit(1)
-    }
-    skillsCmd := cmdArgs[0]
-    skillsCmdArgs := cmdArgs[1:]
-    switch skillsCmd {
-    case "deploy":
-      flags, _ := util.ParseFlags(skillsCmdArgs)
-      targetUser := flags["-user"]
-      if err := SkillsDeploy(cfg, targetUser); err != nil {
-        fmt.Fprintf(os.Stderr, "技能分发失败: %v\n", err)
-        os.Exit(1)
-      }
-      fmt.Println("技能分发完成")
-    default:
-      fmt.Printf("未知技能命令: %s\n", skillsCmd)
-      os.Exit(1)
-    }
-
   case "serve":
     flags, _ := util.ParseFlags(cmdArgs)
     listenAddr := flags["-listen"]
@@ -313,73 +151,14 @@ func main() {
       os.Exit(1)
     }
 
-  case "config":
-    if len(cmdArgs) == 0 {
-      fmt.Println("用法: config <show|set-model|set-key|set-channel|apply> [args]")
+  case "reset-password":
+    _, positional := util.ParseFlags(cmdArgs)
+    if len(positional) == 0 {
+      fmt.Println("用法: picoaide reset-password <username>")
       os.Exit(1)
     }
-    configCmd := cmdArgs[0]
-    configCmdArgs := cmdArgs[1:]
-
-    switch configCmd {
-    case "show":
-      if err := ConfigShow(cfg); err != nil {
-        fmt.Fprintf(os.Stderr, "错误: %v\n", err)
-        os.Exit(1)
-      }
-    case "set-model":
-      if len(configCmdArgs) < 1 {
-        fmt.Println("用法: config set-model '<json-array>'")
-        fmt.Println(`示例: config set-model '[{"model_name":"gpt-5.4","model":"openai/gpt-5.4","api_base":"https://api.openai.com/v1"}]'`)
-        os.Exit(1)
-      }
-      _, positional := util.ParseFlags(configCmdArgs)
-      if len(positional) == 0 {
-        fmt.Println("用法: config set-model '<json-array>'")
-        os.Exit(1)
-      }
-      if err := ConfigSetModel(cfg, configPath, positional[0]); err != nil {
-        fmt.Fprintf(os.Stderr, "错误: %v\n", err)
-        os.Exit(1)
-      }
-      fmt.Println("模型列表已更新")
-    case "set-key":
-      if len(configCmdArgs) < 2 {
-        fmt.Println("用法: config set-key <model-name> <api-key>")
-        fmt.Println("示例: config set-key gpt-5.4:0 sk-new-key")
-        os.Exit(1)
-      }
-      _, positional := util.ParseFlags(configCmdArgs)
-      if len(positional) < 2 {
-        fmt.Println("用法: config set-key <model-name> <api-key>")
-        os.Exit(1)
-      }
-      if err := ConfigSetKey(cfg, configPath, positional[0], positional[1]); err != nil {
-        fmt.Fprintf(os.Stderr, "错误: %v\n", err)
-        os.Exit(1)
-      }
-      fmt.Printf("API Key 已更新: %s\n", positional[0])
-    case "set-channel":
-      if len(configCmdArgs) < 1 {
-        fmt.Println("用法: config set-channel '<json>'")
-        fmt.Println(`示例: config set-channel '{"telegram":{"enabled":true}}'`)
-        os.Exit(1)
-      }
-      if err := ConfigSetChannel(cfg, configPath, configCmdArgs[0]); err != nil {
-        fmt.Fprintf(os.Stderr, "错误: %v\n", err)
-        os.Exit(1)
-      }
-      fmt.Println("渠道配置已更新")
-    case "apply":
-      flags, _ := util.ParseFlags(configCmdArgs)
-      targetUser := flags["-user"]
-      if err := ConfigApply(cfg, targetUser); err != nil {
-        fmt.Fprintf(os.Stderr, "错误: %v\n", err)
-        os.Exit(1)
-      }
-      fmt.Println("配置已应用")
-    default:
-      fmt.Printf("未知配置命令: %s\n", configCmd)
+    if err := runResetPassword(positional[0]); err != nil {
+      fmt.Fprintf(os.Stderr, "重置密码失败: %v\n", err)
       os.Exit(1)
     }
 
@@ -391,97 +170,46 @@ func main() {
 }
 
 // ============================================================
-// Docker 容器操作辅助函数
+// reset-password 命令
 // ============================================================
 
-// ensureContainerCreated 确保容器已创建（未创建则创建）
-func ensureContainerCreated(cfg *config.GlobalConfig, username string) (string, error) {
-  rec, err := auth.GetContainerByUsername(username)
-  if err != nil {
-    return "", fmt.Errorf("查询用户记录失败: %w", err)
-  }
-  if rec == nil {
-    return "", fmt.Errorf("用户 %s 未初始化", username)
+func runResetPassword(username string) error {
+  if !auth.UserExists(username) {
+    return fmt.Errorf("用户 %s 不存在", username)
   }
 
-  // 已有 containerID 且容器存在
-  if rec.ContainerID != "" {
-    if dockerpkg.ContainerExists(context.Background(), username) {
-      return rec.ContainerID, nil
+  for {
+    fmt.Print("新密码: ")
+    pwdBytes, err := term.ReadPassword(int(syscall.Stdin))
+    if err != nil {
+      return fmt.Errorf("读取密码失败: %w", err)
     }
-  }
+    fmt.Println()
 
-  // 需要创建容器
-  userDir := user.UserDir(cfg, username)
-  imageRef := rec.Image
-  if imageRef == "" {
-    return "", fmt.Errorf("用户 %s 未设置镜像标签，请先拉取镜像并在创建用户时指定标签", username)
-  }
+    if len(pwdBytes) < 6 {
+      fmt.Println("密码至少 6 位，请重新输入")
+      continue
+    }
 
-  ctx := context.Background()
-  cid, err := dockerpkg.CreateContainer(ctx, username, imageRef, userDir, rec.IP, rec.CPULimit, rec.MemoryLimit)
-  if err != nil {
-    return "", fmt.Errorf("创建容器失败: %w", err)
-  }
+    fmt.Print("确认密码: ")
+    confirmBytes, err := term.ReadPassword(int(syscall.Stdin))
+    if err != nil {
+      return fmt.Errorf("读取密码失败: %w", err)
+    }
+    fmt.Println()
 
-  // 更新 DB 记录
-  auth.UpdateContainerID(username, cid)
-  return cid, nil
-}
+    if string(pwdBytes) != string(confirmBytes) {
+      fmt.Println("两次密码不一致，请重新输入")
+      continue
+    }
 
-func startUser(cfg *config.GlobalConfig, username string) error {
-  cid, err := ensureContainerCreated(cfg, username)
-  if err != nil {
-    return err
-  }
-  if err := dockerpkg.Start(context.Background(), cid); err != nil {
-    return err
-  }
-  auth.UpdateContainerStatus(username, "running")
-  fmt.Printf("  [启动] %s\n", username)
-  return nil
-}
+    if err := auth.ChangePassword(username, string(pwdBytes)); err != nil {
+      return err
+    }
 
-func stopUser(username string) error {
-  rec, err := auth.GetContainerByUsername(username)
-  if err != nil || rec == nil || rec.ContainerID == "" {
-    fmt.Printf("  [跳过] %s (无容器)\n", username)
+    fmt.Printf("用户 %s 密码已重置\n", username)
     return nil
   }
-  if err := dockerpkg.Stop(context.Background(), rec.ContainerID); err != nil {
-    return err
-  }
-  auth.UpdateContainerStatus(username, "stopped")
-  fmt.Printf("  [停止] %s\n", username)
-  return nil
-}
-
-func downUser(username string) error {
-  rec, err := auth.GetContainerByUsername(username)
-  if err != nil || rec == nil || rec.ContainerID == "" {
-    fmt.Printf("  [跳过] %s (无容器)\n", username)
-    return nil
-  }
-  if err := dockerpkg.Remove(context.Background(), rec.ContainerID); err != nil {
-    return err
-  }
-  auth.UpdateContainerID(username, "")
-  auth.UpdateContainerStatus(username, "stopped")
-  fmt.Printf("  [彻底停止] %s\n", username)
-  return nil
-}
-
-func restartUser(cfg *config.GlobalConfig, username string) error {
-  cid, err := ensureContainerCreated(cfg, username)
-  if err != nil {
-    return err
-  }
-  if err := dockerpkg.Restart(context.Background(), cid); err != nil {
-    return err
-  }
-  auth.UpdateContainerStatus(username, "running")
-  fmt.Printf("  [重启] %s\n", username)
-  return nil
 }
 
 // ============================================================
@@ -641,33 +369,17 @@ func runInitExisting(cfg *config.GlobalConfig) {
     users, err := ldap.FetchUsers(cfg)
     if err != nil {
       fmt.Printf("失败: %v\n", err)
-      fmt.Fprintf(os.Stderr, "LDAP 连接失败，请检查 config.yaml 中的 LDAP 配置\n")
+      fmt.Fprintf(os.Stderr, "LDAP 连接失败，请检查配置\n")
       os.Exit(1)
     }
     fmt.Printf("成功（获取到 %d 个用户）\n", len(users))
-  }
-
-  wd, _ := os.Getwd()
-  if err := auth.InitDB(wd); err != nil {
-    fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
-    os.Exit(1)
   }
 
   if err := config.InstallService(cfg); err != nil {
     fmt.Fprintf(os.Stderr, "警告: 服务安装失败: %v\n", err)
   }
 
-  config.PreflightChecks()
-
-  // 获取本地最新镜像标签
-  var initTag string
-  if tags, err := dockerpkg.ListLocalTags(context.Background(), cfg.Image.Name); err == nil && len(tags) > 0 {
-    initTag = tags[0]
-  }
-  if err := user.InitAll(cfg, initTag); err != nil {
-    fmt.Fprintf(os.Stderr, "初始化失败: %v\n", err)
-    os.Exit(1)
-  }
+  fmt.Println("初始化完成")
 }
 
 // ============================================================

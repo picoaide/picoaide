@@ -14,7 +14,6 @@ import (
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
-  "github.com/picoaide/picoaide/internal/ldap"
   "github.com/picoaide/picoaide/internal/util"
 )
 
@@ -138,7 +137,6 @@ func InitUser(cfg *config.GlobalConfig, username string, imageTag string) error 
   existing := false
   if _, err := os.Stat(ud); err == nil {
     existing = true
-    migrateLegacyRootDir(ud)
   } else {
     if err := os.MkdirAll(ud, 0755); err != nil {
       return fmt.Errorf("创建目录失败 %s: %w", username, err)
@@ -180,36 +178,6 @@ func InitUser(cfg *config.GlobalConfig, username string, imageTag string) error 
   return nil
 }
 
-// InitAll 从 LDAP 获取用户列表并初始化所有白名单内的用户
-func InitAll(cfg *config.GlobalConfig, imageTag string) error {
-
-  whitelist, err := LoadWhitelist()
-  if err != nil {
-    return fmt.Errorf("加载白名单失败: %w", err)
-  }
-
-  users, err := ldap.FetchUsers(cfg)
-  if err != nil {
-    return err
-  }
-
-  fmt.Printf("从 LDAP 获取到 %d 个用户\n", len(users))
-  if whitelist != nil {
-    fmt.Printf("白名单已启用，允许 %d 个用户\n", len(whitelist))
-  }
-
-  for _, u := range users {
-    if !IsWhitelisted(whitelist, u) {
-      fmt.Printf("  [跳过] %s 不在白名单中\n", u)
-      continue
-    }
-    if err := InitUser(cfg, u, imageTag); err != nil {
-      fmt.Fprintf(os.Stderr, "初始化用户 %s 失败: %v\n", u, err)
-    }
-  }
-  return nil
-}
-
 // ResolveArchiveRoot 解析归档目录路径
 func ResolveArchiveRoot(cfg *config.GlobalConfig) string {
   if filepath.IsAbs(cfg.ArchiveRoot) {
@@ -244,44 +212,7 @@ func ArchiveUser(cfg *config.GlobalConfig, username string) error {
   if err := os.Rename(srcDir, dstDir); err != nil {
     return fmt.Errorf("归档 %s 失败: %w", username, err)
   }
-  fmt.Printf("  [归档] %s: %s -> %s\n", username, srcDir, dstDir)
   return nil
-}
-
-// RestoreUser 将归档用户从 archive/ 恢复到 users/
-func RestoreUser(cfg *config.GlobalConfig, username string) error {
-  archiveRoot := ResolveArchiveRoot(cfg)
-  archiveDir := filepath.Join(archiveRoot, username)
-  if _, err := os.Stat(archiveDir); err != nil {
-    return nil
-  }
-
-  dstDir := UserDir(cfg, username)
-  if err := os.Rename(archiveDir, dstDir); err != nil {
-    return fmt.Errorf("恢复 %s 失败: %w", username, err)
-  }
-  fmt.Printf("  [恢复] %s: archive -> users\n", username)
-  return nil
-}
-
-// GetArchivedUsers 获取归档目录中的用户列表
-func GetArchivedUsers(cfg *config.GlobalConfig) ([]string, error) {
-  archiveRoot := ResolveArchiveRoot(cfg)
-  entries, err := os.ReadDir(archiveRoot)
-  if err != nil {
-    if os.IsNotExist(err) {
-      return nil, nil
-    }
-    return nil, fmt.Errorf("读取归档目录失败: %w", err)
-  }
-
-  var users []string
-  for _, e := range entries {
-    if e.IsDir() {
-      users = append(users, e.Name())
-    }
-  }
-  return users, nil
 }
 
 // ============================================================
@@ -514,29 +445,3 @@ func SaveDingTalkConfig(cfg *config.GlobalConfig, username, clientID, clientSecr
 // 旧版目录迁移
 // ============================================================
 
-// migrateLegacyRootDir 将旧版 users/xxx/root/ 的内容提升到 users/xxx/
-func migrateLegacyRootDir(userDir string) {
-  rootDir := filepath.Join(userDir, "root")
-  info, err := os.Stat(rootDir)
-  if err != nil || !info.IsDir() {
-    return
-  }
-
-  entries, err := os.ReadDir(rootDir)
-  if err != nil {
-    return
-  }
-
-  for _, e := range entries {
-    src := filepath.Join(rootDir, e.Name())
-    dst := filepath.Join(userDir, e.Name())
-    if _, err := os.Stat(dst); err == nil {
-      continue
-    }
-    os.Rename(src, dst)
-  }
-
-  if remaining, _ := os.ReadDir(rootDir); len(remaining) == 0 {
-    os.Remove(rootDir)
-  }
-}

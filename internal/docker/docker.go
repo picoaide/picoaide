@@ -27,11 +27,6 @@ const (
 
 var cli *client.Client
 
-// IsInitialized 返回 Docker 客户端是否已初始化
-func IsInitialized() bool {
-  return cli != nil
-}
-
 // InitClient 初始化 Docker Engine API 客户端
 func InitClient() error {
   var err error
