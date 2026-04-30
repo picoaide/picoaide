@@ -15,6 +15,17 @@ from .permissions import is_tool_allowed
 
 logger = logging.getLogger(__name__)
 
+# RapidOCR 惰性初始化（首次调用时加载模型）
+_ocr_engine = None
+
+
+def _get_ocr_engine():
+  global _ocr_engine
+  if _ocr_engine is None:
+    from rapidocr_onnxruntime import RapidOCR
+    _ocr_engine = RapidOCR()
+  return _ocr_engine
+
 # 安全设置
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.05
@@ -160,6 +171,52 @@ def _keyboard_press(params):
   return {"ok": True}
 
 
+def _screen_text(params):
+  """OCR 识别屏幕文字，返回每个元素的文本和位置"""
+  import numpy as np
+
+  with mss() as sct:
+    region = params.get("region", "")
+    if region:
+      parts = [int(p.strip()) for p in region.split(",")]
+      if len(parts) == 4:
+        monitor = {"left": parts[0], "top": parts[1], "width": parts[2], "height": parts[3]}
+      else:
+        monitor = sct.monitors[0]
+    else:
+      monitor = sct.monitors[0]
+
+    shot = sct.grab(monitor)
+    img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+    img_array = np.array(img)
+
+  engine = _get_ocr_engine()
+  results, _ = engine(img_array)
+
+  elements = []
+  if results:
+    for item in results:
+      boxes, text, confidence = item[0], item[1], item[2]
+      xs = [p[0] for p in boxes]
+      ys = [p[1] for p in boxes]
+      x_min, x_max = min(xs), max(xs)
+      y_min, y_max = min(ys), max(ys)
+      offset_x = monitor.get("left", 0)
+      offset_y = monitor.get("top", 0)
+      elements.append({
+        "text": text,
+        "confidence": round(confidence, 3),
+        "x": offset_x + x_min,
+        "y": offset_y + y_min,
+        "width": x_max - x_min,
+        "height": y_max - y_min,
+        "center_x": offset_x + (x_min + x_max) // 2,
+        "center_y": offset_y + (y_min + y_max) // 2,
+      })
+
+  return {"elements": elements, "count": len(elements)}
+
+
 def _file_read(params):
   path = params["path"]
   if not os.path.isfile(path):
@@ -272,6 +329,7 @@ TOOL_HANDLERS = {
   "computer_screenshot": _screenshot,
   "computer_screen_size": _screen_size,
   "computer_active_window": _active_window,
+  "computer_screen_text": _screen_text,
   "computer_mouse_click": _mouse_click,
   "computer_mouse_move": _mouse_move,
   "computer_mouse_drag": _mouse_drag,

@@ -6,7 +6,7 @@ PERMISSION_GROUPS = {
     "label": "屏幕截图",
     "desc": "允许 AI 截取屏幕截图和获取屏幕分辨率",
     "icon": "🖥",
-    "tools": ["computer_screenshot", "computer_screen_size", "computer_active_window"],
+    "tools": ["computer_screenshot", "computer_screen_size", "computer_active_window", "computer_screen_text"],
     "default": True,
   },
   "mouse": {

@@ -114,6 +114,19 @@ var computerToolDefs = []ToolDef{
     },
   },
   {
+    Name:        "computer_screen_text",
+    Description: "通过本地 OCR 识别屏幕上的文字及其位置，返回每个文字元素的文本内容和可点击的屏幕坐标",
+    InputSchema: map[string]interface{}{
+      "type": "object",
+      "properties": map[string]interface{}{
+        "region": map[string]interface{}{
+          "type":        "string",
+          "description": "可选，截取区域，格式 x,y,w,h（如 100,200,800,600），不填则全屏",
+        },
+      },
+    },
+  },
+  {
     Name:        "computer_file_read",
     Description: "读取用户桌面上的文件内容",
     InputSchema: map[string]interface{}{
