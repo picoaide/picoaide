@@ -5,11 +5,30 @@ from PySide6.QtWidgets import (
   QLabel, QPushButton, QCheckBox, QListWidget, QListWidgetItem,
   QFileDialog, QGroupBox, QSystemTrayIcon, QMenu, QComboBox,
 )
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtCore import Qt, QSize, QRect
+from PySide6.QtGui import QAction, QIcon, QPainter, QPen, QColor
 
 from core.permissions import PERMISSION_GROUPS
 from core.config import save_config
+
+
+class CheckCheckBox(QCheckBox):
+  """自定义 Checkbox：checked 状态下绘制白色对号"""
+
+  def paintEvent(self, event):
+    super().paintEvent(event)
+    if self.isChecked():
+      opt = self.style().subElementRect(
+        self.style().SE_CheckBoxIndicator, self.style().initFrom(self), self
+      )
+      painter = QPainter(self)
+      painter.setRenderHint(QPainter.Antialiasing)
+      pen = QPen(QColor("white"), 2)
+      painter.setPen(pen)
+      r = opt.adjusted(3, 3, -3, -3)
+      painter.drawLine(r.left(), r.center().y(), r.center().x(), r.bottom())
+      painter.drawLine(r.center().x(), r.bottom(), r.right(), r.top())
+      painter.end()
 
 
 class MainWindow(QMainWindow):
@@ -62,13 +81,13 @@ class MainWindow(QMainWindow):
     perm_header = QHBoxLayout()
     self.select_all_btn = QPushButton("全部授权")
     self.select_all_btn.setProperty("class", "primary")
-    self.select_all_btn.setMinimumWidth(90)
+    self.select_all_btn.setMinimumWidth(100)
     self.select_all_btn.clicked.connect(lambda: self._set_all(True))
     perm_header.addWidget(self.select_all_btn)
 
     self.deselect_all_btn = QPushButton("全部禁用")
     self.deselect_all_btn.setProperty("class", "outline")
-    self.deselect_all_btn.setMinimumWidth(90)
+    self.deselect_all_btn.setMinimumWidth(100)
     self.deselect_all_btn.clicked.connect(lambda: self._set_all(False))
     perm_header.addWidget(self.deselect_all_btn)
     perm_header.addStretch()
@@ -77,7 +96,7 @@ class MainWindow(QMainWindow):
     # 各权限项
     permissions = self.cfg.get("permissions", {})
     for key, info in PERMISSION_GROUPS.items():
-      cb = QCheckBox(f"  {info['icon']}  {info['label']}")
+      cb = CheckCheckBox(f"  {info['icon']}  {info['label']}")
       cb.setChecked(permissions.get(key, info["default"]))
       cb.stateChanged.connect(self._on_perm_changed)
       perm_layout.addWidget(cb)
