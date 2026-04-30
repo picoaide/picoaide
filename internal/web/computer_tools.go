@@ -19,6 +19,14 @@ var computerToolDefs = []ToolDef{
     },
   },
   {
+    Name:        "computer_active_window",
+    Description: "获取当前活跃窗口的标题",
+    InputSchema: map[string]interface{}{
+      "type":       "object",
+      "properties": map[string]interface{}{},
+    },
+  },
+  {
     Name:        "computer_mouse_click",
     Description: "在桌面指定坐标执行鼠标点击",
     InputSchema: map[string]interface{}{

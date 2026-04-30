@@ -63,8 +63,10 @@ def execute_tool(tool, params, permissions, whitelist_dirs):
 
 def _screenshot(params):
   with mss() as sct:
-    shot = sct.shot(output=None)
-    img = Image.open(io.BytesIO(shot))
+    # grab() 直接返回 PIL 兼容的截图数据，不写文件
+    monitor = sct.monitors[0]
+    shot = sct.grab(monitor)
+    img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode()
@@ -78,6 +80,33 @@ def _screenshot(params):
 def _screen_size(params):
   w, h = pyautogui.size()
   return {"width": w, "height": h, "platform": platform.system()}
+
+
+def _active_window(params):
+  """获取当前活跃窗口的标题"""
+  import subprocess
+  system = platform.system()
+  try:
+    if system == "Windows":
+      import ctypes
+      hwnd = ctypes.windll.user32.GetForegroundWindow()
+      length = ctypes.windll.user32.GetWindowTextLengthW(hwnd) + 1
+      buf = ctypes.create_unicode_buffer(length)
+      ctypes.windll.user32.GetWindowTextW(hwnd, buf, length)
+      title = buf.value
+    elif system == "Darwin":
+      result = subprocess.run(
+        ["osascript", "-e", 'tell application "System Events" to get name of first process whose frontmost is true'],
+        capture_output=True, text=True, timeout=5
+      )
+      title = result.stdout.strip()
+    else:
+      result = subprocess.run(["xdotool", "getactivewindow", "getwindowname"],
+        capture_output=True, text=True, timeout=5)
+      title = result.stdout.strip()
+    return {"title": title, "platform": system}
+  except Exception as e:
+    return {"title": "", "error": str(e)}
 
 
 def _mouse_click(params):
@@ -242,6 +271,7 @@ def _file_search(params):
 TOOL_HANDLERS = {
   "computer_screenshot": _screenshot,
   "computer_screen_size": _screen_size,
+  "computer_active_window": _active_window,
   "computer_mouse_click": _mouse_click,
   "computer_mouse_move": _mouse_move,
   "computer_mouse_drag": _mouse_drag,
