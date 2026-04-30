@@ -4,8 +4,9 @@ from PySide6.QtWidgets import (
   QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
   QLabel, QPushButton, QCheckBox, QListWidget, QListWidgetItem,
   QFileDialog, QGroupBox, QSystemTrayIcon, QMenu, QComboBox,
+  QStyle, QStyleOptionButton,
 )
-from PySide6.QtCore import Qt, QSize, QRect
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QIcon, QPainter, QPen, QColor
 
 from core.permissions import PERMISSION_GROUPS
@@ -18,14 +19,14 @@ class CheckCheckBox(QCheckBox):
   def paintEvent(self, event):
     super().paintEvent(event)
     if self.isChecked():
-      opt = self.style().subElementRect(
-        self.style().SE_CheckBoxIndicator, self.style().initFrom(self), self
-      )
+      opt = QStyleOptionButton()
+      self.initStyleOption(opt)
+      rect = self.style().subElementRect(QStyle.SE_CheckBoxIndicator, opt, self)
       painter = QPainter(self)
       painter.setRenderHint(QPainter.Antialiasing)
       pen = QPen(QColor("white"), 2)
       painter.setPen(pen)
-      r = opt.adjusted(3, 3, -3, -3)
+      r = rect.adjusted(3, 3, -3, -3)
       painter.drawLine(r.left(), r.center().y(), r.center().x(), r.bottom())
       painter.drawLine(r.center().x(), r.bottom(), r.right(), r.top())
       painter.end()
@@ -154,7 +155,11 @@ class MainWindow(QMainWindow):
 
   def _setup_tray(self):
     self.tray = QSystemTrayIcon(self)
-    # 用文字图标代替，避免依赖图标文件
+    # 创建一个简单的托盘图标
+    from PySide6.QtGui import QPixmap
+    px = QPixmap(32, 32)
+    px.fill(QColor("#e94560"))
+    self.tray.setIcon(QIcon(px))
     self.tray.setToolTip("PicoAide Desktop")
 
     menu = QMenu()
