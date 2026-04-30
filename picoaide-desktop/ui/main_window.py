@@ -44,8 +44,8 @@ class MainWindow(QMainWindow):
 
   def _setup_ui(self):
     self.setWindowTitle("PicoAide Desktop")
-    self.setMinimumSize(520, 640)
-    self.resize(560, 700)
+    self.setMinimumSize(520, 690)
+    self.resize(560, 750)
 
     central = QWidget()
     self.setCentralWidget(central)
@@ -107,7 +107,7 @@ class MainWindow(QMainWindow):
       desc.setProperty("class", "desc")
       perm_layout.addWidget(desc)
 
-    layout.addWidget(perm_group)
+    layout.addWidget(perm_group, stretch=0)
 
     # 白名单目录
     wl_group = QGroupBox("白名单目录")
@@ -137,12 +137,12 @@ class MainWindow(QMainWindow):
     wl_layout.addLayout(wl_btn_row)
 
     self.wl_list = QListWidget()
-    self.wl_list.setMaximumHeight(150)
+    self.wl_list.setMinimumHeight(60)
     for d in self.cfg.get("whitelist_dirs", []):
       self._add_wl_item(d)
     wl_layout.addWidget(self.wl_list)
 
-    layout.addWidget(wl_group)
+    layout.addWidget(wl_group, stretch=1)
 
     # 底栏
     bottom = QHBoxLayout()
