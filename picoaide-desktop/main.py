@@ -2,6 +2,18 @@
 
 import sys
 import logging
+import platform
+
+# Windows DPI 感知设置（必须在 QApplication 之前）
+if platform.system() == "Windows":
+  import ctypes
+  try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE_V2
+  except Exception:
+    try:
+      ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+      pass
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt
