@@ -9,7 +9,6 @@ import platform
 
 import pyautogui
 from PIL import Image
-from mss import mss
 
 from .permissions import is_tool_allowed
 
@@ -26,8 +25,9 @@ def _get_ocr_engine():
     _ocr_engine = RapidOCR()
   return _ocr_engine
 
-# 安全设置
-pyautogui.FAILSAFE = True
+# 禁用 pyautogui failsafe — 本工具本身就是远程桌面控制，鼠标移到角落是正常操作
+pyautogui.FAILSAFE = False
+pyautogui.PAUSE = 0.05
 pyautogui.PAUSE = 0.05
 
 
@@ -73,14 +73,19 @@ def execute_tool(tool, params, permissions, whitelist_dirs):
 # ============================================================
 
 def _screenshot(params):
-  with mss() as sct:
-    # grab() 直接返回 PIL 兼容的截图数据，不写文件
-    monitor = sct.monitors[0]
-    shot = sct.grab(monitor)
-    img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode()
+  system = platform.system()
+  if system == "Windows":
+    from PIL import ImageGrab
+    img = ImageGrab.grab()
+  else:
+    from mss import mss
+    with mss() as sct:
+      monitor = sct.monitors[0]
+      shot = sct.grab(monitor)
+      img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+  buf = io.BytesIO()
+  img.save(buf, format="PNG")
+  b64 = base64.b64encode(buf.getvalue()).decode()
   return {
     "content": [
       {"type": "image", "data": b64, "mimeType": "image/png"}
@@ -175,20 +180,39 @@ def _screen_text(params):
   """OCR 识别屏幕文字，返回每个元素的文本和位置"""
   import numpy as np
 
-  with mss() as sct:
-    region = params.get("region", "")
+  system = platform.system()
+  region = params.get("region", "")
+
+  if system == "Windows":
+    from PIL import ImageGrab
     if region:
       parts = [int(p.strip()) for p in region.split(",")]
       if len(parts) == 4:
-        monitor = {"left": parts[0], "top": parts[1], "width": parts[2], "height": parts[3]}
+        bbox = (parts[0], parts[1], parts[0] + parts[2], parts[1] + parts[3])
+      else:
+        bbox = None
+    else:
+      bbox = None
+    img = ImageGrab.grab(bbox=bbox)
+    img_array = np.array(img)
+    offset_x = bbox[0] if bbox else 0
+    offset_y = bbox[1] if bbox else 0
+  else:
+    from mss import mss
+    with mss() as sct:
+      if region:
+        parts = [int(p.strip()) for p in region.split(",")]
+        if len(parts) == 4:
+          monitor = {"left": parts[0], "top": parts[1], "width": parts[2], "height": parts[3]}
+        else:
+          monitor = sct.monitors[0]
       else:
         monitor = sct.monitors[0]
-    else:
-      monitor = sct.monitors[0]
-
-    shot = sct.grab(monitor)
-    img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-    img_array = np.array(img)
+      shot = sct.grab(monitor)
+      img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+      img_array = np.array(img)
+      offset_x = monitor.get("left", 0)
+      offset_y = monitor.get("top", 0)
 
   engine = _get_ocr_engine()
   results, _ = engine(img_array)
@@ -201,8 +225,6 @@ def _screen_text(params):
       ys = [p[1] for p in boxes]
       x_min, x_max = min(xs), max(xs)
       y_min, y_max = min(ys), max(ys)
-      offset_x = monitor.get("left", 0)
-      offset_y = monitor.get("top", 0)
       elements.append({
         "text": text,
         "confidence": round(confidence, 3),
