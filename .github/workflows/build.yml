@@ -14,62 +14,142 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  # ============================================================
+  # Go 后端编译
+  # ============================================================
+  build-go:
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Download dependencies
-        run: go mod download
+      - name: Build picoaide (${{ matrix.suffix }})
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          ext=""
+          [ "${GOOS}" = "windows" ] && ext=".exe"
+          go build -o picoaide-${{ matrix.suffix }}${ext} ./cmd/picoaide/
 
-      - name: Build picoaide (linux amd64)
-        run: GOOS=linux GOARCH=amd64 go build -o picoaide-linux-amd64 ./cmd/picoaide/
-
-      - name: Build picoaide (linux arm64)
-        run: GOOS=linux GOARCH=arm64 go build -o picoaide-linux-arm64 ./cmd/picoaide/
-
-      - name: Upload Go binary artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: picoaide-binaries
-          path: picoaide-linux-*
+          name: picoaide-${{ matrix.suffix }}
+          path: picoaide-${{ matrix.suffix }}*
 
-      - name: Package browser extension
+  # ============================================================
+  # 浏览器插件打包
+  # ============================================================
+  build-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package extension
         run: cd picoaide-extension && zip -r ../picoaide-extension.zip .
 
-      - name: Upload extension artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: picoaide-extension
           path: picoaide-extension.zip
 
+  # ============================================================
+  # 桌面客户端编译 (PyInstaller)
+  # ============================================================
+  build-desktop:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-amd64
+            build_cmd: |
+              pip install -r picoaide-desktop/requirements.txt
+              cd picoaide-desktop
+              pyinstaller --onefile --name picoaide-desktop main.py
+          - os: macos-latest
+            suffix: darwin-arm64
+            build_cmd: |
+              pip install -r picoaide-desktop/requirements.txt
+              cd picoaide-desktop
+              pyinstaller --onefile --name picoaide-desktop main.py
+          - os: windows-latest
+            suffix: windows-amd64
+            build_cmd: |
+              pip install -r picoaide-desktop/requirements.txt
+              cd picoaide-desktop
+              pyinstaller --onefile --name picoaide-desktop main.py
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build desktop client
+        run: ${{ matrix.build_cmd }}
+        env:
+          CI: 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: picoaide-desktop-${{ matrix.suffix }}
+          path: |
+            picoaide-desktop/dist/picoaide-desktop*
+            picoaide-desktop/dist/picoaide-desktop*.exe
+
+  # ============================================================
+  # Release 发布
+  # ============================================================
   release:
     if: github.event_name == 'release'
-    needs: build
+    needs: [build-go, build-extension, build-desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download picoaide binaries
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: picoaide-binaries
+          path: artifacts
+          merge-multiple: false
 
-      - name: Download extension
-        uses: actions/download-artifact@v4
-        with:
-          name: picoaide-extension
+      - name: List artifacts
+        run: find artifacts -type f | sort
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            picoaide-linux-amd64
-            picoaide-linux-arm64
-            picoaide-extension.zip
+            artifacts/picoaide-linux-amd64/*
+            artifacts/picoaide-linux-arm64/*
+            artifacts/picoaide-darwin-amd64/*
+            artifacts/picoaide-darwin-arm64/*
+            artifacts/picoaide-windows-amd64/*
+            artifacts/picoaide-extension/*
+            artifacts/picoaide-desktop-linux-amd64/*
+            artifacts/picoaide-desktop-darwin-arm64/*
+            artifacts/picoaide-desktop-windows-amd64/*

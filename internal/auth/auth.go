@@ -426,14 +426,22 @@ func GetContainerByUsername(username string) (*ContainerRecord, error) {
     return nil, err
   }
   var r ContainerRecord
+  var containerID, image, status, ip, mcpToken, createdAt, updatedAt sql.NullString
   err := db.QueryRow(`SELECT id, username, container_id, image, status, ip, cpu_limit, memory_limit, mcp_token, created_at, updated_at
-    FROM containers WHERE username = ?`, username).Scan(&r.ID, &r.Username, &r.ContainerID, &r.Image, &r.Status, &r.IP, &r.CPULimit, &r.MemoryLimit, &r.MCPToken, &r.CreatedAt, &r.UpdatedAt)
+    FROM containers WHERE username = ?`, username).Scan(&r.ID, &r.Username, &containerID, &image, &status, &ip, &r.CPULimit, &r.MemoryLimit, &mcpToken, &createdAt, &updatedAt)
   if err == sql.ErrNoRows {
     return nil, nil
   }
   if err != nil {
     return nil, err
   }
+  r.ContainerID = containerID.String
+  r.Image = image.String
+  r.Status = status.String
+  r.IP = ip.String
+  r.MCPToken = mcpToken.String
+  r.CreatedAt = createdAt.String
+  r.UpdatedAt = updatedAt.String
   return &r, nil
 }
 
@@ -450,9 +458,17 @@ func GetAllContainers() ([]ContainerRecord, error) {
   var list []ContainerRecord
   for rows.Next() {
     var r ContainerRecord
-    if err := rows.Scan(&r.ID, &r.Username, &r.ContainerID, &r.Image, &r.Status, &r.IP, &r.CPULimit, &r.MemoryLimit, &r.MCPToken, &r.CreatedAt, &r.UpdatedAt); err != nil {
+    var containerID, image, status, ip, mcpToken, createdAt, updatedAt sql.NullString
+    if err := rows.Scan(&r.ID, &r.Username, &containerID, &image, &status, &ip, &r.CPULimit, &r.MemoryLimit, &mcpToken, &createdAt, &updatedAt); err != nil {
       return nil, err
     }
+    r.ContainerID = containerID.String
+    r.Image = image.String
+    r.Status = status.String
+    r.IP = ip.String
+    r.MCPToken = mcpToken.String
+    r.CreatedAt = createdAt.String
+    r.UpdatedAt = updatedAt.String
     list = append(list, r)
   }
   return list, nil

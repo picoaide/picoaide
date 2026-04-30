@@ -26,6 +26,8 @@ export async function init(ctx) {
   $('#test-ldap-btn').addEventListener('click', testLDAP);
   $('#save-group-config-btn').addEventListener('click', saveGroupConfig);
   $('#sync-groups-btn').addEventListener('click', syncLDAPGroups);
+  $('#save-sync-btn').addEventListener('click', saveSyncConfig);
+  $('#wl-enabled').addEventListener('change', updateWhitelistVisibility);
   $('#wl-add-btn').addEventListener('click', addWhitelistUser);
   $('#wl-search-btn').addEventListener('click', searchLDAPUsers);
 
@@ -64,7 +66,17 @@ export async function init(ctx) {
     $('#ldap-group-filter').value = rawConfig.ldap?.group_filter || '';
     $('#ldap-group-member-attr').value = rawConfig.ldap?.group_member_attribute || '';
 
-    if (ldapOn) loadWhitelist();
+    $('#wl-enabled').value = rawConfig.ldap?.whitelist_enabled ? 'true' : 'false';
+    $('#sync-interval').value = rawConfig.ldap?.sync_interval || '24h';
+
+    updateWhitelistVisibility();
+
+    if (ldapOn && rawConfig.ldap?.whitelist_enabled) loadWhitelist();
+  }
+
+  function updateWhitelistVisibility() {
+    var wlOn = $('#wl-enabled').value === 'true';
+    $('#wl-section').classList.toggle('hidden', !wlOn);
   }
 
   function updateLDAPVisibility(ldapOn) {
@@ -113,6 +125,23 @@ export async function init(ctx) {
     } catch (e) { showMsg('#sync-groups-msg', e.message, false); }
   }
 
+  async function saveSyncConfig() {
+    showMsg('#auth-msg', '保存中...', true);
+    if (!rawConfig.ldap) rawConfig.ldap = {};
+    rawConfig.ldap.whitelist_enabled = $('#wl-enabled').value === 'true';
+    rawConfig.ldap.sync_interval = $('#sync-interval').value;
+    try {
+      var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
+      if (res.success) {
+        showMsg('#auth-msg', res.message + '。自动同步间隔修改后需重启服务生效。', true);
+      } else {
+        showMsg('#auth-msg', res.error, false);
+      }
+      updateWhitelistVisibility();
+      if (rawConfig.ldap.whitelist_enabled) loadWhitelist();
+    } catch (e) { showMsg('#auth-msg', e.message, false); }
+  }
+
   async function syncLDAPGroups() {
     showMsg('#sync-groups-msg', '同步中...', true);
     try {
@@ -158,6 +187,8 @@ export async function init(ctx) {
           }).join(', ');
           if (groups.length > 5) groupPreview += '...';
           html += '<div style="margin-left:1em;color:var(--muted)">' + groupPreview + '</div>';
+        } else if (res.group_error) {
+          html += '<div style="color:var(--warn);margin-top:0.5em">⚠ 组查询失败: ' + ctx.esc(res.group_error) + '</div>';
         }
         resultDiv.innerHTML = html;
         resultDiv.classList.remove('hidden');
@@ -175,7 +206,7 @@ export async function init(ctx) {
 
     var users = data.users || [];
     if (users.length === 0) {
-      tags.innerHTML = '<small>白名单为空（所有用户均可使用）</small>';
+      tags.innerHTML = '<small class="text-muted">白名单为空</small>';
       return;
     }
 

@@ -6,6 +6,15 @@ export async function init(ctx) {
   ctx.$('#refresh-groups').addEventListener('click', loadGroups);
   ctx.$('#create-group-btn').addEventListener('click', () => openCreateGroupModal(currentGroups));
 
+  // 统一认证模式下隐藏新建组按钮
+  try {
+    const cfgData = await Api.get('/api/config');
+    const isUnified = cfgData.web?.auth_mode === 'ldap';
+    if (isUnified) {
+      ctx.$('#create-group-btn').classList.add('hidden');
+    }
+  } catch {}
+
   await loadGroups();
 
   async function loadGroups() {
@@ -52,9 +61,15 @@ export async function init(ctx) {
     tbody.querySelectorAll('[data-group-apply]').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm('确定要下发配置到组 ' + btn.dataset.groupApply + ' 的所有成员（含子组）并重启容器吗？')) return;
-        showMsg('#groups-msg', '下发中...', true);
-        const res = await Api.post('/api/admin/config/apply', { group: btn.dataset.groupApply });
-        showMsg('#groups-msg', res.message || res.error, res.success);
+        showMsg('#groups-msg', '提交中...', true);
+        try {
+          const res = await Api.post('/api/admin/config/apply', { group: btn.dataset.groupApply });
+          if (res.task_id) {
+            pollGroupsTask('#groups-msg', '下发配置到组 ' + btn.dataset.groupApply);
+          } else {
+            showMsg('#groups-msg', res.message || res.error, res.success);
+          }
+        } catch (e) { showMsg('#groups-msg', e.message, false); }
       });
     });
     tbody.querySelectorAll('[data-group-del]').forEach(btn => {
@@ -201,5 +216,24 @@ export async function init(ctx) {
       if (res.success) { if (!skills.includes(skillName)) skills.push(skillName); renderSkills(); loadGroups(); alert(res.message); }
       else alert(res.error);
     });
+  }
+
+  function pollGroupsTask(selector, initialMsg) {
+    showMsg(selector, initialMsg + '...', true);
+    var poll = async function() {
+      try {
+        var st = await Api.get('/api/admin/task/status');
+        if (st.running) {
+          var pct = st.total > 0 ? Math.round((st.done + st.failed) / st.total * 100) : 0;
+          showMsg(selector, initialMsg + ' ' + (st.done + st.failed) + '/' + st.total + ' (' + pct + '%)', true);
+          setTimeout(poll, 2000);
+        } else {
+          showMsg(selector, st.message || '完成', st.failed === 0);
+        }
+      } catch (e) {
+        showMsg(selector, '查询进度失败: ' + e.message, false);
+      }
+    };
+    setTimeout(poll, 1500);
   }
 }

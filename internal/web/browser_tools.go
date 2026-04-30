@@ -7,8 +7,8 @@ type ToolDef struct {
   InputSchema map[string]interface{} `json:"inputSchema"`
 }
 
-// toolDefs 是 MCP tools/list 返回的完整工具列表
-var toolDefs = []ToolDef{
+// browserToolDefs 浏览器 MCP 工具列表
+var browserToolDefs = []ToolDef{
   {
     Name:        "browser_navigate",
     Description: "导航当前标签页到指定 URL",
@@ -123,7 +123,7 @@ var toolDefs = []ToolDef{
   },
 }
 
-// GetToolList 返回 MCP tools/list 的工具列表
+// GetToolList 返回浏览器 MCP 工具列表（兼容旧代码）
 func GetToolList() []ToolDef {
-  return toolDefs
+  return browserToolDefs
 }

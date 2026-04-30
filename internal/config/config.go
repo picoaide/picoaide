@@ -13,6 +13,7 @@ import (
   "strconv"
   "strings"
   "text/template"
+  "time"
 
   "github.com/picoaide/picoaide/internal/auth"
   "gopkg.in/yaml.v3"
@@ -107,16 +108,18 @@ users: []
 // ============================================================
 
 type LDAPConfig struct {
-  Host                string `yaml:"host"`
-  BindDN              string `yaml:"bind_dn"`
-  BindPassword        string `yaml:"bind_password"`
-  BaseDN              string `yaml:"base_dn"`
-  Filter              string `yaml:"filter"`
-  UsernameAttribute   string `yaml:"username_attribute"`
-  GroupSearchMode     string `yaml:"group_search_mode"`     // "member_of" | "group_search"
-  GroupBaseDN         string `yaml:"group_base_dn"`
-  GroupFilter         string `yaml:"group_filter"`
+  Host                 string `yaml:"host"`
+  BindDN               string `yaml:"bind_dn"`
+  BindPassword         string `yaml:"bind_password"`
+  BaseDN               string `yaml:"base_dn"`
+  Filter               string `yaml:"filter"`
+  UsernameAttribute    string `yaml:"username_attribute"`
+  GroupSearchMode      string `yaml:"group_search_mode"`      // "member_of" | "group_search"
+  GroupBaseDN          string `yaml:"group_base_dn"`
+  GroupFilter          string `yaml:"group_filter"`
   GroupMemberAttribute string `yaml:"group_member_attribute"`
+  WhitelistEnabled     bool   `yaml:"whitelist_enabled"`
+  SyncInterval         string `yaml:"sync_interval"` // "0" 禁用, "1h", "24h", "30m" 等
 }
 
 type ImageConfig struct {
@@ -214,6 +217,22 @@ func (cfg *GlobalConfig) AuthMode() string {
     return "ldap"
   }
   return "local"
+}
+
+// SyncIntervalDuration 解析同步间隔配置，返回 time.Duration，0 表示禁用
+func (cfg *GlobalConfig) SyncIntervalDuration() time.Duration {
+  if cfg.LDAP.SyncInterval == "" || cfg.LDAP.SyncInterval == "0" {
+    return 0
+  }
+  // 纯数字默认为小时
+  if d, err := strconv.ParseInt(cfg.LDAP.SyncInterval, 10, 64); err == nil {
+    return time.Duration(d) * time.Hour
+  }
+  d, err := time.ParseDuration(cfg.LDAP.SyncInterval)
+  if err != nil {
+    return 0
+  }
+  return d
 }
 
 // SkillsDirPath 返回技能目录路径（使用工作目录）
@@ -1036,8 +1055,9 @@ func buildNested(flat map[string]string) map[string]interface{} {
 
   // 需要作为 bool 返回的键
   boolKeys := map[string]bool{
-    "web.ldap_enabled": true,
-    "web.tls.enabled":  true,
+    "web.ldap_enabled":       true,
+    "web.tls.enabled":        true,
+    "ldap.whitelist_enabled": true,
   }
 
   result := make(map[string]interface{})

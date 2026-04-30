@@ -253,7 +253,7 @@ func ApplyConfigToJSON(cfg *config.GlobalConfig, picoclawDir string, username st
   return os.WriteFile(configPath, jsonData, 0644)
 }
 
-// injectMCPConfig 向 config.json 注入 browser MCP server 配置（SSE 直连 Go relay）
+// injectMCPConfig 向 config.json 注入 MCP server 配置
 func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config.GlobalConfig) {
   tools, _ := config["tools"].(map[string]interface{})
   if tools == nil {
@@ -283,9 +283,20 @@ func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config
     }
   }
 
+  scheme := "http"
+  if cfg.Web.TLS.Enabled {
+    scheme = "https"
+  }
+
   servers["browser"] = map[string]interface{}{
     "enabled":   true,
-    "url":       fmt.Sprintf("http://%s:%s/api/browser/mcp/sse?token=%s", host, port, mcpToken),
+    "url":       fmt.Sprintf("%s://%s:%s/api/mcp/sse/browser?token=%s", scheme, host, port, mcpToken),
+    "transport": "sse",
+  }
+
+  servers["computer"] = map[string]interface{}{
+    "enabled":   true,
+    "url":       fmt.Sprintf("%s://%s:%s/api/mcp/sse/computer?token=%s", scheme, host, port, mcpToken),
     "transport": "sse",
   }
 

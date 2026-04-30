@@ -7,7 +7,7 @@ export async function init(ctx) {
   ]);
 
   const users = (usersData.users || []).filter(u => u.role !== 'superadmin');
-  const running = users.filter(u => u.status && u.status.startsWith('Up')).length;
+  const running = users.filter(u => u.status === 'running').length;
   const noImage = users.filter(u => !u.image_ready).length;
 
   ctx.$('#stat-users').textContent = users.length;
@@ -18,7 +18,7 @@ export async function init(ctx) {
   const tbody = ctx.$('#dash-users');
   tbody.innerHTML = '';
   for (const u of users) {
-    const statusCls = u.status?.startsWith('Up') ? 'badge-ok' : 'badge-muted';
+    const statusCls = u.status === 'running' ? 'badge-ok' : 'badge-muted';
     const imgBadge = u.image_ready
       ? ''
       : ' <span class="badge badge-danger">未拉取</span>';

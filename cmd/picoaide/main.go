@@ -180,7 +180,13 @@ func main() {
 // ============================================================
 
 func runResetPassword(username string) error {
+  // 检查是否为本地用户
   if !auth.UserExists(username) {
+    // 尝试加载配置判断认证模式
+    cfg, _ := config.LoadFromDB()
+    if cfg != nil && cfg.UnifiedAuthEnabled() {
+      return fmt.Errorf("用户 %s 不是本地用户，不支持修改密码，请联系管理员在公司认证中心修改", username)
+    }
     return fmt.Errorf("用户 %s 不存在", username)
   }
 

@@ -50,7 +50,7 @@ export async function init(ctx) {
     tbody.innerHTML = '';
     for (const u of users) {
       if (u.role === 'superadmin') continue;
-      const statusCls = u.status?.startsWith('Up') ? 'badge-ok' : 'badge-muted';
+      const statusCls = u.status === 'running' ? 'badge-ok' : 'badge-muted';
       const imgBadge = u.image_ready
         ? '<span class="badge badge-ok">就绪</span>'
         : '<span class="badge badge-danger">未拉取</span>';

@@ -8,8 +8,11 @@ import (
   "github.com/gorilla/websocket"
 )
 
-// handleBrowserWS 处理 Extension WebSocket 连接（GET /api/browser/ws?token=xxx）
-func (s *Server) handleBrowserWS(w http.ResponseWriter, r *http.Request) {
+// computerSvc 桌面控制服务的连接管理器
+var computerSvc = NewServiceHub("computer")
+
+// handleComputerWS 处理桌面代理 WebSocket 连接（GET /api/computer/ws?token=xxx）
+func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
   if r.Method != "GET" {
     writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
@@ -22,16 +25,16 @@ func (s *Server) handleBrowserWS(w http.ResponseWriter, r *http.Request) {
 
   ws, err := upgrader.Upgrade(w, r, nil)
   if err != nil {
-    log.Printf("[browser-ws] %s WebSocket 升级失败: %v", username, err)
+    log.Printf("[computer-ws] %s WebSocket 升级失败: %v", username, err)
     return
   }
 
-  conn := browserSvc.Register(username, ws, &BrowserExtra{TabID: 0})
-  log.Printf("[browser-ws] %s Extension WebSocket 已连接 (%s)", username, ws.RemoteAddr())
+  conn := computerSvc.Register(username, ws, nil)
+  log.Printf("[computer-ws] %s 桌面代理已连接 (%s)", username, ws.RemoteAddr())
 
   select {
   case <-conn.done:
-    log.Printf("[browser-ws] %s Extension WebSocket 已断开", username)
+    log.Printf("[computer-ws] %s 桌面代理已断开", username)
   }
 
   ws.WriteControl(websocket.CloseMessage,

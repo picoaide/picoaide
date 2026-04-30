@@ -11,6 +11,8 @@ export async function init(ctx) {
   $('#pull-close-btn')?.addEventListener('click', closePullModal);
   $('#migrate-modal-close')?.addEventListener('click', closeMigrateModal);
   $('#migrate-cancel-btn')?.addEventListener('click', closeMigrateModal);
+  $('#image-users-close')?.addEventListener('click', closeUsersModal);
+  $('#image-users-close-btn')?.addEventListener('click', closeUsersModal);
 
   async function loadLocalImages() {
     const data = await Api.get('/api/admin/images').catch(() => ({ images: [] }));
@@ -24,9 +26,9 @@ export async function init(ctx) {
     $('#images-local-empty')?.classList.add('hidden');
     for (const img of localImages) {
       const tags = (img.repo_tags || []).join(', ') || '(无标签)';
-      const users = img.users || [];
-      const userHtml = users.length > 0
-        ? users.map(u => '<span class="tag">' + esc(u) + '</span>').join(' ')
+      const userCount = img.user_count || 0;
+      const userBtnHtml = userCount > 0
+        ? '<button class="btn btn-sm btn-outline" data-users-img="' + esc(tags) + '">' + userCount + ' 个用户</button>'
         : '<small class="text-muted">-</small>';
       const tr = document.createElement('tr');
       const actionsTd = '<td></td>';
@@ -35,7 +37,7 @@ export async function init(ctx) {
         '<td style="font-family:monospace;font-size:12px">' + esc(img.id || '-') + '</td>' +
         '<td>' + esc(img.size_str) + '</td>' +
         '<td style="white-space:nowrap">' + esc(img.created_str || '-') + '</td>' +
-        '<td>' + userHtml + '</td>' +
+        '<td>' + userBtnHtml + '</td>' +
         actionsTd;
       for (const tag of (img.repo_tags || [])) {
         const btn = document.createElement('button');
@@ -47,12 +49,27 @@ export async function init(ctx) {
       }
       tbody.appendChild(tr);
     }
+    tbody.querySelectorAll('[data-users-img]').forEach(btn => {
+      btn.addEventListener('click', () => showImageUsers(btn.dataset.usersImg));
+    });
   }
 
   async function loadRegistryTags() {
-    const data = await Api.get('/api/admin/images/registry').catch(() => ({ tags: [] }));
     const tbody = $('#images-registry');
     tbody.innerHTML = '';
+    let data;
+    try {
+      data = await Api.get('/api/admin/images/registry');
+    } catch (e) {
+      showMsg('#images-registry-msg', '获取远程标签失败: ' + e.message, false);
+      $('#images-registry-empty')?.classList.remove('hidden');
+      return;
+    }
+    if (!data.success) {
+      showMsg('#images-registry-msg', data.error || '获取远程标签失败', false);
+      $('#images-registry-empty')?.classList.remove('hidden');
+      return;
+    }
     const tags = data.tags || [];
     if (tags.length === 0) {
       $('#images-registry-empty')?.classList.remove('hidden');
@@ -276,5 +293,31 @@ export async function init(ctx) {
 
   function closeMigrateModal() {
     $('#image-migrate-modal')?.classList.add('hidden');
+  }
+
+  async function showImageUsers(imageTag) {
+    const modal = $('#image-users-modal');
+    const title = $('#image-users-title');
+    const list = $('#image-users-list');
+
+    title.textContent = imageTag;
+    list.innerHTML = '<small>加载中...</small>';
+    modal.classList.remove('hidden');
+
+    try {
+      const data = await Api.get('/api/admin/images/users?image=' + encodeURIComponent(imageTag));
+      const users = data.users || [];
+      if (users.length === 0) {
+        list.innerHTML = '<small class="text-muted">无依赖用户</small>';
+      } else {
+        list.innerHTML = users.map(u => '<span class="tag">' + esc(u) + '</span>').join('');
+      }
+    } catch (e) {
+      list.innerHTML = '<small style="color:var(--err)">加载失败: ' + esc(e.message) + '</small>';
+    }
+  }
+
+  function closeUsersModal() {
+    $('#image-users-modal')?.classList.add('hidden');
   }
 }

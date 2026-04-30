@@ -513,7 +513,7 @@ func (s *Server) handleAdminConfigApply(w http.ResponseWriter, r *http.Request) 
   case username != "":
     targets = []string{username}
   case group != "":
-    targets, err = auth.GetGroupMembers(group)
+    targets, err = auth.GetGroupMembersForDeploy(group)
     if err != nil {
       writeError(w, http.StatusBadRequest, "获取组成员失败: "+err.Error())
       return
@@ -531,24 +531,43 @@ func (s *Server) handleAdminConfigApply(w http.ResponseWriter, r *http.Request) 
     }
   }
 
-  var success []string
-  var failed []string
-
-  for _, u := range targets {
-    if err := s.applyConfigToUser(u); err != nil {
-      log.Printf("[config] %s: 下发失败: %v", u, err)
-      failed = append(failed, u+"("+err.Error()+")")
+  // 单个用户直接同步执行
+  if len(targets) == 1 {
+    if err := s.applyConfigToUser(targets[0]); err != nil {
+      writeError(w, http.StatusInternalServerError, err.Error())
     } else {
-      log.Printf("[config] %s: 配置已下发并重启", u)
-      success = append(success, u)
+      writeSuccess(w, "配置已下发并重启")
     }
+    return
   }
 
-  msg := fmt.Sprintf("配置下发完成：%d 成功", len(success))
-  if len(failed) > 0 {
-    msg += fmt.Sprintf("，%d 失败：%s", len(failed), strings.Join(failed, ", "))
+  // 多个用户走队列
+  applyFn := func(u string) error {
+    return s.applyConfigToUser(u)
   }
-  writeSuccess(w, msg)
+  taskID, err := enqueueTask("config-apply", targets, applyFn)
+  if err != nil {
+    writeError(w, http.StatusConflict, err.Error())
+    return
+  }
+  writeJSON(w, http.StatusOK, map[string]interface{}{
+    "success": true,
+    "message": fmt.Sprintf("已提交配置下发任务，共 %d 个用户", len(targets)),
+    "task_id": taskID,
+  })
+}
+
+// handleAdminTaskStatus 返回当前任务队列状态
+func (s *Server) handleAdminTaskStatus(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "GET" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+    return
+  }
+  status := getTaskStatus()
+  writeJSON(w, http.StatusOK, status)
 }
 
 // handleAdminContainerLogs 返回容器日志
@@ -642,19 +661,24 @@ func (s *Server) handleAdminAuthTestLDAP(w http.ResponseWriter, r *http.Request)
     return
   }
 
-  // 测试组查询
-  groups, _ := ldap.TestGroups(host, bindDN, bindPassword, baseDN, groupSearchMode, groupBaseDN, groupFilter, groupMemberAttr, usernameAttr)
+  // 测试组查询（失败不影响用户测试结果）
+  var groupError string
+  groups, gerr := ldap.TestGroups(host, bindDN, bindPassword, baseDN, groupSearchMode, groupBaseDN, groupFilter, groupMemberAttr, usernameAttr)
+  if gerr != nil {
+    groupError = gerr.Error()
+  }
   if groups == nil {
     groups = []ldap.GroupPreview{}
   }
 
   writeJSON(w, http.StatusOK, struct {
-    Success   bool                `json:"success"`
-    Message   string              `json:"message"`
-    UserCount int                 `json:"user_count"`
-    Users     []string            `json:"users"`
-    Groups    []ldap.GroupPreview `json:"groups"`
-  }{true, fmt.Sprintf("连接成功，找到 %d 个用户", len(users)), len(users), users, groups})
+    Success    bool                `json:"success"`
+    Message    string              `json:"message"`
+    UserCount  int                 `json:"user_count"`
+    Users      []string            `json:"users"`
+    Groups     []ldap.GroupPreview `json:"groups"`
+    GroupError string              `json:"group_error"`
+  }{true, fmt.Sprintf("连接成功，找到 %d 个用户", len(users)), len(users), users, groups, groupError})
 }
 
 func (s *Server) handleAdminAuthLDAPUsers(w http.ResponseWriter, r *http.Request) {
@@ -869,7 +893,6 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
     return
   }
 
-  userCount := 0
   deployFn := func(username string) error {
     targetSkillsDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills")
     for _, sn := range deploySkills {
@@ -879,37 +902,51 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
         return fmt.Errorf("复制技能 %s 失败: %w", sn, err)
       }
     }
-    userCount++
     return nil
   }
 
   if targetUser != "" {
+    // 单个用户直接执行
     if err := deployFn(targetUser); err != nil {
       writeError(w, http.StatusInternalServerError, err.Error())
       return
     }
-  } else if targetGroup != "" {
-    members, err := auth.GetGroupMembersForDeploy(targetGroup)
+    writeJSON(w, http.StatusOK, map[string]interface{}{
+      "success":     true,
+      "message":     fmt.Sprintf("已将 %d 个技能部署到 %s", len(deploySkills), targetUser),
+      "skill_count": len(deploySkills),
+      "user_count":  1,
+    })
+    return
+  }
+
+  // 组或全部用户走队列
+  var targets []string
+  if targetGroup != "" {
+    targets, err = auth.GetGroupMembersForDeploy(targetGroup)
     if err != nil {
       writeError(w, http.StatusBadRequest, "获取组成员失败: "+err.Error())
       return
     }
-    for _, m := range members {
-      deployFn(m)
-    }
   } else {
-    if err := user.ForEachUser(s.cfg, deployFn); err != nil {
-      writeError(w, http.StatusInternalServerError, err.Error())
+    targets, err = user.GetUserList(s.cfg)
+    if err != nil {
+      writeError(w, http.StatusInternalServerError, "获取用户列表失败: "+err.Error())
       return
     }
   }
 
-  writeJSON(w, http.StatusOK, struct {
-    Success    bool   `json:"success"`
-    Message    string `json:"message"`
-    SkillCount int    `json:"skill_count"`
-    UserCount  int    `json:"user_count"`
-  }{true, fmt.Sprintf("已将 %d 个技能部署到 %d 个用户", len(deploySkills), userCount), len(deploySkills), userCount})
+  taskID, err := enqueueTask("skills-deploy", targets, deployFn)
+  if err != nil {
+    writeError(w, http.StatusConflict, err.Error())
+    return
+  }
+  writeJSON(w, http.StatusOK, map[string]interface{}{
+    "success":     true,
+    "message":     fmt.Sprintf("已提交技能部署任务，共 %d 个用户", len(targets)),
+    "task_id":     taskID,
+    "skill_count": len(deploySkills),
+  })
 }
 
 func (s *Server) handleAdminSkillsDownload(w http.ResponseWriter, r *http.Request) {
@@ -1276,6 +1313,10 @@ func (s *Server) handleAdminGroups(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminGroupCreate(w http.ResponseWriter, r *http.Request) {
   if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if s.cfg.UnifiedAuthEnabled() {
+    writeError(w, http.StatusForbidden, "统一认证模式下不允许手动创建组，请通过 LDAP 同步")
     return
   }
   if r.Method != "POST" {

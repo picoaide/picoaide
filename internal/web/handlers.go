@@ -316,7 +316,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
   }
 
   if s.cfg.UnifiedAuthEnabled() {
-    writeError(w, http.StatusForbidden, "统一认证模式下不允许修改密码，请联系管理员")
+    writeError(w, http.StatusForbidden, "非本地用户不支持修改密码，请联系管理员在公司认证中心修改")
     return
   }
 
@@ -440,6 +440,11 @@ func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
   if err := config.SaveRawToDB(raw, changedBy); err != nil {
     writeError(w, http.StatusInternalServerError, err.Error())
     return
+  }
+
+  // 重新加载内存配置，确保后续下发操作使用最新值
+  if newCfg, err := config.LoadFromDB(); err == nil {
+    s.cfg = newCfg
   }
 
   writeSuccess(w, "配置已保存")

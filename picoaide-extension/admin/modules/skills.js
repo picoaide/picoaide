@@ -48,6 +48,7 @@ export async function init(ctx) {
       const userGroup = ctx.$('#deploy-user-group');
       userGroup.innerHTML = '';
       for (const u of (uData.users || [])) {
+        if (u.role === 'superadmin') continue;
         const opt = document.createElement('option');
         opt.value = 'user:' + u.username;
         opt.textContent = u.username;
@@ -92,8 +93,33 @@ export async function init(ctx) {
       if (target.startsWith('user:')) params.username = target.slice(5);
       else if (target.startsWith('group:')) params.group_name = target.slice(6);
     }
-    const res = await Api.post('/api/admin/skills/deploy', params);
-    showMsg('#deploy-msg', res.message || res.error, res.success);
+    try {
+      const res = await Api.post('/api/admin/skills/deploy', params);
+      if (res.task_id) {
+        pollDeployStatus(res.message);
+      } else {
+        showMsg('#deploy-msg', res.message || res.error, res.success);
+      }
+    } catch (e) { showMsg('#deploy-msg', e.message, false); }
+  }
+
+  function pollDeployStatus(initialMsg) {
+    showMsg('#deploy-msg', initialMsg + '...', true);
+    var poll = async function() {
+      try {
+        var st = await Api.get('/api/admin/task/status');
+        if (st.running) {
+          var pct = st.total > 0 ? Math.round((st.done + st.failed) / st.total * 100) : 0;
+          showMsg('#deploy-msg', initialMsg + ' ' + (st.done + st.failed) + '/' + st.total + ' (' + pct + '%)', true);
+          setTimeout(poll, 2000);
+        } else {
+          showMsg('#deploy-msg', st.message || '完成', st.failed === 0);
+        }
+      } catch (e) {
+        showMsg('#deploy-msg', '查询进度失败: ' + e.message, false);
+      }
+    };
+    setTimeout(poll, 1500);
   }
 
   async function loadRepos() {

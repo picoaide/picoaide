@@ -6,6 +6,7 @@ import (
   "crypto/sha256"
   "encoding/hex"
   "fmt"
+  "log"
   "net/http"
   "os"
   "strconv"
@@ -15,6 +16,7 @@ import (
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
   dockerpkg "github.com/picoaide/picoaide/internal/docker"
+  "github.com/picoaide/picoaide/internal/ldap"
   "github.com/picoaide/picoaide/internal/user"
 )
 
@@ -28,6 +30,47 @@ type Server struct {
   secret         string
   csrfKey        string
   dockerAvailable bool
+}
+
+// startLDAPSyncScheduler 定时同步 LDAP 组
+func (s *Server) startLDAPSyncScheduler(interval time.Duration) {
+  ticker := time.NewTicker(interval)
+  defer ticker.Stop()
+  log.Printf("LDAP 定时同步已启动，间隔: %s", interval)
+  for range ticker.C {
+    s.syncLDAPGroups()
+  }
+}
+
+// syncLDAPGroups 执行 LDAP 组同步
+func (s *Server) syncLDAPGroups() {
+  if !s.cfg.LDAPEnabled() {
+    return
+  }
+  if s.cfg.LDAP.GroupSearchMode == "" {
+    return
+  }
+  groupMap, err := ldap.FetchAllGroupsWithMembers(s.cfg)
+  if err != nil {
+    log.Printf("LDAP 定时同步失败: %v", err)
+    return
+  }
+  whitelist, _ := user.LoadWhitelist()
+  groupCount := 0
+  for groupName, members := range groupMap {
+    auth.CreateGroup(groupName, "ldap", "", nil)
+    groupCount++
+    var filtered []string
+    for _, m := range members {
+      if whitelist == nil || whitelist[m] {
+        filtered = append(filtered, m)
+      }
+    }
+    if len(filtered) > 0 {
+      auth.AddUsersToGroup(groupName, filtered)
+    }
+  }
+  log.Printf("LDAP 定时同步完成: %d 个组", groupCount)
 }
 
 // createSessionToken 生成 HMAC 签名的 session token
@@ -191,6 +234,11 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
     dockerAvailable: dockerOK,
   }
 
+  // LDAP 定时同步
+  if interval := cfg.SyncIntervalDuration(); interval > 0 && cfg.LDAPEnabled() {
+    go s.startLDAPSyncScheduler(interval)
+  }
+
   mux := http.NewServeMux()
   // 认证
   mux.HandleFunc("/api/login", s.secureHeaders(s.handleLogin))
@@ -202,6 +250,7 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   // 配置管理（超管）
   mux.HandleFunc("/api/config", s.secureHeaders(s.handleConfig))
   mux.HandleFunc("/api/admin/config/apply", s.secureHeaders(s.handleAdminConfigApply))
+  mux.HandleFunc("/api/admin/task/status", s.secureHeaders(s.handleAdminTaskStatus))
   // 文件管理
   mux.HandleFunc("/api/files", s.secureHeaders(s.handleFiles))
   mux.HandleFunc("/api/files/upload", s.secureHeaders(s.handleFileUpload))
@@ -215,11 +264,16 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/csrf", s.secureHeaders(s.handleCSRF))
   // MCP token（Extension 获取认证 token）
   mux.HandleFunc("/api/mcp/token", s.secureHeaders(s.handleMCPToken))
-  // Browser MCP Server（SSE + JSON-RPC）
-  mux.HandleFunc("/api/browser/mcp/sse", s.secureHeaders(s.handleBrowserMCPSSE))
-  mux.HandleFunc("/api/browser/mcp", s.secureHeaders(s.handleBrowserMCPMessage))
+  // MCP SSE 服务（参数化路由，支持 browser、computer 等服务）
+  mux.HandleFunc("/api/mcp/sse/{service}", func(w http.ResponseWriter, r *http.Request) {
+    s.secureHeaders(func(w http.ResponseWriter, r *http.Request) {
+      s.handleMCPSSEService(w, r, r.PathValue("service"))
+    })(w, r)
+  })
   // Browser Extension WebSocket
   mux.HandleFunc("/api/browser/ws", s.secureHeaders(s.handleBrowserWS))
+  // Computer 桌面代理 WebSocket
+  mux.HandleFunc("/api/computer/ws", s.secureHeaders(s.handleComputerWS))
   // 超管 - 用户管理
   mux.HandleFunc("/api/admin/users", s.secureHeaders(s.handleAdminUsers))
   mux.HandleFunc("/api/admin/users/create", s.secureHeaders(s.handleAdminUserCreate))
@@ -266,6 +320,7 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/admin/images/migrate", s.secureHeaders(s.handleAdminImageMigrate))
   mux.HandleFunc("/api/admin/images/registry", s.secureHeaders(s.handleAdminImageRegistry))
   mux.HandleFunc("/api/admin/images/local-tags", s.secureHeaders(s.handleAdminLocalTags))
+  mux.HandleFunc("/api/admin/images/users", s.secureHeaders(s.handleAdminImageUsers))
 
   if cfg.Web.TLS.Enabled && cfg.Web.TLS.CertFile != "" && cfg.Web.TLS.KeyFile != "" {
     if _, err := os.Stat(cfg.Web.TLS.CertFile); err != nil {
@@ -675,9 +730,9 @@ func (s *Server) handleAdminImageRegistry(w http.ResponseWriter, r *http.Request
     return
   }
 
-  // 固定查询 picoaide/picoaide 仓库
+  // 远程标签始终从 GitHub Container Registry 获取
   ctx := contextWithTimeout(15)
-  tags, err := dockerpkg.ListRegistryTagsForConfig(ctx, "picoaide/picoaide", s.cfg.Image.Registry)
+  tags, err := dockerpkg.ListRegistryTags(ctx, "picoaide/picoaide")
   if err != nil {
     writeError(w, http.StatusInternalServerError, "获取远程标签失败: "+err.Error())
     return
@@ -720,4 +775,37 @@ func (s *Server) handleAdminLocalTags(w http.ResponseWriter, r *http.Request) {
     Success bool     `json:"success"`
     Tags    []string `json:"tags"`
   }{true, tags})
+}
+
+// handleAdminImageUsers 返回使用指定镜像的用户列表
+func (s *Server) handleAdminImageUsers(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "GET" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+    return
+  }
+
+  image := r.URL.Query().Get("image")
+  if image == "" {
+    writeError(w, http.StatusBadRequest, "缺少 image 参数")
+    return
+  }
+
+  containers, _ := auth.GetAllContainers()
+  var users []string
+  for _, c := range containers {
+    if c.Image == image {
+      users = append(users, c.Username)
+    }
+  }
+  if users == nil {
+    users = []string{}
+  }
+
+  writeJSON(w, http.StatusOK, map[string]interface{}{
+    "success": true,
+    "users":   users,
+  })
 }

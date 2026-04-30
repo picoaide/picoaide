@@ -308,10 +308,14 @@ export async function init(ctx) {
   // 下发配置到全部用户
   $('#apply-all-btn').addEventListener('click', async function() {
     if (!confirm('确定要下发配置到所有用户并重启其容器吗？')) return;
-    showMsg('#settings-msg', '正在下发配置...', true);
+    showMsg('#settings-msg', '正在提交下发任务...', true);
     try {
       var res = await Api.post('/api/admin/config/apply', {});
-      showMsg('#settings-msg', res.message || res.error, res.success);
+      if (res.task_id) {
+        pollTaskStatus('#settings-msg', res.message);
+      } else {
+        showMsg('#settings-msg', res.message || res.error, res.success);
+      }
     } catch (e) { showMsg('#settings-msg', e.message, false); }
   });
 
@@ -345,3 +349,24 @@ async function getServerUrl() {
   var r = await chrome.storage.local.get('serverUrl');
   return (r.serverUrl || '').replace(/\/+$/, '');
 }
+
+// pollTaskStatus 轮询任务队列进度
+async function pollTaskStatus(selector, initialMsg) {
+  showMsg(selector, initialMsg + '...', true);
+  var poll = async function() {
+    try {
+      var st = await Api.get('/api/admin/task/status');
+      if (st.running) {
+        var pct = st.total > 0 ? Math.round((st.done + st.failed) / st.total * 100) : 0;
+        showMsg(selector, initialMsg + ' ' + (st.done + st.failed) + '/' + st.total + ' (' + pct + '%)', true);
+        setTimeout(poll, 2000);
+      } else {
+        showMsg(selector, st.message || '完成', st.failed === 0);
+      }
+    } catch (e) {
+      showMsg(selector, '查询进度失败: ' + e.message, false);
+    }
+  };
+  setTimeout(poll, 1500);
+}
+
