@@ -44,7 +44,7 @@ PERMISSION_GROUPS = {
     "label": "目录浏览",
     "desc": "允许 AI 列出白名单目录内的文件和子目录",
     "icon": "📁",
-    "tools": ["computer_file_list"],
+    "tools": ["computer_file_list", "computer_whitelist", "computer_file_search"],
     "default": True,
     "need_whitelist": True,
   },

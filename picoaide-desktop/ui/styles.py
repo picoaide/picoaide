@@ -87,20 +87,19 @@ QCheckBox {
   font-size: 13px;
 }
 QCheckBox::indicator {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: 4px;
-  border: 2px solid #0f3460;
-  background-color: #16213e;
+  border: 2px solid #555;
+  background-color: #1a1a2e;
 }
 QCheckBox::indicator:checked {
   background-color: #e94560;
   border-color: #e94560;
-  image: none;
+  image: url(data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='white'><path d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/></svg>);
 }
-QCheckBox::indicator:checked {
-  background-color: #e94560;
-  border-color: #e94560;
+QCheckBox::indicator:hover {
+  border-color: #888;
 }
 
 QLabel[class="title"] {

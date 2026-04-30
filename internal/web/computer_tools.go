@@ -139,4 +139,25 @@ var computerToolDefs = []ToolDef{
       "required": []string{"path"},
     },
   },
+  {
+    Name:        "computer_whitelist",
+    Description: "获取允许访问的白名单目录列表，AI 应先调用此工具了解可访问的目录范围",
+    InputSchema: map[string]interface{}{
+      "type":       "object",
+      "properties": map[string]interface{}{},
+    },
+  },
+  {
+    Name:        "computer_file_search",
+    Description: "在白名单目录内搜索匹配关键词的文件",
+    InputSchema: map[string]interface{}{
+      "type": "object",
+      "properties": map[string]interface{}{
+        "path":    map[string]interface{}{"type": "string", "description": "搜索起始目录（必须在白名单内）"},
+        "query":   map[string]interface{}{"type": "string", "description": "搜索关键词（匹配文件名）"},
+        "max_results": map[string]interface{}{"type": "integer", "description": "最大返回数量，默认 50"},
+      },
+      "required": []string{"path", "query"},
+    },
+  },
 }

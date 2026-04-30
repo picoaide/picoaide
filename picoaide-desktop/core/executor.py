@@ -37,12 +37,16 @@ def execute_tool(tool, params, permissions, whitelist_dirs):
     return {"error": {"message": f"工具 {tool} 未被授权"}}
 
   # 文件类工具需要白名单检查
-  if tool in ("computer_file_read", "computer_file_write", "computer_file_list"):
+  if tool in ("computer_file_read", "computer_file_write", "computer_file_list", "computer_file_search"):
     path = params.get("path", "")
     if not check_whitelist(path, whitelist_dirs):
       return {"error": {"message": f"路径不在白名单内: {path}"}}
 
   try:
+    # computer_whitelist 特殊处理：直接返回白名单目录
+    if tool == "computer_whitelist":
+      return {"result": {"directories": whitelist_dirs, "count": len(whitelist_dirs)}}
+
     handler = TOOL_HANDLERS.get(tool)
     if handler is None:
       return {"error": {"message": f"不支持的工具: {tool}"}}
@@ -204,6 +208,36 @@ def _file_list(params):
   return {"entries": entries, "path": path}
 
 
+def _whitelist(params):
+  """白名单目录列表 — 需要外部传入"""
+  # 这个函数在 execute_tool 中特殊处理
+  return {}
+
+
+def _file_search(params):
+  path = params["path"]
+  query = params.get("query", "").lower()
+  max_results = int(params.get("max_results", 50))
+  if not os.path.isdir(path):
+    return {"error": {"message": f"目录不存在: {path}"}}
+  matches = []
+  for root, dirs, files in os.walk(path):
+    for name in files + dirs:
+      if query in name.lower():
+        full = os.path.join(root, name)
+        try:
+          is_dir = os.path.isdir(full)
+          size = os.path.getsize(full) if not is_dir else 0
+          matches.append({"path": full, "name": name, "is_dir": is_dir, "size": size})
+          if len(matches) >= max_results:
+            break
+        except OSError:
+          continue
+    if len(matches) >= max_results:
+      break
+  return {"matches": matches, "count": len(matches), "query": query}
+
+
 # 工具名 -> 处理函数映射
 TOOL_HANDLERS = {
   "computer_screenshot": _screenshot,
@@ -217,4 +251,6 @@ TOOL_HANDLERS = {
   "computer_file_read": _file_read,
   "computer_file_write": _file_write,
   "computer_file_list": _file_list,
+  "computer_whitelist": _whitelist,
+  "computer_file_search": _file_search,
 }
