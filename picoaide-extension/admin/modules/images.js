@@ -96,12 +96,13 @@ export async function init(ctx) {
 
     for (const tag of tags) {
       const exists = localTags.has(tag);
-      const hasOlder = localTags.size > 0 && !exists;
+      // 本地存在其他版本的 picoaide 镜像就显示升级按钮
+      const hasOtherVersions = Array.from(localTags).some(t => t !== tag);
       const tr = document.createElement('tr');
       const statusHtml = exists
         ? '<span class="badge badge-ok">已存在</span>'
         : '<span class="badge badge-muted">未拉取</span>';
-      const upgradeBtnHtml = hasOlder
+      const upgradeBtnHtml = hasOtherVersions
         ? '<button class="btn btn-sm btn-primary" data-upgrade="' + esc(tag) + '" style="margin-left:4px">升级</button>'
         : '';
       tr.innerHTML =
