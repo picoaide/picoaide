@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="{{ .Site.Language.Lang }}">
+<head>
+  {{ partial "head.html" . }}
+  {{ block "head" . }}{{ end }}
+</head>
+<body class="body">
+  {{ partial "nav.html" . }}
+
+  <main class="main" id="main">
+    {{ block "content" . }}{{ end }}
+  </main>
+
+  {{ partial "footer.html" . }}
+
+  {{ block "scripts" . }}
+  <script>
+  (function() {
+    // Mobile menu toggle
+    var toggle = document.getElementById('nav-toggle');
+    var menu = document.getElementById('nav-menu');
+    if (toggle && menu) {
+      toggle.addEventListener('click', function() {
+        var expanded = this.getAttribute('aria-expanded') === 'true';
+        this.setAttribute('aria-expanded', !expanded);
+        menu.classList.toggle('open');
+        this.classList.toggle('active');
+      });
+    }
+
+    // Close mobile menu on outside click
+    document.addEventListener('click', function(e) {
+      if (toggle && menu && !toggle.contains(e.target) && !menu.contains(e.target)) {
+        toggle.setAttribute('aria-expanded', 'false');
+        menu.classList.remove('open');
+        toggle.classList.remove('active');
+      }
+    });
+  })();
+  </script>
+  {{ end }}
+</body>
+</html>

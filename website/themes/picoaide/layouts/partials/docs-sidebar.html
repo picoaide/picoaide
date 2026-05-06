@@ -1,0 +1,80 @@
+<aside class="docs-sidebar" id="docs-sidebar">
+  {{ if .Site.Params.docVersions }}
+  <div class="docs-version-selector">
+    <label class="docs-version-label" for="version-select">版本</label>
+    <select class="docs-version-select" id="version-select" onchange="handleVersionChange(this)">
+      {{ range .Site.Params.docVersions }}
+        <option value="{{ . }}"{{ if eq $.Site.Params.version . }} selected{{ end }}>{{ . }}</option>
+      {{ end }}
+    </select>
+  </div>
+  {{ end }}
+
+  <nav class="docs-nav" aria-label="文档导航">
+    {{ $currentNode := . }}
+    {{ $docsSection := .Site.GetPage "/docs" }}
+
+    {{ if $docsSection }}
+    <ul class="docs-nav-list">
+      {{ range $docsSection.Pages }}
+        {{ if .IsSection }}
+          <li class="docs-nav-section">
+            <button class="docs-nav-section-btn{{ if or ($currentNode.IsDescendant .) (eq $currentNode.RelPermalink .RelPermalink) }} expanded{{ end }}" aria-expanded="{{ if or ($currentNode.IsDescendant .) (eq $currentNode.RelPermalink .RelPermalink) }}true{{ else }}false{{ end }}">
+              {{ .Title }}
+              <svg class="docs-nav-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <ul class="docs-nav-sublist{{ if or ($currentNode.IsDescendant .) (eq $currentNode.RelPermalink .RelPermalink) }} open{{ end }}">
+              <li class="docs-nav-item">
+                <a class="docs-nav-link{{ if eq $currentNode.RelPermalink .RelPermalink }} active{{ end }}" href="{{ .RelPermalink }}">{{ .Title }} 概览</a>
+              </li>
+              {{ range .Pages }}
+                {{ if .IsSection }}
+                  <li class="docs-nav-subsection">
+                    <span class="docs-nav-subsection-title">{{ .Title }}</span>
+                    <ul class="docs-nav-sublist">
+                      {{ range .Pages }}
+                        <li class="docs-nav-item">
+                          <a class="docs-nav-link{{ if eq $currentNode.RelPermalink .RelPermalink }} active{{ end }}" href="{{ .RelPermalink }}">{{ .Title }}</a>
+                        </li>
+                      {{ end }}
+                    </ul>
+                  </li>
+                {{ else }}
+                  <li class="docs-nav-item">
+                    <a class="docs-nav-link{{ if eq $currentNode.RelPermalink .RelPermalink }} active{{ end }}" href="{{ .RelPermalink }}">{{ .Title }}</a>
+                  </li>
+                {{ end }}
+              {{ end }}
+            </ul>
+          </li>
+        {{ else }}
+          <li class="docs-nav-item">
+            <a class="docs-nav-link{{ if eq $currentNode.RelPermalink .RelPermalink }} active{{ end }}" href="{{ .RelPermalink }}">{{ .Title }}</a>
+          </li>
+        {{ end }}
+      {{ end }}
+    </ul>
+    {{ end }}
+  </nav>
+</aside>
+
+<script>
+function handleVersionChange(select) {
+  var currentPath = window.location.pathname;
+  var currentVersion = '{{ .Site.Params.version }}';
+  var targetVersion = select.value;
+
+  // Replace the version segment in the URL path
+  // Handles paths like /docs/v1.0.0/xxx and /docs/xxx (latest)
+  var newPath = currentPath.replace('/docs/' + currentVersion + '/', '/docs/' + targetVersion + '/');
+
+  // If no version segment found, try prepending
+  if (newPath === currentPath) {
+    newPath = currentPath.replace('/docs/', '/docs/' + targetVersion + '/');
+  }
+
+  window.location.href = newPath;
+}
+</script>

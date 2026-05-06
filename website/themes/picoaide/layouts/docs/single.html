@@ -1,0 +1,134 @@
+{{ define "content" }}
+{{ $docsSection := .Site.GetPage "/docs" }}
+<div class="docs-layout">
+  {{ partial "docs-sidebar.html" . }}
+
+  <div class="docs-content-wrapper">
+    <div class="container">
+      <article class="docs-page">
+        <header class="docs-header">
+          <button class="docs-sidebar-toggle" id="docs-sidebar-toggle" aria-label="切换文档导航">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+            <span>导航</span>
+          </button>
+
+          <nav class="docs-breadcrumb" aria-label="面包屑导航">
+            <a href="{{ "/" | relURL }}">首页</a>
+            <span class="docs-breadcrumb-sep">/</span>
+            <a href="{{ "/docs/" | relURL }}">文档</a>
+            {{ if .CurrentSection }}
+              {{ if and $docsSection (ne .CurrentSection.RelPermalink $docsSection.RelPermalink) }}
+              <span class="docs-breadcrumb-sep">/</span>
+              <a href="{{ .CurrentSection.RelPermalink }}">{{ .CurrentSection.Title }}</a>
+              {{ end }}
+            {{ end }}
+            {{ if not .IsSection }}
+            <span class="docs-breadcrumb-sep">/</span>
+            <span class="docs-breadcrumb-current">{{ .Title }}</span>
+            {{ end }}
+          </nav>
+        </header>
+
+        <div class="docs-body">
+          <div class="docs-main">
+            <h1 class="docs-title">{{ .Title }}</h1>
+            {{ with .Description }}
+              <p class="docs-description">{{ . }}</p>
+            {{ end }}
+            <div class="docs-text">
+              {{ .Content }}
+            </div>
+          </div>
+          {{ partial "toc.html" . }}
+        </div>
+
+        {{ with .File }}
+        <div class="docs-edit-link">
+          <a href="{{ $.Site.Params.github }}/blob/main/website/content/{{ .Path }}" target="_blank" rel="noopener noreferrer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+            在 GitHub 上编辑此页
+          </a>
+        </div>
+        {{ end }}
+
+        {{/* Previous / Next page navigation */}}
+        {{ $parent := .Parent }}
+        {{ if and $parent (ne $parent.RelPermalink "/docs/") }}
+        <nav class="docs-page-nav" aria-label="页面导航">
+          {{ with .Prev }}
+          <a class="docs-page-nav-link docs-page-nav-prev" href="{{ .RelPermalink }}">
+            <span class="docs-page-nav-label">上一页</span>
+            <span class="docs-page-nav-title">{{ .Title }}</span>
+          </a>
+          {{ end }}
+          {{ with .Next }}
+          <a class="docs-page-nav-link docs-page-nav-next" href="{{ .RelPermalink }}">
+            <span class="docs-page-nav-label">下一页</span>
+            <span class="docs-page-nav-title">{{ .Title }}</span>
+          </a>
+          {{ end }}
+        </nav>
+        {{ end }}
+      </article>
+    </div>
+  </div>
+</div>
+{{ end }}
+
+{{ define "scripts" }}
+<script>
+(function() {
+  // Mobile menu toggle (inherited from base)
+  var toggle = document.getElementById('nav-toggle');
+  var menu = document.getElementById('nav-menu');
+  if (toggle && menu) {
+    toggle.addEventListener('click', function() {
+      var expanded = this.getAttribute('aria-expanded') === 'true';
+      this.setAttribute('aria-expanded', !expanded);
+      menu.classList.toggle('open');
+      this.classList.toggle('active');
+    });
+  }
+
+  // Docs sidebar section toggle
+  var sectionBtns = document.querySelectorAll('.docs-nav-section-btn');
+  sectionBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var expanded = this.getAttribute('aria-expanded') === 'true';
+      this.setAttribute('aria-expanded', !expanded);
+      this.classList.toggle('expanded');
+      var sublist = this.nextElementSibling;
+      if (sublist) {
+        sublist.classList.toggle('open');
+      }
+    });
+  });
+
+  // Mobile docs sidebar toggle
+  var sidebarToggle = document.getElementById('docs-sidebar-toggle');
+  var sidebar = document.getElementById('docs-sidebar');
+  if (sidebarToggle && sidebar) {
+    sidebarToggle.addEventListener('click', function() {
+      sidebar.classList.toggle('open');
+      this.classList.toggle('active');
+    });
+
+    // Close sidebar on outside click
+    document.addEventListener('click', function(e) {
+      if (!sidebar.contains(e.target) && !sidebarToggle.contains(e.target)) {
+        sidebar.classList.remove('open');
+        sidebarToggle.classList.remove('active');
+      }
+    });
+  }
+})();
+</script>
+{{ end }}

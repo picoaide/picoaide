@@ -1,0 +1,32 @@
+<nav class="nav" id="nav">
+  <div class="nav-container">
+    <a class="nav-logo" href="{{ "/" | relURL }}">
+      <span class="nav-logo-text">PicoAide</span>
+    </a>
+
+    <button class="nav-toggle" id="nav-toggle" aria-label="切换导航菜单" aria-expanded="false">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+
+    <ul class="nav-menu" id="nav-menu">
+      {{ range .Site.Menus.main }}
+        <li class="nav-item{{ if $.IsMenuCurrent "main" . }} active{{ end }}">
+          {{ if .Params.external }}
+            <a class="nav-link nav-link-external" href="{{ .URL }}" target="_blank" rel="noopener noreferrer">
+              {{ .Name }}
+              <svg class="nav-link-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+          {{ else }}
+            <a class="nav-link" href="{{ .URL | relURL }}">{{ .Name }}</a>
+          {{ end }}
+        </li>
+      {{ end }}
+    </ul>
+  </div>
+</nav>

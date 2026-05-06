@@ -1,0 +1,30 @@
+{{ define "content" }}
+<div class="container">
+  <article class="single-page">
+    <header class="single-header">
+      <h1 class="single-title">{{ .Title }}</h1>
+      {{ if .Date }}
+      <div class="single-meta">
+        <time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006年01月02日" }}</time>
+        {{ with .Params.author }}<span class="single-meta-sep">&middot;</span><span>{{ . }}</span>{{ end }}
+        {{ with .Params.tags }}<span class="single-meta-sep">&middot;</span><span>{{ delimit . ", " }}</span>{{ end }}
+      </div>
+      {{ end }}
+    </header>
+
+    <div class="single-content">
+      {{ .Content }}
+    </div>
+
+    {{ if .Params.tags }}
+    <footer class="single-footer">
+      <div class="single-tags">
+        {{ range .Params.tags }}
+          <span class="single-tag">{{ . }}</span>
+        {{ end }}
+      </div>
+    </footer>
+    {{ end }}
+  </article>
+</div>
+{{ end }}

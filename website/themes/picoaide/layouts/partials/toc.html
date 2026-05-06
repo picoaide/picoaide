@@ -1,0 +1,6 @@
+{{ if and .TableOfContents (gt (len .TableOfContents) 40) }}
+<aside class="docs-toc" id="docs-toc">
+  <h3 class="docs-toc-title">目录</h3>
+  {{ .TableOfContents }}
+</aside>
+{{ end }}

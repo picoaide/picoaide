@@ -1,0 +1,42 @@
+{{ define "content" }}
+<div class="container">
+  <div class="list-page">
+    <header class="list-header">
+      <h1 class="list-title">{{ .Title }}</h1>
+      {{ with .Description }}
+        <p class="list-description">{{ . }}</p>
+      {{ end }}
+    </header>
+
+    {{ if .Content }}
+    <div class="list-intro">
+      {{ .Content }}
+    </div>
+    {{ end }}
+
+    {{ if .Pages }}
+    <div class="list-grid">
+      {{ range .Pages }}
+      <article class="list-card">
+        <div class="list-card-body">
+          <h2 class="list-card-title">
+            <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+          </h2>
+          {{ with .Description }}
+            <p class="list-card-desc">{{ . }}</p>
+          {{ else }}
+            <p class="list-card-desc">{{ .Summary | truncate 120 }}</p>
+          {{ end }}
+        </div>
+        <div class="list-card-meta">
+          <time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006年01月02日" }}</time>
+        </div>
+      </article>
+      {{ end }}
+    </div>
+    {{ end }}
+
+    {{ template "_internal/pagination.html" . }}
+  </div>
+</div>
+{{ end }}

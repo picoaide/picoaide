@@ -1,0 +1,31 @@
+{{ printf `<meta charset="utf-8">` | safeHTML }}
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="{{ if .Description }}{{ .Description }}{{ else }}{{ .Site.Params.description }}{{ end }}">
+<meta name="author" content="PicoAide">
+<meta name="theme-color" content="#1a1a2e">
+
+{{ if .IsHome }}<meta name="robots" content="index, follow">{{ end }}
+
+{{ template "_internal/opengraph.html" . }}
+
+<title>{{ if .IsHome }}{{ .Site.Title }} - {{ .Site.Params.description }}{{ else }}{{ .Title }} | {{ .Site.Title }}{{ end }}</title>
+
+{{ $css := resources.Get "css/main.css" }}
+{{ if $css }}
+  {{ $cssMin := $css | minify | fingerprint }}
+  <link rel="stylesheet" href="{{ $cssMin.RelPermalink }}" integrity="{{ $cssMin.Data.Integrity }}" media="all">
+{{ else }}
+  <link rel="stylesheet" href="/css/main.css">
+{{ end }}
+
+{{ with resources.Get "favicon.svg" }}
+  <link rel="icon" type="image/svg+xml" href="{{ .RelPermalink }}">
+{{ else }}
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+{{ end }}
+
+{{ with resources.Get "favicon.ico" }}
+  <link rel="alternate icon" href="{{ .RelPermalink }}">
+{{ else }}
+  <link rel="alternate icon" href="/favicon.ico">
+{{ end }}

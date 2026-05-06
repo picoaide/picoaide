@@ -1,0 +1,41 @@
+<footer class="footer">
+  <div class="footer-container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <span class="footer-logo">PicoAide</span>
+        <p class="footer-tagline">{{ .Site.Params.description }}</p>
+      </div>
+
+      <div class="footer-links">
+        <div class="footer-col">
+          <h4 class="footer-col-title">产品</h4>
+          <ul class="footer-col-list">
+            <li><a href="{{ "/docs/" | relURL }}">文档</a></li>
+            <li><a href="{{ "/docs/quick-start/" | relURL }}">快速开始</a></li>
+            <li><a href="{{ "/blog/" | relURL }}">博客</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-col-title">社区</h4>
+          <ul class="footer-col-list">
+            <li><a href="{{ .Site.Params.github }}" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+            <li><a href="{{ .Site.Params.github }}/issues" target="_blank" rel="noopener noreferrer">问题反馈</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-col-title">更多</h4>
+          <ul class="footer-col-list">
+            <li><a href="{{ .Site.Params.github }}/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">开源许可</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <p class="footer-copyright">&copy; {{ now.Year }} PicoAide. All rights reserved.</p>
+      <p class="footer-version">版本 {{ .Site.Params.version }}</p>
+    </div>
+  </div>
+</footer>

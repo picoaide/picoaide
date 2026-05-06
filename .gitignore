@@ -33,3 +33,4 @@ _playwright_ref/
 picoaide-desktop/__pycache__/
 picoaide-desktop/core/__pycache__/
 picoaide-desktop/ui/__pycache__/
+website/public/

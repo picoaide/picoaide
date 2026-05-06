@@ -1,0 +1,46 @@
+baseURL = "https://www.picoaide.com/"
+languageCode = "zh-CN"
+title = "PicoAide"
+theme = "picoaide"
+
+[pagination]
+  pagerSize = 10
+
+[params]
+  description = "企业级 AI PaaS 工作平台"
+  github = "https://github.com/picoaide/picoaide"
+  version = "v1.0.0"
+  docVersions = ["v1.0.0", "v0.2.8", "v0.2.7"]
+
+[params.home]
+  heroTitle = "让每位员工拥有自己的 AI 操作助手"
+  heroSubtitle = "私有化部署 · 权限继承 · 数据不外流"
+  heroDescription = "AI 的力量应当被释放，但数据的边界必须被守护。PicoAide 让 AI 进入企业，而不是让数据离开企业。"
+
+[markup]
+  [markup.highlight]
+    style = "dracula"
+    lineNos = false
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+
+[menu]
+  [[menu.main]]
+    name = "首页"
+    url = "/"
+    weight = 1
+  [[menu.main]]
+    name = "文档"
+    url = "/docs/"
+    weight = 2
+  [[menu.main]]
+    name = "博客"
+    url = "/blog/"
+    weight = 3
+  [[menu.main]]
+    name = "GitHub"
+    url = "https://github.com/picoaide/picoaide"
+    weight = 4
+    [menu.main.params]
+      external = true
