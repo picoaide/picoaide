@@ -401,7 +401,7 @@ export async function init(ctx) {
     }
     for (const u of users) {
       const label = document.createElement('label');
-      label.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;background:var(--bg-card,#16213e);font-size:12px;cursor:pointer';
+      label.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;background:var(--bg-card,#16213e);font-size:12px;cursor:pointer;color:#e0e0e0';
       const cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.value = u.username;
