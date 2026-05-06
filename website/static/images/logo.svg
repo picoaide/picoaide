@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 40">
-  <rect x="0" y="4" width="32" height="32" rx="6" fill="#1a1a2e"/>
-  <path d="M9 12 L25 12 L25 17 L14 17 L14 19 L23 19 L23 24 L14 24 L14 31 L9 31 Z" fill="#e94560"/>
-  <text x="40" y="28" font-family="Inter, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1a1a2e">PicoAide</text>
+  <rect x="0" y="4" width="32" height="32" rx="6" fill="#0a1628"/>
+  <path d="M9 12 L25 12 L25 17 L14 17 L14 19 L23 19 L23 24 L14 24 L14 31 L9 31 Z" fill="#2563eb"/>
+  <text x="40" y="28" font-family="Inter, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#0a1628">PicoAide</text>
 </svg>
