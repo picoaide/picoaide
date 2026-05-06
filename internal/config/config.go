@@ -133,17 +133,31 @@ func (i ImageConfig) IsTencent() bool {
   return i.Registry == "tencent"
 }
 
-// PullRef 根据配置返回实际拉取地址
-func (i ImageConfig) PullRef(tag string) string {
-  if i.IsTencent() {
-    return "hkccr.ccs.tencentyun.com/picoaide/picoaide:" + tag
-  }
-  return "ghcr.io/picoaide/picoaide:" + tag
+// IsDev 是否为开发模式（通过环境变量 PICOAIDE_DEV=1 启用）
+func (i ImageConfig) IsDev() bool {
+  return os.Getenv("PICOAIDE_DEV") == "1"
 }
 
-// UnifiedRef 返回统一名称（ghcr.io/picoaide/picoaide:tag）
+// RepoName 返回镜像仓库名
+func (i ImageConfig) RepoName() string {
+  if i.IsDev() {
+    return "picoaide/picoaide-dev"
+  }
+  return "picoaide/picoaide"
+}
+
+// PullRef 根据配置返回实际拉取地址
+func (i ImageConfig) PullRef(tag string) string {
+  repo := i.RepoName()
+  if i.IsTencent() {
+    return "hkccr.ccs.tencentyun.com/" + repo + ":" + tag
+  }
+  return "ghcr.io/" + repo + ":" + tag
+}
+
+// UnifiedRef 返回统一名称
 func (i ImageConfig) UnifiedRef(tag string) string {
-  return "ghcr.io/picoaide/picoaide:" + tag
+  return "ghcr.io/" + i.RepoName() + ":" + tag
 }
 
 type TLSConfig struct {

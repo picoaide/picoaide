@@ -2,9 +2,6 @@ name: Build PicoAide
 
 on:
   push:
-    branches:
-      - main
-      - master
     paths-ignore:
       - 'docker/**'
       - 'docs/**'

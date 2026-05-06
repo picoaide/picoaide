@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - dev
   workflow_dispatch:
     inputs:
       force_build:
@@ -91,11 +92,22 @@ jobs:
         id: tags
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
-          TAGS="ghcr.io/picoaide/picoaide:${VERSION}"
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+
+          if [ "${{ github.ref_name }}" = "main" ] || [ "${{ github.ref_name }}" = "master" ]; then
+            IMAGE="picoaide/picoaide"
+            TAG="${VERSION}"
+          else
+            IMAGE="picoaide/picoaide-dev"
+            TAG="dev-${SHORT_SHA}"
+          fi
+
+          TAGS="ghcr.io/${IMAGE}:${TAG},ghcr.io/${IMAGE}:dev"
           if [ "${{ vars.TENCENT_REGISTRY_ENABLED }}" = "true" ]; then
-            TAGS="${TAGS},hkccr.ccs.tencentyun.com/picoaide/picoaide:${VERSION}"
+            TAGS="${TAGS},hkccr.ccs.tencentyun.com/${IMAGE}:${TAG},hkccr.ccs.tencentyun.com/${IMAGE}:dev"
           fi
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "Building: ${TAGS}"
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7

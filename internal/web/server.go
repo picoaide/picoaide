@@ -753,7 +753,7 @@ func (s *Server) handleAdminImageUpgradeCandidates(w http.ResponseWriter, r *htt
     if c.Image == newImage {
       continue
     }
-    if !strings.Contains(c.Image, "picoaide/picoaide") {
+    if !strings.Contains(c.Image, s.cfg.Image.RepoName()) {
       continue
     }
     groups, _ := auth.GetGroupsForUser(c.Username)
@@ -847,7 +847,7 @@ func (s *Server) handleAdminImageUpgrade(w http.ResponseWriter, r *http.Request)
     if rec.Image == newImage {
       continue
     }
-    if !strings.Contains(rec.Image, "picoaide/picoaide") {
+    if !strings.Contains(rec.Image, s.cfg.Image.RepoName()) {
       continue
     }
     upgradeUsers = append(upgradeUsers, username)
@@ -962,7 +962,7 @@ func (s *Server) handleAdminImageRegistry(w http.ResponseWriter, r *http.Request
 
   // 远程标签始终从 GitHub Container Registry 获取
   ctx := contextWithTimeout(15)
-  tags, err := dockerpkg.ListRegistryTags(ctx, "picoaide/picoaide")
+  tags, err := dockerpkg.ListRegistryTags(ctx, s.cfg.Image.RepoName())
   if err != nil {
     writeError(w, http.StatusInternalServerError, "获取远程标签失败: "+err.Error())
     return

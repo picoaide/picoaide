@@ -456,7 +456,7 @@ func pullAndListTags(reader *bufio.Reader, cfg *config.GlobalConfig) {
   defer cancel()
 
   // 获取远程标签
-  tags, err := dockerpkg.ListRegistryTagsForConfig(ctx, "picoaide/picoaide", cfg.Image.Registry)
+  tags, err := dockerpkg.ListRegistryTagsForConfig(ctx, cfg.Image.RepoName(), cfg.Image.Registry)
   if err != nil {
     fmt.Fprintf(os.Stderr, "获取远程标签失败: %v\n", err)
     return
