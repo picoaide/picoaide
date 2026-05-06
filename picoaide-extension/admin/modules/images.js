@@ -353,7 +353,7 @@ export async function init(ctx) {
     const groupSelect = $('#upgrade-group-select');
 
     targetEl.textContent = tag;
-    usersDiv.innerHTML = '<small style="color:#aaa">加载中...</small>';
+    usersDiv.innerHTML = '<small style="color:#666">加载中...</small>';
     progressDiv.style.display = 'none';
     progressDiv.innerHTML = '';
     msgEl.textContent = '';
@@ -379,7 +379,7 @@ export async function init(ctx) {
       }
 
       if (upgradeUsersData.length === 0) {
-        usersDiv.innerHTML = '<small style="color:#aaa">所有用户已是最新版本</small>';
+        usersDiv.innerHTML = '<small style="color:#666">所有用户已是最新版本</small>';
       } else {
         renderUpgradeTable(upgradeUsersData);
       }
@@ -450,31 +450,31 @@ export async function init(ctx) {
     const usersDiv = $('#upgrade-users');
     usersDiv.innerHTML = '';
     if (users.length === 0) {
-      usersDiv.innerHTML = '<div style="padding:12px;color:#aaa;text-align:center">无匹配用户</div>';
+      usersDiv.innerHTML = '<div style="padding:12px;color:#999;text-align:center">无匹配用户</div>';
       updateUpgradeCount();
       return;
     }
     const table = document.createElement('table');
-    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px';
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;background:#fff';
     const thead = document.createElement('thead');
-    thead.innerHTML = '<tr style="border-bottom:1px solid var(--border,#333)">' +
+    thead.innerHTML = '<tr style="border-bottom:2px solid #ddd;background:#f5f5f5">' +
       '<th style="padding:6px 8px;text-align:left;width:30px"><input type="checkbox" id="upgrade-header-cb"></th>' +
-      '<th style="padding:6px 8px;text-align:left;color:#aaa">用户名</th>' +
-      '<th style="padding:6px 8px;text-align:left;color:#aaa">当前版本</th>' +
-      '<th style="padding:6px 8px;text-align:left;color:#aaa">状态</th>' +
-      '<th style="padding:6px 8px;text-align:left;color:#aaa">分组</th></tr>';
+      '<th style="padding:6px 8px;text-align:left;color:#555">用户名</th>' +
+      '<th style="padding:6px 8px;text-align:left;color:#555">当前版本</th>' +
+      '<th style="padding:6px 8px;text-align:left;color:#555">状态</th>' +
+      '<th style="padding:6px 8px;text-align:left;color:#555">分组</th></tr>';
     table.appendChild(thead);
 
     const tbody = document.createElement('tbody');
     for (const u of users) {
       const tr = document.createElement('tr');
-      tr.style.cssText = 'border-bottom:1px solid rgba(255,255,255,0.05)';
+      tr.style.cssText = 'border-bottom:1px solid #eee;background:#fff';
       tr.innerHTML =
         '<td style="padding:4px 8px"><input type="checkbox" value="' + esc(u.username) + '" checked></td>' +
-        '<td style="padding:4px 8px;color:#e0e0e0">' + esc(u.username) + '</td>' +
-        '<td style="padding:4px 8px;color:#aaa;font-family:monospace;font-size:11px">' + esc(u.image.split(':').pop()) + '</td>' +
-        '<td style="padding:4px 8px">' + (u.status === 'running' ? '<span style="color:#2ecc71">运行中</span>' : '<span style="color:#888">' + esc(u.status) + '</span>') + '</td>' +
-        '<td style="padding:4px 8px;color:#aaa">' + esc(u.groups || '-') + '</td>';
+        '<td style="padding:4px 8px;color:#333">' + esc(u.username) + '</td>' +
+        '<td style="padding:4px 8px;color:#666;font-family:monospace;font-size:11px">' + esc(u.image.split(':').pop()) + '</td>' +
+        '<td style="padding:4px 8px">' + (u.status === 'running' ? '<span style="color:#27ae60">运行中</span>' : '<span style="color:#999">' + esc(u.status) + '</span>') + '</td>' +
+        '<td style="padding:4px 8px;color:#666">' + esc(u.groups || '-') + '</td>';
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
@@ -521,10 +521,10 @@ export async function init(ctx) {
     container.innerHTML = '';
     for (const name of upgradeSelectedGroups) {
       const tag = document.createElement('span');
-      tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:#0f3460;color:#e0e0e0;font-size:12px';
+      tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:#e8f4fd;color:#333;font-size:12px;border:1px solid #b3d9f2';
       tag.textContent = name;
       const x = document.createElement('span');
-      x.style.cssText = 'cursor:pointer;color:#e74c3c;font-weight:bold;margin-left:4px';
+      x.style.cssText = 'cursor:pointer;color:#c0392b;font-weight:bold;margin-left:4px';
       x.textContent = '×';
       x.addEventListener('click', () => {
         upgradeSelectedGroups.delete(name);
