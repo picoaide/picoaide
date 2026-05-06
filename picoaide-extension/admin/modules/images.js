@@ -339,51 +339,105 @@ export async function init(ctx) {
 
   let upgradeTag = '';
   let upgradeUsersData = [];
+  let upgradeGroupsData = [];
+  let upgradeSelectedGroups = new Set();
 
   async function openUpgradeModal(tag) {
     upgradeTag = tag;
+    upgradeSelectedGroups = new Set();
     const modal = $('#image-upgrade-modal');
     const targetEl = $('#upgrade-target');
-    const groupsDiv = $('#upgrade-groups');
     const usersDiv = $('#upgrade-users');
     const progressDiv = $('#upgrade-progress');
     const msgEl = $('#upgrade-msg');
+    const groupSelect = $('#upgrade-group-select');
 
     targetEl.textContent = tag;
-    groupsDiv.innerHTML = '<small>加载中...</small>';
-    usersDiv.innerHTML = '<small>加载中...</small>';
+    usersDiv.innerHTML = '<small style="color:#aaa">加载中...</small>';
     progressDiv.style.display = 'none';
     progressDiv.innerHTML = '';
     msgEl.textContent = '';
     msgEl.className = 'msg';
+    $('#upgrade-selected-groups').innerHTML = '';
+    $('#upgrade-search').value = '';
+    $('#upgrade-count').textContent = '';
 
     modal.classList.remove('hidden');
 
     try {
       const data = await Api.get('/api/admin/images/upgrade-candidates?tag=' + encodeURIComponent(tag));
       upgradeUsersData = data.users || [];
+      upgradeGroupsData = data.groups || [];
 
-      // 渲染分组按钮
-      const groups = data.groups || [];
-      groupsDiv.innerHTML = '';
-      if (groups.length === 0) {
-        groupsDiv.innerHTML = '<small class="text-muted">无可升级分组</small>';
-      } else {
-        for (const g of groups) {
-          const btn = document.createElement('button');
-          btn.className = 'btn btn-sm btn-outline';
-          btn.textContent = g.name + ' (' + g.count + ')';
-          btn.addEventListener('click', () => toggleGroupUsers(g.name));
-          groupsDiv.appendChild(btn);
-        }
+      // 填充分组下拉
+      groupSelect.innerHTML = '<option value="">-- 选择分组 --</option>';
+      for (const g of upgradeGroupsData) {
+        const opt = document.createElement('option');
+        opt.value = g.name;
+        opt.textContent = g.name + ' (' + g.count + ' 人)';
+        groupSelect.appendChild(opt);
       }
 
-      // 渲染用户复选框
-      renderUpgradeUsers(upgradeUsersData);
+      if (upgradeUsersData.length === 0) {
+        usersDiv.innerHTML = '<small style="color:#aaa">所有用户已是最新版本</small>';
+      } else {
+        renderUpgradeTable(upgradeUsersData);
+      }
     } catch (e) {
-      groupsDiv.innerHTML = '<small style="color:var(--err)">加载失败</small>';
-      usersDiv.innerHTML = '';
+      usersDiv.innerHTML = '<small style="color:var(--err)">加载失败: ' + esc(e.message) + '</small>';
     }
+
+    // 绑定搜索
+    const searchInput = $('#upgrade-search');
+    const newSearch = searchInput.cloneNode(true);
+    searchInput.parentNode.replaceChild(newSearch, searchInput);
+    newSearch.addEventListener('input', () => {
+      const q = newSearch.value.toLowerCase().trim();
+      const filtered = q ? upgradeUsersData.filter(u =>
+        u.username.toLowerCase().includes(q) || (u.groups && u.groups.toLowerCase().includes(q))
+      ) : upgradeUsersData;
+      renderUpgradeTable(filtered);
+    });
+
+    // 绑定添加分组按钮
+    const addGroupBtn = $('#upgrade-add-group');
+    const newAddGroup = addGroupBtn.cloneNode(true);
+    addGroupBtn.parentNode.replaceChild(newAddGroup, addGroupBtn);
+    newAddGroup.addEventListener('click', () => {
+      const name = $('#upgrade-group-select').value;
+      if (!name || upgradeSelectedGroups.has(name)) return;
+      upgradeSelectedGroups.add(name);
+      selectGroupUsers(name, true);
+      renderSelectedGroups();
+    });
+
+    // 绑定全员升级按钮
+    const allBtn = $('#upgrade-all-btn');
+    const newAllBtn = allBtn.cloneNode(true);
+    allBtn.parentNode.replaceChild(newAllBtn, allBtn);
+    newAllBtn.addEventListener('click', () => {
+      document.querySelectorAll('#upgrade-users tbody input[type=checkbox]').forEach(cb => cb.checked = true);
+      updateUpgradeCount();
+    });
+
+    // 绑定全选/清空
+    const selectAllBtn = $('#upgrade-select-all');
+    const newSelectAll = selectAllBtn.cloneNode(true);
+    selectAllBtn.parentNode.replaceChild(newSelectAll, selectAllBtn);
+    newSelectAll.addEventListener('click', () => {
+      document.querySelectorAll('#upgrade-users input[type=checkbox]').forEach(cb => cb.checked = true);
+      updateUpgradeCount();
+    });
+
+    const deselectAllBtn = $('#upgrade-deselect-all');
+    const newDeselectAll = deselectAllBtn.cloneNode(true);
+    deselectAllBtn.parentNode.replaceChild(newDeselectAll, deselectAllBtn);
+    newDeselectAll.addEventListener('click', () => {
+      document.querySelectorAll('#upgrade-users input[type=checkbox]').forEach(cb => cb.checked = false);
+      upgradeSelectedGroups.clear();
+      renderSelectedGroups();
+      updateUpgradeCount();
+    });
 
     // 绑定确认按钮
     const confirmBtn = $('#upgrade-confirm-btn');
@@ -392,38 +446,98 @@ export async function init(ctx) {
     newBtn.addEventListener('click', () => confirmUpgrade());
   }
 
-  function renderUpgradeUsers(users) {
+  function renderUpgradeTable(users) {
     const usersDiv = $('#upgrade-users');
     usersDiv.innerHTML = '';
     if (users.length === 0) {
-      usersDiv.innerHTML = '<small class="text-muted">所有用户已是最新版本</small>';
+      usersDiv.innerHTML = '<div style="padding:12px;color:#aaa;text-align:center">无匹配用户</div>';
+      updateUpgradeCount();
       return;
     }
+    const table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px';
+    const thead = document.createElement('thead');
+    thead.innerHTML = '<tr style="border-bottom:1px solid var(--border,#333)">' +
+      '<th style="padding:6px 8px;text-align:left;width:30px"><input type="checkbox" id="upgrade-header-cb"></th>' +
+      '<th style="padding:6px 8px;text-align:left;color:#aaa">用户名</th>' +
+      '<th style="padding:6px 8px;text-align:left;color:#aaa">当前版本</th>' +
+      '<th style="padding:6px 8px;text-align:left;color:#aaa">状态</th>' +
+      '<th style="padding:6px 8px;text-align:left;color:#aaa">分组</th></tr>';
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
     for (const u of users) {
-      const label = document.createElement('label');
-      label.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;background:var(--bg-card,#16213e);font-size:12px;cursor:pointer;color:#e0e0e0';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = u.username;
-      cb.checked = true;
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(u.username + (u.groups ? ' (' + u.groups + ')' : '')));
-      usersDiv.appendChild(label);
+      const tr = document.createElement('tr');
+      tr.style.cssText = 'border-bottom:1px solid rgba(255,255,255,0.05)';
+      tr.innerHTML =
+        '<td style="padding:4px 8px"><input type="checkbox" value="' + esc(u.username) + '" checked></td>' +
+        '<td style="padding:4px 8px;color:#e0e0e0">' + esc(u.username) + '</td>' +
+        '<td style="padding:4px 8px;color:#aaa;font-family:monospace;font-size:11px">' + esc(u.image.split(':').pop()) + '</td>' +
+        '<td style="padding:4px 8px">' + (u.status === 'running' ? '<span style="color:#2ecc71">运行中</span>' : '<span style="color:#888">' + esc(u.status) + '</span>') + '</td>' +
+        '<td style="padding:4px 8px;color:#aaa">' + esc(u.groups || '-') + '</td>';
+      tbody.appendChild(tr);
     }
+    table.appendChild(tbody);
+    usersDiv.appendChild(table);
+
+    // 表头全选/取消
+    const headerCb = document.getElementById('upgrade-header-cb');
+    if (headerCb) {
+      headerCb.addEventListener('change', () => {
+        tbody.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = headerCb.checked);
+        updateUpgradeCount();
+      });
+    }
+
+    // 单个变更时更新计数
+    tbody.querySelectorAll('input[type=checkbox]').forEach(cb => {
+      cb.addEventListener('change', updateUpgradeCount);
+    });
+
+    updateUpgradeCount();
   }
 
-  function toggleGroupUsers(groupName) {
-    const checkboxes = document.querySelectorAll('#upgrade-users input[type=checkbox]');
-    checkboxes.forEach(cb => {
+  function updateUpgradeCount() {
+    const all = document.querySelectorAll('#upgrade-users tbody input[type=checkbox]').length;
+    const checked = document.querySelectorAll('#upgrade-users tbody input[type=checkbox]:checked').length;
+    $('#upgrade-count').textContent = checked + ' / ' + all + ' 人已选';
+  }
+
+  function selectGroupUsers(groupName, checked) {
+    const rows = document.querySelectorAll('#upgrade-users tbody tr');
+    rows.forEach(tr => {
+      const cb = tr.querySelector('input[type=checkbox]');
+      if (!cb) return;
       const user = upgradeUsersData.find(u => u.username === cb.value);
       if (user && user.groups && user.groups.split(', ').includes(groupName)) {
-        cb.checked = !cb.checked;
+        cb.checked = checked;
       }
     });
+    updateUpgradeCount();
+  }
+
+  function renderSelectedGroups() {
+    const container = $('#upgrade-selected-groups');
+    container.innerHTML = '';
+    for (const name of upgradeSelectedGroups) {
+      const tag = document.createElement('span');
+      tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:#0f3460;color:#e0e0e0;font-size:12px';
+      tag.textContent = name;
+      const x = document.createElement('span');
+      x.style.cssText = 'cursor:pointer;color:#e74c3c;font-weight:bold;margin-left:4px';
+      x.textContent = '×';
+      x.addEventListener('click', () => {
+        upgradeSelectedGroups.delete(name);
+        selectGroupUsers(name, false);
+        renderSelectedGroups();
+      });
+      tag.appendChild(x);
+      container.appendChild(tag);
+    }
   }
 
   async function confirmUpgrade() {
-    const checkboxes = document.querySelectorAll('#upgrade-users input[type=checkbox]:checked');
+    const checkboxes = document.querySelectorAll('#upgrade-users tbody input[type=checkbox]:checked');
     const selectedUsers = Array.from(checkboxes).map(cb => cb.value);
     if (selectedUsers.length === 0) {
       showMsg('#upgrade-msg', '请选择要升级的用户', false);
@@ -460,9 +574,11 @@ export async function init(ctx) {
         return;
       }
 
+      // 读取 SSE 流（拉取镜像阶段）
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let taskId = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -476,9 +592,8 @@ export async function init(ctx) {
             try {
               const obj = JSON.parse(raw);
               if (obj.status === 'done') {
-                progressDiv.innerHTML += '<div style="color:#2ecc71">' + esc(obj.message || '升级完成!') + '</div>';
-                await loadLocalImages();
-                loadRegistryTags();
+                taskId = obj.task_id;
+                progressDiv.innerHTML += '<div style="color:#2ecc71">' + esc(obj.message) + '</div>';
                 break;
               }
               if (obj.status === 'error') {
@@ -493,11 +608,50 @@ export async function init(ctx) {
           }
         }
       }
+
+      // 如果有任务 ID，轮询队列进度
+      if (taskId) {
+        pollUpgradeProgress(progressDiv);
+      }
     } catch (err) {
       progressDiv.innerHTML += '<div style="color:#e74c3c">错误: ' + esc(err.message) + '</div>';
     }
     confirmBtn.disabled = false;
     confirmBtn.textContent = '拉取并升级';
+  }
+
+  async function pollUpgradeProgress(progressDiv) {
+    const serverBase = await getServerUrl();
+    const poll = async () => {
+      try {
+        const data = await Api.get('/api/admin/task/status');
+        const s = data.status || data;
+        const lineId = 'upgrade-poll-status';
+        let el = document.getElementById(lineId);
+        if (!el) {
+          el = document.createElement('div');
+          el.id = lineId;
+          progressDiv.appendChild(el);
+        }
+        const pct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
+        el.textContent = '升级进度：' + s.done + '/' + s.total + ' (' + pct + '%)' +
+          (s.failed > 0 ? '，失败 ' + s.failed : '') +
+          (s.message ? ' — ' + s.message : '');
+        progressDiv.scrollTop = progressDiv.scrollHeight;
+
+        if (s.running) {
+          setTimeout(poll, 2000);
+        } else {
+          el.style.color = '#2ecc71';
+          el.textContent = '升级完成：' + s.done + ' 成功' + (s.failed > 0 ? '，' + s.failed + ' 失败' : '');
+          await loadLocalImages();
+          loadRegistryTags();
+        }
+      } catch {
+        setTimeout(poll, 3000);
+      }
+    };
+    setTimeout(poll, 1000);
   }
 
   function closeUpgradeModal() {

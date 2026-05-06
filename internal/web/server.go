@@ -797,7 +797,7 @@ func (s *Server) handleAdminImageUpgradeCandidates(w http.ResponseWriter, r *htt
   })
 }
 
-// handleAdminImageUpgrade 拉取新版本镜像并升级指定用户（SSE 流式）
+// handleAdminImageUpgrade 拉取新版本镜像，然后用任务队列逐步升级用户
 func (s *Server) handleAdminImageUpgrade(w http.ResponseWriter, r *http.Request) {
   if s.requireSuperadmin(w, r) == "" {
     return
@@ -824,14 +824,7 @@ func (s *Server) handleAdminImageUpgrade(w http.ResponseWriter, r *http.Request)
 
   // 解析目标用户列表
   var targetUsers []string
-  if groupFilter := r.FormValue("group"); groupFilter != "" {
-    members, err := auth.GetGroupMembers(groupFilter)
-    if err != nil {
-      writeError(w, http.StatusInternalServerError, "查询分组用户失败")
-      return
-    }
-    targetUsers = members
-  } else if userList := r.FormValue("users"); userList != "" {
+  if userList := r.FormValue("users"); userList != "" {
     for _, u := range strings.Split(userList, ",") {
       if v := strings.TrimSpace(u); v != "" {
         targetUsers = append(targetUsers, v)
@@ -840,7 +833,7 @@ func (s *Server) handleAdminImageUpgrade(w http.ResponseWriter, r *http.Request)
   }
 
   if len(targetUsers) == 0 {
-    writeError(w, http.StatusBadRequest, "必须指定要升级的用户或分组")
+    writeError(w, http.StatusBadRequest, "必须指定要升级的用户")
     return
   }
 
@@ -879,7 +872,7 @@ func (s *Server) handleAdminImageUpgrade(w http.ResponseWriter, r *http.Request)
     flush()
   }
 
-  // 1. 拉取新镜像
+  // 1. 同步拉取新镜像
   sendStatus("正在拉取镜像 " + newImage + " ...")
   pullRef := s.cfg.Image.PullRef(targetTag)
   ctx := context.Background()
@@ -911,23 +904,15 @@ func (s *Server) handleAdminImageUpgrade(w http.ResponseWriter, r *http.Request)
     }
   }
 
-  // 2. 逐个迁移用户
-  sendStatus(fmt.Sprintf("镜像就绪，开始升级 %d 个用户...", len(upgradeUsers)))
-
-  var success []string
-  var failed []string
-
-  for i, username := range upgradeUsers {
-    sendStatus(fmt.Sprintf("[%d/%d] 升级 %s ...", i+1, len(upgradeUsers), username))
-
-    if err := auth.UpdateContainerImage(username, newImage); err != nil {
-      failed = append(failed, username+"(更新失败)")
-      continue
+  // 2. 提交到任务队列逐步执行
+  img := newImage // 闭包捕获
+  taskFn := func(username string) error {
+    if err := auth.UpdateContainerImage(username, img); err != nil {
+      return fmt.Errorf("更新失败: %w", err)
     }
     rec, _ := auth.GetContainerByUsername(username)
     if rec == nil {
-      failed = append(failed, username+"(记录不存在)")
-      continue
+      return fmt.Errorf("记录不存在")
     }
     if rec.ContainerID != "" {
       _ = dockerpkg.Stop(ctx, rec.ContainerID)
@@ -936,26 +921,28 @@ func (s *Server) handleAdminImageUpgrade(w http.ResponseWriter, r *http.Request)
     }
     if rec.Status == "running" {
       ud := user.UserDir(s.cfg, username)
-      cid, createErr := dockerpkg.CreateContainer(ctx, username, newImage, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
+      cid, createErr := dockerpkg.CreateContainer(ctx, username, img, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
       if createErr != nil {
-        failed = append(failed, username+"(创建失败)")
-        continue
+        return fmt.Errorf("创建失败: %w", createErr)
       }
       auth.UpdateContainerID(username, cid)
       if err := dockerpkg.Start(ctx, cid); err != nil {
-        failed = append(failed, username+"(启动失败)")
-        continue
+        return fmt.Errorf("启动失败: %w", err)
       }
       auth.UpdateContainerStatus(username, "running")
     }
-    success = append(success, username)
+    return nil
   }
 
-  msg := fmt.Sprintf("升级完成：%d 成功", len(success))
-  if len(failed) > 0 {
-    msg += fmt.Sprintf("，%d 失败：%s", len(failed), strings.Join(failed, ", "))
+  taskID, err := enqueueTask("upgrade", upgradeUsers, taskFn)
+  if err != nil {
+    fmt.Fprintf(w, "data: {\"status\":\"error\",\"error\":\"%s\"}\n\n", err.Error())
+    flush()
+    return
   }
-  fmt.Fprintf(w, "data: {\"status\":\"done\",\"message\":%q,\"success\":%d,\"failed\":%d}\n\n", msg, len(success), len(failed))
+
+  sendStatus(fmt.Sprintf("镜像就绪，已提交升级任务 %s，共 %d 个用户排队中（每 2 秒处理一个）", taskID, len(upgradeUsers)))
+  fmt.Fprintf(w, "data: {\"status\":\"done\",\"message\":\"镜像拉取完成，%d 个用户已进入升级队列\",\"task_id\":%q,\"total\":%d}\n\n", len(upgradeUsers), taskID, len(upgradeUsers))
   flush()
 }
 
