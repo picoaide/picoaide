@@ -13,6 +13,14 @@ export async function init(ctx) {
   $('#migrate-cancel-btn')?.addEventListener('click', closeMigrateModal);
   $('#image-users-close')?.addEventListener('click', closeUsersModal);
   $('#image-users-close-btn')?.addEventListener('click', closeUsersModal);
+  $('#upgrade-modal-close')?.addEventListener('click', closeUpgradeModal);
+  $('#upgrade-cancel-btn')?.addEventListener('click', closeUpgradeModal);
+  $('#upgrade-select-all')?.addEventListener('click', () => {
+    document.querySelectorAll('#upgrade-users input[type=checkbox]').forEach(cb => cb.checked = true);
+  });
+  $('#upgrade-deselect-all')?.addEventListener('click', () => {
+    document.querySelectorAll('#upgrade-users input[type=checkbox]').forEach(cb => cb.checked = false);
+  });
 
   async function loadLocalImages() {
     const data = await Api.get('/api/admin/images').catch(() => ({ images: [] }));
@@ -88,18 +96,25 @@ export async function init(ctx) {
 
     for (const tag of tags) {
       const exists = localTags.has(tag);
+      const hasOlder = localTags.size > 0 && !exists;
       const tr = document.createElement('tr');
       const statusHtml = exists
         ? '<span class="badge badge-ok">已存在</span>'
         : '<span class="badge badge-muted">未拉取</span>';
+      const upgradeBtnHtml = hasOlder
+        ? '<button class="btn btn-sm btn-primary" data-upgrade="' + esc(tag) + '" style="margin-left:4px">升级</button>'
+        : '';
       tr.innerHTML =
         '<td style="font-family:monospace">' + esc(tag) + '</td>' +
         '<td>' + statusHtml + '</td>' +
-        '<td><button class="btn btn-sm btn-primary" data-tag="' + esc(tag) + '">' + (exists ? '重新拉取' : '拉取') + '</button></td>';
+        '<td><button class="btn btn-sm btn-outline" data-tag="' + esc(tag) + '">' + (exists ? '重新拉取' : '拉取') + '</button>' + upgradeBtnHtml + '</td>';
       tbody.appendChild(tr);
     }
     tbody.querySelectorAll('[data-tag]').forEach(btn => {
       btn.addEventListener('click', () => pullImage(btn.dataset.tag));
+    });
+    tbody.querySelectorAll('[data-upgrade]').forEach(btn => {
+      btn.addEventListener('click', () => openUpgradeModal(btn.dataset.upgrade));
     });
   }
 
@@ -319,5 +334,172 @@ export async function init(ctx) {
 
   function closeUsersModal() {
     $('#image-users-modal')?.classList.add('hidden');
+  }
+
+  let upgradeTag = '';
+  let upgradeUsersData = [];
+
+  async function openUpgradeModal(tag) {
+    upgradeTag = tag;
+    const modal = $('#image-upgrade-modal');
+    const targetEl = $('#upgrade-target');
+    const groupsDiv = $('#upgrade-groups');
+    const usersDiv = $('#upgrade-users');
+    const progressDiv = $('#upgrade-progress');
+    const msgEl = $('#upgrade-msg');
+
+    targetEl.textContent = tag;
+    groupsDiv.innerHTML = '<small>加载中...</small>';
+    usersDiv.innerHTML = '<small>加载中...</small>';
+    progressDiv.style.display = 'none';
+    progressDiv.innerHTML = '';
+    msgEl.textContent = '';
+    msgEl.className = 'msg';
+
+    modal.classList.remove('hidden');
+
+    try {
+      const data = await Api.get('/api/admin/images/upgrade-candidates?tag=' + encodeURIComponent(tag));
+      upgradeUsersData = data.users || [];
+
+      // 渲染分组按钮
+      const groups = data.groups || [];
+      groupsDiv.innerHTML = '';
+      if (groups.length === 0) {
+        groupsDiv.innerHTML = '<small class="text-muted">无可升级分组</small>';
+      } else {
+        for (const g of groups) {
+          const btn = document.createElement('button');
+          btn.className = 'btn btn-sm btn-outline';
+          btn.textContent = g.name + ' (' + g.count + ')';
+          btn.addEventListener('click', () => toggleGroupUsers(g.name));
+          groupsDiv.appendChild(btn);
+        }
+      }
+
+      // 渲染用户复选框
+      renderUpgradeUsers(upgradeUsersData);
+    } catch (e) {
+      groupsDiv.innerHTML = '<small style="color:var(--err)">加载失败</small>';
+      usersDiv.innerHTML = '';
+    }
+
+    // 绑定确认按钮
+    const confirmBtn = $('#upgrade-confirm-btn');
+    const newBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
+    newBtn.addEventListener('click', () => confirmUpgrade());
+  }
+
+  function renderUpgradeUsers(users) {
+    const usersDiv = $('#upgrade-users');
+    usersDiv.innerHTML = '';
+    if (users.length === 0) {
+      usersDiv.innerHTML = '<small class="text-muted">所有用户已是最新版本</small>';
+      return;
+    }
+    for (const u of users) {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;background:var(--bg-card,#16213e);font-size:12px;cursor:pointer';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = u.username;
+      cb.checked = true;
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(u.username + (u.groups ? ' (' + u.groups + ')' : '')));
+      usersDiv.appendChild(label);
+    }
+  }
+
+  function toggleGroupUsers(groupName) {
+    const checkboxes = document.querySelectorAll('#upgrade-users input[type=checkbox]');
+    checkboxes.forEach(cb => {
+      const user = upgradeUsersData.find(u => u.username === cb.value);
+      if (user && user.groups && user.groups.split(', ').includes(groupName)) {
+        cb.checked = !cb.checked;
+      }
+    });
+  }
+
+  async function confirmUpgrade() {
+    const checkboxes = document.querySelectorAll('#upgrade-users input[type=checkbox]:checked');
+    const selectedUsers = Array.from(checkboxes).map(cb => cb.value);
+    if (selectedUsers.length === 0) {
+      showMsg('#upgrade-msg', '请选择要升级的用户', false);
+      return;
+    }
+
+    const confirmBtn = $('#upgrade-confirm-btn');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '升级中...';
+
+    const progressDiv = $('#upgrade-progress');
+    progressDiv.style.display = 'block';
+    progressDiv.innerHTML = '';
+
+    const csrf = await getCSRF();
+    const serverBase = await getServerUrl();
+    const formData = new FormData();
+    formData.append('tag', upgradeTag);
+    formData.append('users', selectedUsers.join(','));
+    formData.append('csrf_token', csrf);
+
+    try {
+      const response = await fetch(serverBase + '/api/admin/images/upgrade', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+
+      if (!response.ok && !response.headers.get('content-type')?.includes('text/event-stream')) {
+        const data = await response.json();
+        showMsg('#upgrade-msg', data.error || '升级失败', false);
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = '拉取并升级';
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const raw = line.slice(6);
+            try {
+              const obj = JSON.parse(raw);
+              if (obj.status === 'done') {
+                progressDiv.innerHTML += '<div style="color:#2ecc71">' + esc(obj.message || '升级完成!') + '</div>';
+                await loadLocalImages();
+                loadRegistryTags();
+                break;
+              }
+              if (obj.status === 'error') {
+                progressDiv.innerHTML += '<div style="color:#e74c3c">错误: ' + esc(obj.error || '') + '</div>';
+              } else if (obj.status) {
+                progressDiv.innerHTML += '<div>' + esc(obj.status) + '</div>';
+              }
+            } catch {
+              progressDiv.innerHTML += '<div>' + esc(raw) + '</div>';
+            }
+            progressDiv.scrollTop = progressDiv.scrollHeight;
+          }
+        }
+      }
+    } catch (err) {
+      progressDiv.innerHTML += '<div style="color:#e74c3c">错误: ' + esc(err.message) + '</div>';
+    }
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = '拉取并升级';
+  }
+
+  function closeUpgradeModal() {
+    $('#image-upgrade-modal')?.classList.add('hidden');
   }
 }

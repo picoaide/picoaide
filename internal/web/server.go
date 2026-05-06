@@ -318,8 +318,10 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/admin/images/pull", s.secureHeaders(s.handleAdminImagePull))
   mux.HandleFunc("/api/admin/images/delete", s.secureHeaders(s.handleAdminImageDelete))
   mux.HandleFunc("/api/admin/images/migrate", s.secureHeaders(s.handleAdminImageMigrate))
+  mux.HandleFunc("/api/admin/images/upgrade", s.secureHeaders(s.handleAdminImageUpgrade))
   mux.HandleFunc("/api/admin/images/registry", s.secureHeaders(s.handleAdminImageRegistry))
   mux.HandleFunc("/api/admin/images/local-tags", s.secureHeaders(s.handleAdminLocalTags))
+  mux.HandleFunc("/api/admin/images/upgrade-candidates", s.secureHeaders(s.handleAdminImageUpgradeCandidates))
   mux.HandleFunc("/api/admin/images/users", s.secureHeaders(s.handleAdminImageUsers))
 
   if cfg.Web.TLS.Enabled && cfg.Web.TLS.CertFile != "" && cfg.Web.TLS.KeyFile != "" {
@@ -714,6 +716,247 @@ func (s *Server) handleAdminImageMigrate(w http.ResponseWriter, r *http.Request)
     msg += fmt.Sprintf("，%d 失败：%s", len(failed), strings.Join(failed, ", "))
   }
   writeSuccess(w, msg)
+}
+
+// handleAdminImageUpgradeCandidates 查询可升级到指定版本的用户和分组
+func (s *Server) handleAdminImageUpgradeCandidates(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if r.Method != "GET" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+    return
+  }
+
+  targetTag := r.URL.Query().Get("tag")
+  if targetTag == "" {
+    writeError(w, http.StatusBadRequest, "必须指定目标版本标签")
+    return
+  }
+  newImage := s.cfg.Image.UnifiedRef(targetTag)
+
+  containers, err := auth.GetAllContainers()
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, "查询用户列表失败")
+    return
+  }
+
+  type userInfo struct {
+    Username string `json:"username"`
+    Image    string `json:"image"`
+    Status   string `json:"status"`
+    Groups   string `json:"groups"`
+  }
+
+  var users []userInfo
+  for _, c := range containers {
+    if c.Image == newImage {
+      continue
+    }
+    if !strings.Contains(c.Image, "picoaide/picoaide") {
+      continue
+    }
+    groups, _ := auth.GetGroupsForUser(c.Username)
+    groupStr := strings.Join(groups, ", ")
+    users = append(users, userInfo{
+      Username: c.Username,
+      Image:    c.Image,
+      Status:   c.Status,
+      Groups:   groupStr,
+    })
+  }
+
+  allGroups, _ := auth.ListGroups()
+  type groupInfo struct {
+    Name  string `json:"name"`
+    Count int    `json:"count"`
+  }
+  groupCount := map[string]int{}
+  for _, u := range users {
+    gs, _ := auth.GetGroupsForUser(u.Username)
+    seen := map[string]bool{}
+    for _, g := range gs {
+      if !seen[g] {
+        groupCount[g]++
+        seen[g] = true
+      }
+    }
+  }
+  var groups []groupInfo
+  for _, g := range allGroups {
+    if groupCount[g.Name] > 0 {
+      groups = append(groups, groupInfo{Name: g.Name, Count: groupCount[g.Name]})
+    }
+  }
+
+  writeJSON(w, http.StatusOK, map[string]interface{}{
+    "success": true,
+    "target":  newImage,
+    "users":   users,
+    "groups":  groups,
+  })
+}
+
+// handleAdminImageUpgrade 拉取新版本镜像并升级指定用户（SSE 流式）
+func (s *Server) handleAdminImageUpgrade(w http.ResponseWriter, r *http.Request) {
+  if s.requireSuperadmin(w, r) == "" {
+    return
+  }
+  if !s.dockerAvailable {
+    writeError(w, http.StatusServiceUnavailable, "Docker 服务不可用")
+    return
+  }
+  if r.Method != "POST" {
+    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(r) {
+    writeError(w, http.StatusForbidden, "无效请求")
+    return
+  }
+
+  targetTag := r.FormValue("tag")
+  if targetTag == "" {
+    writeError(w, http.StatusBadRequest, "必须指定目标版本标签")
+    return
+  }
+  newImage := s.cfg.Image.UnifiedRef(targetTag)
+
+  // 解析目标用户列表
+  var targetUsers []string
+  if groupFilter := r.FormValue("group"); groupFilter != "" {
+    members, err := auth.GetGroupMembers(groupFilter)
+    if err != nil {
+      writeError(w, http.StatusInternalServerError, "查询分组用户失败")
+      return
+    }
+    targetUsers = members
+  } else if userList := r.FormValue("users"); userList != "" {
+    for _, u := range strings.Split(userList, ",") {
+      if v := strings.TrimSpace(u); v != "" {
+        targetUsers = append(targetUsers, v)
+      }
+    }
+  }
+
+  if len(targetUsers) == 0 {
+    writeError(w, http.StatusBadRequest, "必须指定要升级的用户或分组")
+    return
+  }
+
+  // 过滤出真正需要升级的用户
+  var upgradeUsers []string
+  for _, username := range targetUsers {
+    rec, _ := auth.GetContainerByUsername(username)
+    if rec == nil {
+      continue
+    }
+    if rec.Image == newImage {
+      continue
+    }
+    if !strings.Contains(rec.Image, "picoaide/picoaide") {
+      continue
+    }
+    upgradeUsers = append(upgradeUsers, username)
+  }
+
+  if len(upgradeUsers) == 0 {
+    writeError(w, http.StatusBadRequest, "没有需要升级的用户")
+    return
+  }
+
+  // SSE 响应
+  w.Header().Set("Content-Type", "text/event-stream")
+  w.Header().Set("Cache-Control", "no-cache")
+  w.Header().Set("Connection", "keep-alive")
+  flush := func() {
+    if f, ok := w.(http.Flusher); ok {
+      f.Flush()
+    }
+  }
+  sendStatus := func(status string) {
+    fmt.Fprintf(w, "data: {\"status\":%q}\n\n", status)
+    flush()
+  }
+
+  // 1. 拉取新镜像
+  sendStatus("正在拉取镜像 " + newImage + " ...")
+  pullRef := s.cfg.Image.PullRef(targetTag)
+  ctx := context.Background()
+  reader, err := dockerpkg.ImagePull(ctx, pullRef)
+  if err != nil {
+    fmt.Fprintf(w, "data: {\"status\":\"error\",\"error\":\"拉取失败: %s\"}\n\n", err.Error())
+    flush()
+    return
+  }
+  buf := make([]byte, 4096)
+  for {
+    n, err := reader.Read(buf)
+    if n > 0 {
+      w.Write(buf[:n])
+      flush()
+    }
+    if err != nil {
+      break
+    }
+  }
+
+  // 腾讯云模式 retag
+  if s.cfg.Image.IsTencent() && pullRef != newImage {
+    sendStatus("重命名镜像 " + pullRef + " -> " + newImage)
+    if err := dockerpkg.RetagImage(ctx, pullRef, newImage); err != nil {
+      fmt.Fprintf(w, "data: {\"status\":\"error\",\"error\":\"重命名失败: %s\"}\n\n", err.Error())
+      flush()
+      return
+    }
+  }
+
+  // 2. 逐个迁移用户
+  sendStatus(fmt.Sprintf("镜像就绪，开始升级 %d 个用户...", len(upgradeUsers)))
+
+  var success []string
+  var failed []string
+
+  for i, username := range upgradeUsers {
+    sendStatus(fmt.Sprintf("[%d/%d] 升级 %s ...", i+1, len(upgradeUsers), username))
+
+    if err := auth.UpdateContainerImage(username, newImage); err != nil {
+      failed = append(failed, username+"(更新失败)")
+      continue
+    }
+    rec, _ := auth.GetContainerByUsername(username)
+    if rec == nil {
+      failed = append(failed, username+"(记录不存在)")
+      continue
+    }
+    if rec.ContainerID != "" {
+      _ = dockerpkg.Stop(ctx, rec.ContainerID)
+      _ = dockerpkg.Remove(ctx, rec.ContainerID)
+      auth.UpdateContainerID(username, "")
+    }
+    if rec.Status == "running" {
+      ud := user.UserDir(s.cfg, username)
+      cid, createErr := dockerpkg.CreateContainer(ctx, username, newImage, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
+      if createErr != nil {
+        failed = append(failed, username+"(创建失败)")
+        continue
+      }
+      auth.UpdateContainerID(username, cid)
+      if err := dockerpkg.Start(ctx, cid); err != nil {
+        failed = append(failed, username+"(启动失败)")
+        continue
+      }
+      auth.UpdateContainerStatus(username, "running")
+    }
+    success = append(success, username)
+  }
+
+  msg := fmt.Sprintf("升级完成：%d 成功", len(success))
+  if len(failed) > 0 {
+    msg += fmt.Sprintf("，%d 失败：%s", len(failed), strings.Join(failed, ", "))
+  }
+  fmt.Fprintf(w, "data: {\"status\":\"done\",\"message\":%q,\"success\":%d,\"failed\":%d}\n\n", msg, len(success), len(failed))
+  flush()
 }
 
 // handleAdminImageRegistry 列出 PicoAide 远程仓库标签

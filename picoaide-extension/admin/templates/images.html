@@ -63,3 +63,33 @@
     </div>
   </div>
 </div>
+
+<div id="image-upgrade-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">升级镜像<button id="upgrade-modal-close">&times;</button></div>
+    <div class="modal-body">
+      <p>升级到：<strong id="upgrade-target" style="font-family:monospace"></strong></p>
+
+      <div style="margin:10px 0">
+        <label style="font-weight:bold">按分组升级：</label>
+        <div id="upgrade-groups" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
+      </div>
+
+      <div style="margin:10px 0">
+        <div class="row" style="align-items:center;gap:8px;margin-bottom:6px">
+          <label style="font-weight:bold">选择用户：</label>
+          <button class="btn btn-sm btn-outline" id="upgrade-select-all">全选</button>
+          <button class="btn btn-sm btn-outline" id="upgrade-deselect-all">取消全选</button>
+        </div>
+        <div id="upgrade-users" style="max-height:250px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:4px"></div>
+      </div>
+
+      <div id="upgrade-progress" style="background:#1a1a2e;border-radius:4px;padding:8px;max-height:200px;overflow-y:auto;font-family:monospace;font-size:12px;color:#aaa;display:none"></div>
+      <div id="upgrade-msg" class="msg"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="upgrade-cancel-btn">取消</button>
+      <button class="btn btn-primary" id="upgrade-confirm-btn">拉取并升级</button>
+    </div>
+  </div>
+</div>
