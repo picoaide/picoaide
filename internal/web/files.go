@@ -53,7 +53,8 @@ const maxUploadSize = 32 << 20 // 32 MB
 
 // workspaceRoot 返回指定用户的工作区根目录路径
 func (s *Server) workspaceRoot(username string) string {
-  return filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace")
+  base := filepath.Base(username) // 防御性截取：确保不会拼出子路径
+  return filepath.Join(user.UserDir(s.cfg, base), ".picoclaw", "workspace")
 }
 
 // safePath 安全解析相对路径，防止路径遍历和符号链接逃逸

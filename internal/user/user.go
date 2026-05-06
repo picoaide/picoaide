@@ -83,8 +83,10 @@ func ResolveUsersRoot(cfg *config.GlobalConfig) string {
 }
 
 // UserDir 返回指定用户的目录路径
+// 注意：调用方应先通过 ValidateUsername 验证用户名合法性
 func UserDir(cfg *config.GlobalConfig, username string) string {
-  return filepath.Join(ResolveUsersRoot(cfg), username)
+  base := filepath.Base(username) // 防御性截取：确保不会拼出子路径
+  return filepath.Join(ResolveUsersRoot(cfg), base)
 }
 
 // EnsureUsersRoot 确保用户根目录和归档目录存在

@@ -332,15 +332,26 @@ export async function init(ctx) {
 function deepGet(obj, path) {
   var keys = path.split('.');
   var cur = obj;
-  for (var i = 0; i < keys.length; i++) { if (cur == null) return undefined; cur = cur[keys[i]]; }
+  for (var i = 0; i < keys.length; i++) {
+    if (cur == null) return undefined;
+    var key = keys[i];
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return undefined;
+    cur = cur[key];
+  }
   return cur;
 }
 
 function deepSet(obj, path, value) {
   var keys = path.split('.');
   var cur = obj;
-  for (var i = 0; i < keys.length - 1; i++) { if (cur[keys[i]] == null) cur[keys[i]] = {}; cur = cur[keys[i]]; }
+  for (var i = 0; i < keys.length - 1; i++) {
+    var key = keys[i];
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return;
+    if (cur[key] == null) cur[key] = {};
+    cur = cur[key];
+  }
   var last = keys[keys.length - 1];
+  if (last === '__proto__' || last === 'constructor' || last === 'prototype') return;
   if (value !== '' && !isNaN(value) && String(Number(value)) === value) cur[last] = Number(value);
   else cur[last] = value;
 }

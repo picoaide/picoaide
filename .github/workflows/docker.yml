@@ -18,8 +18,9 @@ on:
 
 jobs:
   check-version:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
-    outputs:
       version: ${{ steps.get_version.outputs.version }}
       should_build: ${{ steps.check_build.outputs.should_build }}
     steps:

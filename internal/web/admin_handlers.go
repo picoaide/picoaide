@@ -232,6 +232,10 @@ func (s *Server) handleAdminUserDelete(w http.ResponseWriter, r *http.Request) {
     writeError(w, http.StatusBadRequest, "用户名不能为空")
     return
   }
+  if err := user.ValidateUsername(username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
 
   // 停止并移除容器
   rec, _ := auth.GetContainerByUsername(username)
@@ -291,6 +295,10 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
   username := r.FormValue("username")
   if username == "" {
     writeError(w, http.StatusBadRequest, "用户名不能为空")
+    return
+  }
+  if err := user.ValidateUsername(username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
     return
   }
 
@@ -515,6 +523,10 @@ func (s *Server) handleAdminConfigApply(w http.ResponseWriter, r *http.Request) 
 
   switch {
   case username != "":
+    if err := user.ValidateUsername(username); err != nil {
+      writeError(w, http.StatusBadRequest, err.Error())
+      return
+    }
     targets = []string{username}
   case group != "":
     targets, err = auth.GetGroupMembersForDeploy(group)
@@ -591,6 +603,10 @@ func (s *Server) handleAdminContainerLogs(w http.ResponseWriter, r *http.Request
   username := r.URL.Query().Get("username")
   if username == "" {
     writeError(w, http.StatusBadRequest, "用户名不能为空")
+    return
+  }
+  if err := user.ValidateUsername(username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
     return
   }
 
@@ -877,6 +893,19 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
   targetUser := strings.TrimSpace(r.FormValue("username"))
   targetGroup := strings.TrimSpace(r.FormValue("group_name"))
 
+  if skillName != "" {
+    if err := util.SafePathSegment(skillName); err != nil {
+      writeError(w, http.StatusBadRequest, "技能名称不合法: "+err.Error())
+      return
+    }
+  }
+  if targetUser != "" {
+    if err := user.ValidateUsername(targetUser); err != nil {
+      writeError(w, http.StatusBadRequest, err.Error())
+      return
+    }
+  }
+
   skillDir := config.SkillsDirPath()
   entries, err := os.ReadDir(skillDir)
   if err != nil {
@@ -967,6 +996,10 @@ func (s *Server) handleAdminSkillsDownload(w http.ResponseWriter, r *http.Reques
     writeError(w, http.StatusBadRequest, "技能名称不能为空")
     return
   }
+  if err := util.SafePathSegment(name); err != nil {
+    writeError(w, http.StatusBadRequest, "技能名称不合法")
+    return
+  }
   skillPath := filepath.Join(config.SkillsDirPath(), name)
   if _, err := os.Stat(skillPath); err != nil {
     writeError(w, http.StatusNotFound, "技能不存在")
@@ -980,6 +1013,11 @@ func (s *Server) handleAdminSkillsDownload(w http.ResponseWriter, r *http.Reques
       return nil
     }
     relPath, _ := filepath.Rel(skillPath, path)
+    // 安全检查：防止 zip slip — 确保相对路径不以 .. 开头
+    relPath = filepath.ToSlash(relPath)
+    if strings.HasPrefix(relPath, "../") || relPath == ".." {
+      return nil
+    }
     if d.IsDir() {
       zw.Create(relPath + "/")
       return nil
@@ -1017,6 +1055,10 @@ func (s *Server) handleAdminSkillsRemove(w http.ResponseWriter, r *http.Request)
     writeError(w, http.StatusBadRequest, "技能名称不能为空")
     return
   }
+  if err := util.SafePathSegment(name); err != nil {
+    writeError(w, http.StatusBadRequest, "技能名称不合法")
+    return
+  }
   skillPath := filepath.Join(config.SkillsDirPath(), name)
   if err := os.RemoveAll(skillPath); err != nil {
     writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
@@ -1047,6 +1089,15 @@ func (s *Server) handleAdminSkillsReposAdd(w http.ResponseWriter, r *http.Reques
   repoURL := strings.TrimSpace(r.FormValue("url"))
   if repoName == "" || repoURL == "" {
     writeError(w, http.StatusBadRequest, "仓库名称和地址不能为空")
+    return
+  }
+  if err := util.SafePathSegment(repoName); err != nil {
+    writeError(w, http.StatusBadRequest, "仓库名称不合法: "+err.Error())
+    return
+  }
+  // 验证仓库 URL 必须是合法的 Git 远程地址
+  if !strings.HasPrefix(repoURL, "https://") && !strings.HasPrefix(repoURL, "git@") && !strings.HasPrefix(repoURL, "ssh://") {
+    writeError(w, http.StatusBadRequest, "仓库地址必须是 https://、git@ 或 ssh:// 开头的 Git 地址")
     return
   }
 
@@ -1107,6 +1158,10 @@ func (s *Server) handleAdminSkillsReposPull(w http.ResponseWriter, r *http.Reque
     writeError(w, http.StatusBadRequest, "仓库名称不能为空")
     return
   }
+  if err := util.SafePathSegment(repoName); err != nil {
+    writeError(w, http.StatusBadRequest, "仓库名称不合法")
+    return
+  }
 
   gitMutex.Lock()
   defer gitMutex.Unlock()
@@ -1159,6 +1214,10 @@ func (s *Server) handleAdminSkillsReposRemove(w http.ResponseWriter, r *http.Req
     writeError(w, http.StatusBadRequest, "仓库名称不能为空")
     return
   }
+  if err := util.SafePathSegment(repoName); err != nil {
+    writeError(w, http.StatusBadRequest, "仓库名称不合法")
+    return
+  }
 
   os.RemoveAll(filepath.Join(skillReposDir(), repoName))
 
@@ -1192,6 +1251,16 @@ func (s *Server) handleAdminSkillsInstall(w http.ResponseWriter, r *http.Request
   if repoName == "" {
     writeError(w, http.StatusBadRequest, "仓库名称不能为空")
     return
+  }
+  if err := util.SafePathSegment(repoName); err != nil {
+    writeError(w, http.StatusBadRequest, "仓库名称不合法")
+    return
+  }
+  if skillName != "" {
+    if err := util.SafePathSegment(skillName); err != nil {
+      writeError(w, http.StatusBadRequest, "技能名称不合法")
+      return
+    }
   }
 
   repoDir := filepath.Join(skillReposDir(), repoName)
@@ -1253,6 +1322,10 @@ func (s *Server) handleAdminSkillsReposList(w http.ResponseWriter, r *http.Reque
   repoName := r.URL.Query().Get("name")
   if repoName == "" {
     writeError(w, http.StatusBadRequest, "仓库名称不能为空")
+    return
+  }
+  if err := util.SafePathSegment(repoName); err != nil {
+    writeError(w, http.StatusBadRequest, "仓库名称不合法")
     return
   }
 
@@ -1459,6 +1532,10 @@ func (s *Server) handleAdminGroupSkillsBind(w http.ResponseWriter, r *http.Reque
     writeError(w, http.StatusBadRequest, "组名和技能名不能为空")
     return
   }
+  if err := util.SafePathSegment(skillName); err != nil {
+    writeError(w, http.StatusBadRequest, "技能名称不合法")
+    return
+  }
   if err := auth.BindSkillToGroup(groupName, skillName); err != nil {
     writeError(w, http.StatusBadRequest, err.Error())
     return
@@ -1482,9 +1559,9 @@ func (s *Server) handleAdminGroupSkillsBind(w http.ResponseWriter, r *http.Reque
   }
 
   writeJSON(w, http.StatusOK, struct {
-    Success    bool   `json:"success"`
-    Message    string `json:"message"`
-    UserCount  int    `json:"user_count"`
+    Success   bool   `json:"success"`
+    Message   string `json:"message"`
+    UserCount int    `json:"user_count"`
   }{true, fmt.Sprintf("技能 %s 已绑定到组 %s 并部署到 %d 个用户", skillName, groupName, userCount), userCount})
 }
 
@@ -1504,6 +1581,10 @@ func (s *Server) handleAdminGroupSkillsUnbind(w http.ResponseWriter, r *http.Req
   skillName := strings.TrimSpace(r.FormValue("skill_name"))
   if groupName == "" || skillName == "" {
     writeError(w, http.StatusBadRequest, "组名和技能名不能为空")
+    return
+  }
+  if err := util.SafePathSegment(skillName); err != nil {
+    writeError(w, http.StatusBadRequest, "技能名称不合法")
     return
   }
   if err := auth.UnbindSkillFromGroup(groupName, skillName); err != nil {
@@ -1742,6 +1823,10 @@ func (s *Server) handleAdminSuperadminDelete(w http.ResponseWriter, r *http.Requ
     writeError(w, http.StatusBadRequest, "不能删除自己")
     return
   }
+  if err := user.ValidateUsername(username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
   if !auth.IsSuperadmin(username) {
     writeError(w, http.StatusBadRequest, username+" 不是超管")
     return
@@ -1779,6 +1864,10 @@ func (s *Server) handleAdminSuperadminReset(w http.ResponseWriter, r *http.Reque
   username := r.FormValue("username")
   if username == "" {
     writeError(w, http.StatusBadRequest, "用户名不能为空")
+    return
+  }
+  if err := user.ValidateUsername(username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
     return
   }
   if !auth.IsSuperadmin(username) {
