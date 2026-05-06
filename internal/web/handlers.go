@@ -10,6 +10,7 @@ import (
   "github.com/picoaide/picoaide/internal/config"
   dockerpkg "github.com/picoaide/picoaide/internal/docker"
   "github.com/picoaide/picoaide/internal/ldap"
+  "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
 )
 
@@ -88,6 +89,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
       }
 
       s.setSessionCookie(w, s.createSessionToken(username), 86400)
+      logger.Audit("user.login", "username", username, "method", "local")
       writeJSON(w, http.StatusOK, struct {
         Success  bool   `json:"success"`
         Username string `json:"username"`
@@ -101,6 +103,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
   // 2. LDAP 认证（如果启用）
   if !s.cfg.LDAPEnabled() {
+    logger.Audit("user.login_failed", "username", username, "reason", "invalid_credentials")
     writeError(w, http.StatusUnauthorized, "用户名或密码错误")
     return
   }
@@ -133,6 +136,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
   }
 
   s.setSessionCookie(w, s.createSessionToken(username), 86400)
+  logger.Audit("user.login", "username", username, "method", "ldap")
   writeJSON(w, http.StatusOK, struct {
     Success  bool   `json:"success"`
     Username string `json:"username"`
@@ -148,7 +152,11 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
     writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
+  username := s.getSessionUser(r)
   s.setSessionCookie(w, "", -1)
+  if username != "" {
+    logger.Audit("user.logout", "username", username)
+  }
   writeSuccess(w, "已登出")
 }
 
@@ -358,6 +366,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
   }
 
   writeSuccess(w, "密码修改成功")
+  logger.Audit("password.change", "username", username)
 }
 
 // isSuperadmin 检查请求的用户是否是超管
@@ -448,4 +457,5 @@ func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
   }
 
   writeSuccess(w, "配置已保存")
+  logger.Audit("config.save", "operator", changedBy)
 }

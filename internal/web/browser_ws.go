@@ -1,7 +1,7 @@
 package web
 
 import (
-  "log"
+  "log/slog"
   "net/http"
   "time"
 
@@ -22,16 +22,16 @@ func (s *Server) handleBrowserWS(w http.ResponseWriter, r *http.Request) {
 
   ws, err := upgrader.Upgrade(w, r, nil)
   if err != nil {
-    log.Printf("[browser-ws] %s WebSocket 升级失败: %v", username, err)
+    slog.Error("Extension WebSocket 升级失败", "username", username, "error", err)
     return
   }
 
   conn := browserSvc.Register(username, ws, &BrowserExtra{TabID: 0})
-  log.Printf("[browser-ws] %s Extension WebSocket 已连接 (%s)", username, ws.RemoteAddr())
+  slog.Info("Extension WebSocket 已连接", "username", username, "remote", ws.RemoteAddr())
 
   select {
   case <-conn.done:
-    log.Printf("[browser-ws] %s Extension WebSocket 已断开", username)
+    slog.Info("Extension WebSocket 已断开", "username", username)
   }
 
   ws.WriteControl(websocket.CloseMessage,

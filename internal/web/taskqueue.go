@@ -2,7 +2,7 @@ package web
 
 import (
   "fmt"
-  "log"
+  "log/slog"
   "sync"
   "sync/atomic"
   "time"
@@ -100,7 +100,7 @@ func enqueueTask(taskType string, users []string, fn func(username string) error
     }
   }()
 
-  log.Printf("[task-queue] 任务 %s 已提交，共 %d 个用户", taskID, len(filtered))
+  slog.Info("批量任务已提交", "task_id", taskID, "total", len(filtered))
   return taskID, nil
 }
 
@@ -116,7 +116,7 @@ func processQueue(fn func(username string) error) {
     taskErr := item.Fn(item.Username)
     if taskErr != nil {
       atomic.AddInt32(&taskQueue.failed, 1)
-      log.Printf("[task-queue] %s 失败: %v", item.Username, taskErr)
+      slog.Error("任务执行失败", "username", item.Username, "error", taskErr)
     } else {
       atomic.AddInt32(&taskQueue.done, 1)
     }
@@ -158,7 +158,7 @@ func processQueue(fn func(username string) error) {
   }
   taskQueue.mu.Unlock()
 
-  log.Printf("[task-queue] 任务完成: %d 成功, %d 失败", taskQueue.done, taskQueue.failed)
+  slog.Info("批量任务完成", "done", taskQueue.done, "failed", taskQueue.failed)
 }
 
 // getTaskStatus 返回当前任务状态

@@ -63,7 +63,7 @@
 <script>
 function handleVersionChange(select) {
   var currentPath = window.location.pathname;
-  var currentVersion = '{{ .Site.Params.version }}';
+  var currentVersion = {{ .Site.Params.version | jsonify }};
   var targetVersion = select.value;
 
   // Replace the version segment in the URL path

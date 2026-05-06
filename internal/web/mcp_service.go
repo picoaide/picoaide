@@ -4,7 +4,7 @@ import (
   "encoding/json"
   "fmt"
   "io"
-  "log"
+  "log/slog"
   "net/http"
   "time"
 )
@@ -94,7 +94,7 @@ func (s *Server) handleMCPSSEService(w http.ResponseWriter, r *http.Request, ser
   fmt.Fprintf(w, "event: endpoint\ndata: %s\n\n", postEndpoint)
   flusher.Flush()
 
-  log.Printf("[mcp-%s] %s SSE 连接建立", serviceName, username)
+  slog.Info("MCP SSE 连接建立", "service", serviceName, "username", username)
 
   // 保持连接
   notify := r.Context().Done()
@@ -104,7 +104,7 @@ func (s *Server) handleMCPSSEService(w http.ResponseWriter, r *http.Request, ser
   for {
     select {
     case <-notify:
-      log.Printf("[mcp-%s] %s SSE 连接关闭", serviceName, username)
+      slog.Info("MCP SSE 连接关闭", "service", serviceName, "username", username)
       return
     case <-ticker.C:
       fmt.Fprintf(w, ": keepalive\n\n")

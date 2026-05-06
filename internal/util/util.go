@@ -4,6 +4,7 @@ import (
   "fmt"
   "os"
   "path/filepath"
+  "regexp"
   "strings"
 )
 
@@ -130,6 +131,62 @@ func FormatSize(size int64) string {
     return fmt.Sprintf("%.1f KB", float64(size)/1024)
   }
   return fmt.Sprintf("%.1f MB", float64(size)/(1024*1024))
+}
+
+// SafePathSegment 验证路径片段不包含路径遍历字符或危险模式。
+// 用于验证将直接拼接进文件路径的用户输入（如用户名、技能名、仓库名）。
+// 允许：字母、数字、短横线、下划线、点、中文及常见 Unicode 字符。
+// 拒绝：/ \ .. 空字符串 以及仅由点组成的字符串。
+var safeSegmentRe = regexp.MustCompile(`^[^/\\]+$`)
+
+func SafePathSegment(name string) error {
+  if name == "" {
+    return fmt.Errorf("名称不能为空")
+  }
+  if name == "." || name == ".." {
+    return fmt.Errorf("名称不能是 . 或 ..")
+  }
+  if strings.Contains(name, "..") {
+    return fmt.Errorf("名称不能包含 ..")
+  }
+  if !safeSegmentRe.MatchString(name) {
+    return fmt.Errorf("名称包含非法字符: %s", name)
+  }
+  return nil
+}
+
+// SafeRelPath 验证相对路径不逃逸出基准目录。
+// 返回清理后的安全绝对路径。适用于文件管理等需要子目录遍历的场景。
+func SafeRelPath(baseDir, relPath string) (string, error) {
+  cleaned := filepath.Clean("/" + relPath)
+  absPath := filepath.Join(baseDir, cleaned)
+
+  evalBase, err := filepath.EvalSymlinks(baseDir)
+  if err != nil {
+    evalBase = baseDir
+  }
+
+  evalPath, err := filepath.EvalSymlinks(absPath)
+  if err != nil {
+    if !os.IsNotExist(err) {
+      return "", fmt.Errorf("路径验证失败")
+    }
+    // 路径不存在时验证父目录
+    parent := filepath.Dir(absPath)
+    evalParent, err2 := filepath.EvalSymlinks(parent)
+    if err2 != nil {
+      return "", fmt.Errorf("路径验证失败")
+    }
+    if !strings.HasPrefix(evalParent, evalBase+string(os.PathSeparator)) && evalParent != evalBase {
+      return "", fmt.Errorf("路径越界")
+    }
+    return absPath, nil
+  }
+
+  if !strings.HasPrefix(evalPath, evalBase+string(os.PathSeparator)) && evalPath != evalBase {
+    return "", fmt.Errorf("路径越界")
+  }
+  return evalPath, nil
 }
 
 func IsTextFile(filename string) bool {

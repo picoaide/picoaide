@@ -6,7 +6,7 @@ import (
   "encoding/json"
   "fmt"
   "io"
-  "log"
+  "log/slog"
   "net/http"
   "os"
   "os/exec"
@@ -21,6 +21,7 @@ import (
   "github.com/picoaide/picoaide/internal/config"
   dockerpkg "github.com/picoaide/picoaide/internal/docker"
   "github.com/picoaide/picoaide/internal/ldap"
+  "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
 )
@@ -200,6 +201,7 @@ func (s *Server) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
     go s.autoStartUserContainer(username)
   }
 
+  logger.Audit("user.create", "username", username, "operator", s.getSessionUser(r))
   writeJSON(w, http.StatusOK, struct {
     Success  bool   `json:"success"`
     Message  string `json:"message"`
@@ -230,6 +232,10 @@ func (s *Server) handleAdminUserDelete(w http.ResponseWriter, r *http.Request) {
     writeError(w, http.StatusBadRequest, "用户名不能为空")
     return
   }
+  if err := user.ValidateUsername(username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
 
   // 停止并移除容器
   rec, _ := auth.GetContainerByUsername(username)
@@ -251,6 +257,7 @@ func (s *Server) handleAdminUserDelete(w http.ResponseWriter, r *http.Request) {
     return
   }
 
+  logger.Audit("user.delete", "username", username, "operator", s.getSessionUser(r))
   writeSuccess(w, "用户 "+username+" 已删除并归档")
 }
 
@@ -288,6 +295,10 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
   username := r.FormValue("username")
   if username == "" {
     writeError(w, http.StatusBadRequest, "用户名不能为空")
+    return
+  }
+  if err := user.ValidateUsername(username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
     return
   }
 
@@ -331,10 +342,10 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
     configPath := filepath.Join(picoclawDir, "config.json")
     if _, err := os.Stat(configPath); err == nil {
       if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
-        log.Printf("[config] %s: 下发配置失败: %v", username, err)
+        slog.Error("下发配置失败", "username", username, "error", err)
       }
       if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
-        log.Printf("[config] %s: 下发安全配置失败: %v", username, err)
+        slog.Error("下发安全配置失败", "username", username, "error", err)
       }
     } else {
       go s.applyConfigAsync(username, picoclawDir, rec.ContainerID)
@@ -374,16 +385,17 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
     configPath := filepath.Join(picoclawDir, "config.json")
     if _, err := os.Stat(configPath); err == nil {
       if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
-        log.Printf("[config] %s: 下发配置失败: %v", username, err)
+        slog.Error("下发配置失败", "username", username, "error", err)
       }
       if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
-        log.Printf("[config] %s: 下发安全配置失败: %v", username, err)
+        slog.Error("下发安全配置失败", "username", username, "error", err)
       }
     } else {
       go s.applyConfigAsync(username, picoclawDir, cid)
     }
   }
 
+  logger.Audit("container."+action, "username", username, "operator", s.getSessionUser(r))
   labels := map[string]string{"start": "启动", "stop": "停止", "restart": "重启"}
   writeSuccess(w, fmt.Sprintf("容器已%s", labels[action]))
 }
@@ -392,30 +404,30 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
 func (s *Server) autoStartUserContainer(username string) {
   rec, err := auth.GetContainerByUsername(username)
   if err != nil || rec == nil || rec.Image == "" {
-    log.Printf("[init] %s: 无容器记录或镜像未配置，跳过自动启动", username)
+    slog.Warn("无容器记录或镜像未配置，跳过自动启动", "username", username)
     return
   }
 
   ctx := context.Background()
   if !dockerpkg.ImageExists(ctx, rec.Image) {
-    log.Printf("[init] %s: 镜像 %s 不存在，跳过自动启动", username, rec.Image)
+    slog.Warn("镜像不存在，跳过自动启动", "username", username, "image", rec.Image)
     return
   }
 
   ud := user.UserDir(s.cfg, username)
   cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
   if createErr != nil {
-    log.Printf("[init] %s: 创建容器失败: %v", username, createErr)
+    slog.Error("创建容器失败", "username", username, "error", createErr)
     return
   }
   auth.UpdateContainerID(username, cid)
 
   if err := dockerpkg.Start(ctx, cid); err != nil {
-    log.Printf("[init] %s: 启动容器失败: %v", username, err)
+    slog.Error("启动容器失败", "username", username, "error", err)
     return
   }
   auth.UpdateContainerStatus(username, "running")
-  log.Printf("[init] %s: 容器已启动", username)
+  slog.Info("容器已自动启动", "username", username)
 
   picoclawDir := filepath.Join(ud, ".picoclaw")
   s.applyConfigAsync(username, picoclawDir, cid)
@@ -424,7 +436,7 @@ func (s *Server) autoStartUserContainer(username string) {
 // applyConfigAsync 异步等待 config.json 生成后下发配置并重启容器
 func (s *Server) applyConfigAsync(username, picoclawDir, containerID string) {
   configPath := filepath.Join(picoclawDir, "config.json")
-  log.Printf("[config] %s: 等待 config.json 生成...", username)
+  slog.Info("等待 config.json 生成", "username", username)
 
   // 轮询等待 config.json 出现，最多 60 秒
   for i := 0; i < 30; i++ {
@@ -433,28 +445,28 @@ func (s *Server) applyConfigAsync(username, picoclawDir, containerID string) {
       break
     }
     if i == 29 {
-      log.Printf("[config] %s: 等待超时，config.json 未生成", username)
+      slog.Warn("等待 config.json 超时", "username", username)
       return
     }
   }
 
   // 下发配置
   if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
-    log.Printf("[config] %s: 下发配置失败: %v", username, err)
+    slog.Error("下发配置失败", "username", username, "error", err)
     return
   }
   if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
-    log.Printf("[config] %s: 下发安全配置失败: %v", username, err)
+    slog.Error("下发安全配置失败", "username", username, "error", err)
   }
-  log.Printf("[config] %s: 配置已下发", username)
+  slog.Info("配置已下发", "username", username)
 
   // 重启容器使配置生效
   ctx := context.Background()
   if err := dockerpkg.Restart(ctx, containerID); err != nil {
-    log.Printf("[config] %s: 重启失败: %v", username, err)
+    slog.Error("重启容器失败", "username", username, "error", err)
     return
   }
-  log.Printf("[config] %s: 容器已重启，配置生效", username)
+  slog.Info("容器已重启，配置生效", "username", username)
 }
 
 // applyConfigToUser 向单个用户下发配置并重启容器
@@ -471,7 +483,7 @@ func (s *Server) applyConfigToUser(username string) error {
     return fmt.Errorf("下发配置失败: %w", err)
   }
   if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
-    log.Printf("[config] %s: 下发安全配置失败: %v", username, err)
+    slog.Error("下发安全配置失败", "username", username, "error", err)
   }
 
   // 重启容器使配置生效
@@ -511,6 +523,10 @@ func (s *Server) handleAdminConfigApply(w http.ResponseWriter, r *http.Request) 
 
   switch {
   case username != "":
+    if err := user.ValidateUsername(username); err != nil {
+      writeError(w, http.StatusBadRequest, err.Error())
+      return
+    }
     targets = []string{username}
   case group != "":
     targets, err = auth.GetGroupMembersForDeploy(group)
@@ -587,6 +603,10 @@ func (s *Server) handleAdminContainerLogs(w http.ResponseWriter, r *http.Request
   username := r.URL.Query().Get("username")
   if username == "" {
     writeError(w, http.StatusBadRequest, "用户名不能为空")
+    return
+  }
+  if err := user.ValidateUsername(username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
     return
   }
 
@@ -775,6 +795,7 @@ func (s *Server) handleAdminWhitelist(w http.ResponseWriter, r *http.Request) {
       return
     }
     writeSuccess(w, "白名单已更新")
+    logger.Audit("whitelist.update", "count", len(users), "operator", s.getSessionUser(r))
     return
   }
 
@@ -872,6 +893,19 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
   targetUser := strings.TrimSpace(r.FormValue("username"))
   targetGroup := strings.TrimSpace(r.FormValue("group_name"))
 
+  if skillName != "" {
+    if err := util.SafePathSegment(skillName); err != nil {
+      writeError(w, http.StatusBadRequest, "技能名称不合法: "+err.Error())
+      return
+    }
+  }
+  if targetUser != "" {
+    if err := user.ValidateUsername(targetUser); err != nil {
+      writeError(w, http.StatusBadRequest, err.Error())
+      return
+    }
+  }
+
   skillDir := config.SkillsDirPath()
   entries, err := os.ReadDir(skillDir)
   if err != nil {
@@ -962,6 +996,10 @@ func (s *Server) handleAdminSkillsDownload(w http.ResponseWriter, r *http.Reques
     writeError(w, http.StatusBadRequest, "技能名称不能为空")
     return
   }
+  if err := util.SafePathSegment(name); err != nil {
+    writeError(w, http.StatusBadRequest, "技能名称不合法")
+    return
+  }
   skillPath := filepath.Join(config.SkillsDirPath(), name)
   if _, err := os.Stat(skillPath); err != nil {
     writeError(w, http.StatusNotFound, "技能不存在")
@@ -975,6 +1013,11 @@ func (s *Server) handleAdminSkillsDownload(w http.ResponseWriter, r *http.Reques
       return nil
     }
     relPath, _ := filepath.Rel(skillPath, path)
+    // 安全检查：防止 zip slip — 确保相对路径不以 .. 开头
+    relPath = filepath.ToSlash(relPath)
+    if strings.HasPrefix(relPath, "../") || relPath == ".." {
+      return nil
+    }
     if d.IsDir() {
       zw.Create(relPath + "/")
       return nil
@@ -1012,6 +1055,10 @@ func (s *Server) handleAdminSkillsRemove(w http.ResponseWriter, r *http.Request)
     writeError(w, http.StatusBadRequest, "技能名称不能为空")
     return
   }
+  if err := util.SafePathSegment(name); err != nil {
+    writeError(w, http.StatusBadRequest, "技能名称不合法")
+    return
+  }
   skillPath := filepath.Join(config.SkillsDirPath(), name)
   if err := os.RemoveAll(skillPath); err != nil {
     writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
@@ -1042,6 +1089,15 @@ func (s *Server) handleAdminSkillsReposAdd(w http.ResponseWriter, r *http.Reques
   repoURL := strings.TrimSpace(r.FormValue("url"))
   if repoName == "" || repoURL == "" {
     writeError(w, http.StatusBadRequest, "仓库名称和地址不能为空")
+    return
+  }
+  if err := util.SafePathSegment(repoName); err != nil {
+    writeError(w, http.StatusBadRequest, "仓库名称不合法: "+err.Error())
+    return
+  }
+  // 验证仓库 URL 必须是合法的 Git 远程地址
+  if !strings.HasPrefix(repoURL, "https://") && !strings.HasPrefix(repoURL, "git@") && !strings.HasPrefix(repoURL, "ssh://") {
+    writeError(w, http.StatusBadRequest, "仓库地址必须是 https://、git@ 或 ssh:// 开头的 Git 地址")
     return
   }
 
@@ -1102,6 +1158,10 @@ func (s *Server) handleAdminSkillsReposPull(w http.ResponseWriter, r *http.Reque
     writeError(w, http.StatusBadRequest, "仓库名称不能为空")
     return
   }
+  if err := util.SafePathSegment(repoName); err != nil {
+    writeError(w, http.StatusBadRequest, "仓库名称不合法")
+    return
+  }
 
   gitMutex.Lock()
   defer gitMutex.Unlock()
@@ -1154,6 +1214,10 @@ func (s *Server) handleAdminSkillsReposRemove(w http.ResponseWriter, r *http.Req
     writeError(w, http.StatusBadRequest, "仓库名称不能为空")
     return
   }
+  if err := util.SafePathSegment(repoName); err != nil {
+    writeError(w, http.StatusBadRequest, "仓库名称不合法")
+    return
+  }
 
   os.RemoveAll(filepath.Join(skillReposDir(), repoName))
 
@@ -1187,6 +1251,16 @@ func (s *Server) handleAdminSkillsInstall(w http.ResponseWriter, r *http.Request
   if repoName == "" {
     writeError(w, http.StatusBadRequest, "仓库名称不能为空")
     return
+  }
+  if err := util.SafePathSegment(repoName); err != nil {
+    writeError(w, http.StatusBadRequest, "仓库名称不合法")
+    return
+  }
+  if skillName != "" {
+    if err := util.SafePathSegment(skillName); err != nil {
+      writeError(w, http.StatusBadRequest, "技能名称不合法")
+      return
+    }
   }
 
   repoDir := filepath.Join(skillReposDir(), repoName)
@@ -1248,6 +1322,10 @@ func (s *Server) handleAdminSkillsReposList(w http.ResponseWriter, r *http.Reque
   repoName := r.URL.Query().Get("name")
   if repoName == "" {
     writeError(w, http.StatusBadRequest, "仓库名称不能为空")
+    return
+  }
+  if err := util.SafePathSegment(repoName); err != nil {
+    writeError(w, http.StatusBadRequest, "仓库名称不合法")
     return
   }
 
@@ -1454,6 +1532,10 @@ func (s *Server) handleAdminGroupSkillsBind(w http.ResponseWriter, r *http.Reque
     writeError(w, http.StatusBadRequest, "组名和技能名不能为空")
     return
   }
+  if err := util.SafePathSegment(skillName); err != nil {
+    writeError(w, http.StatusBadRequest, "技能名称不合法")
+    return
+  }
   if err := auth.BindSkillToGroup(groupName, skillName); err != nil {
     writeError(w, http.StatusBadRequest, err.Error())
     return
@@ -1477,9 +1559,9 @@ func (s *Server) handleAdminGroupSkillsBind(w http.ResponseWriter, r *http.Reque
   }
 
   writeJSON(w, http.StatusOK, struct {
-    Success    bool   `json:"success"`
-    Message    string `json:"message"`
-    UserCount  int    `json:"user_count"`
+    Success   bool   `json:"success"`
+    Message   string `json:"message"`
+    UserCount int    `json:"user_count"`
   }{true, fmt.Sprintf("技能 %s 已绑定到组 %s 并部署到 %d 个用户", skillName, groupName, userCount), userCount})
 }
 
@@ -1499,6 +1581,10 @@ func (s *Server) handleAdminGroupSkillsUnbind(w http.ResponseWriter, r *http.Req
   skillName := strings.TrimSpace(r.FormValue("skill_name"))
   if groupName == "" || skillName == "" {
     writeError(w, http.StatusBadRequest, "组名和技能名不能为空")
+    return
+  }
+  if err := util.SafePathSegment(skillName); err != nil {
+    writeError(w, http.StatusBadRequest, "技能名称不合法")
     return
   }
   if err := auth.UnbindSkillFromGroup(groupName, skillName); err != nil {
@@ -1710,6 +1796,7 @@ func (s *Server) handleAdminSuperadminCreate(w http.ResponseWriter, r *http.Requ
     Username string `json:"username"`
     Password string `json:"password"`
   }{true, "超管创建成功", username, password})
+  logger.Audit("superadmin.create", "username", username, "operator", s.getSessionUser(r))
 }
 
 // handleAdminSuperadminDelete 删除超管账户（至少保留一个）
@@ -1736,6 +1823,10 @@ func (s *Server) handleAdminSuperadminDelete(w http.ResponseWriter, r *http.Requ
     writeError(w, http.StatusBadRequest, "不能删除自己")
     return
   }
+  if err := user.ValidateUsername(username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
   if !auth.IsSuperadmin(username) {
     writeError(w, http.StatusBadRequest, username+" 不是超管")
     return
@@ -1753,6 +1844,7 @@ func (s *Server) handleAdminSuperadminDelete(w http.ResponseWriter, r *http.Requ
   }
 
   writeSuccess(w, "超管 "+username+" 已删除")
+  logger.Audit("superadmin.delete", "username", username, "operator", currentUser)
 }
 
 // handleAdminSuperadminReset 重置超管密码
@@ -1774,6 +1866,10 @@ func (s *Server) handleAdminSuperadminReset(w http.ResponseWriter, r *http.Reque
     writeError(w, http.StatusBadRequest, "用户名不能为空")
     return
   }
+  if err := user.ValidateUsername(username); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
   if !auth.IsSuperadmin(username) {
     writeError(w, http.StatusBadRequest, username+" 不是超管")
     return
@@ -1790,4 +1886,5 @@ func (s *Server) handleAdminSuperadminReset(w http.ResponseWriter, r *http.Reque
     Message  string `json:"message"`
     Password string `json:"password"`
   }{true, "密码已重置", password})
+  logger.Audit("password.reset", "username", username, "operator", s.getSessionUser(r))
 }
