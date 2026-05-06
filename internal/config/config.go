@@ -50,6 +50,7 @@ archive_root: "./archive"
 web:
   listen: ":80"
   password: "change-me-to-a-random-secret"
+  log_retention: "6m"
   tls:
     enabled: false
     cert_file: ""
@@ -167,11 +168,12 @@ type TLSConfig struct {
 }
 
 type WebConfig struct {
-  Listen      string    `yaml:"listen"`
-  Password    string    `yaml:"password"`
-  LDAPEnabled *bool     `yaml:"ldap_enabled"`
-  AuthMode    string    `yaml:"auth_mode"` // "ldap" | "oidc" | "local"（默认根据 ldap_enabled 推断）
-  TLS         TLSConfig `yaml:"tls"`
+  Listen       string    `yaml:"listen"`
+  Password     string    `yaml:"password"`
+  LDAPEnabled  *bool     `yaml:"ldap_enabled"`
+  AuthMode     string    `yaml:"auth_mode"`     // "ldap" | "oidc" | "local"
+  LogRetention string    `yaml:"log_retention"` // "1m","3m","6m","1y","3y","5y","forever"
+  TLS          TLSConfig `yaml:"tls"`
 }
 
 type SkillRepo struct {
@@ -687,6 +689,7 @@ func LoadFromDB() (*GlobalConfig, error) {
   cfg.Web.Listen = kv["web.listen"]
   cfg.Web.Password = kv["web.password"]
   cfg.Web.AuthMode = kv["web.auth_mode"]
+  cfg.Web.LogRetention = kv["web.log_retention"]
 
   // web.ldap_enabled 需要解析为 bool 指针
   if v, ok := kv["web.ldap_enabled"]; ok && v != "" {
@@ -751,6 +754,7 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
   kv["web.listen"] = cfg.Web.Listen
   kv["web.password"] = cfg.Web.Password
   kv["web.auth_mode"] = cfg.Web.AuthMode
+  kv["web.log_retention"] = cfg.Web.LogRetention
 
   if cfg.Web.LDAPEnabled != nil {
     kv["web.ldap_enabled"] = strconv.FormatBool(*cfg.Web.LDAPEnabled)

@@ -1,7 +1,7 @@
 package web
 
 import (
-  "log"
+  "log/slog"
   "net/http"
 
   "github.com/gorilla/websocket"
@@ -39,7 +39,7 @@ func (s *Server) handleMCPToken(w http.ResponseWriter, r *http.Request) {
       writeError(w, http.StatusInternalServerError, "生成 MCP token 失败: "+err.Error())
       return
     }
-    log.Printf("[mcp] 自动为 %s 生成 MCP token", username)
+    slog.Info("自动生成 MCP token", "username", username)
   }
 
   writeJSON(w, http.StatusOK, struct {

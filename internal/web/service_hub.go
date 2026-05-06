@@ -4,7 +4,7 @@ import (
   "context"
   "encoding/json"
   "fmt"
-  "log"
+  "log/slog"
   "sync"
   "time"
 
@@ -68,7 +68,7 @@ func (h *ServiceHub) Register(username string, ws *websocket.Conn, extra interfa
   go conn.readPump(h)
   go conn.keepAlive()
 
-  log.Printf("[%s-hub] %s 代理注册", h.name, username)
+  slog.Info("代理注册", "service", h.name, "username", username)
   return conn
 }
 
@@ -77,7 +77,7 @@ func (h *ServiceHub) Unregister(username string) {
   h.mu.Lock()
   defer h.mu.Unlock()
   delete(h.conns, username)
-  log.Printf("[%s-hub] %s 代理注销", h.name, username)
+  slog.Info("代理注销", "service", h.name, "username", username)
 }
 
 // GetConnection 获取用户的代理连接
@@ -174,7 +174,7 @@ func (c *AgentConn) readPump(hub *ServiceHub) {
     _, data, err := c.ws.ReadMessage()
     if err != nil {
       if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-        log.Printf("[%s-hub] %s 读取错误: %v", hub.name, c.username, err)
+        slog.Error("代理连接读取错误", "service", hub.name, "username", c.username, "error", err)
       }
       return
     }

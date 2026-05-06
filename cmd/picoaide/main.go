@@ -17,6 +17,7 @@ import (
   "github.com/picoaide/picoaide/internal/config"
   dockerpkg "github.com/picoaide/picoaide/internal/docker"
   "github.com/picoaide/picoaide/internal/ldap"
+  "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
   "github.com/picoaide/picoaide/internal/web"
@@ -147,6 +148,15 @@ func main() {
     fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
     os.Exit(1)
   }
+
+  // 初始化日志
+  wd, _ = os.Getwd()
+  retention := cfg.Web.LogRetention
+  if retention == "" {
+    retention = "6m"
+  }
+  logger.Init(wd, retention, false)
+  defer logger.Close()
 
   switch command {
   case "serve":

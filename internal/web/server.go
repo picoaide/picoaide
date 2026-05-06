@@ -6,7 +6,7 @@ import (
   "crypto/sha256"
   "encoding/hex"
   "fmt"
-  "log"
+  "log/slog"
   "net/http"
   "os"
   "strconv"
@@ -17,6 +17,7 @@ import (
   "github.com/picoaide/picoaide/internal/config"
   dockerpkg "github.com/picoaide/picoaide/internal/docker"
   "github.com/picoaide/picoaide/internal/ldap"
+  "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
 )
 
@@ -36,7 +37,7 @@ type Server struct {
 func (s *Server) startLDAPSyncScheduler(interval time.Duration) {
   ticker := time.NewTicker(interval)
   defer ticker.Stop()
-  log.Printf("LDAP 定时同步已启动，间隔: %s", interval)
+  slog.Info("LDAP 定时同步已启动", "interval", interval)
   for range ticker.C {
     s.syncLDAPGroups()
   }
@@ -52,7 +53,7 @@ func (s *Server) syncLDAPGroups() {
   }
   groupMap, err := ldap.FetchAllGroupsWithMembers(s.cfg)
   if err != nil {
-    log.Printf("LDAP 定时同步失败: %v", err)
+    slog.Error("LDAP 定时同步失败", "error", err)
     return
   }
   whitelist, _ := user.LoadWhitelist()
@@ -70,7 +71,7 @@ func (s *Server) syncLDAPGroups() {
       auth.AddUsersToGroup(groupName, filtered)
     }
   }
-  log.Printf("LDAP 定时同步完成: %d 个组", groupCount)
+  slog.Info("LDAP 定时同步完成", "groups", groupCount)
 }
 
 // createSessionToken 生成 HMAC 签名的 session token
@@ -189,7 +190,7 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   secret := cfg.Web.Password
   if secret == "" {
     secret = config.SessionSecret
-    fmt.Fprintln(os.Stderr, "警告: 未配置 web.password，使用默认 session 密钥，请尽快修改")
+    slog.Warn("未配置 web.password，使用默认 session 密钥，请尽快修改")
   }
 
   csrfKey := secret + "-csrf"
@@ -202,12 +203,12 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 
   // 确保 users/ 和 archive/ 目录存在
   if err := user.EnsureUsersRoot(cfg); err != nil {
-    fmt.Fprintf(os.Stderr, "警告: 创建用户目录失败: %v\n", err)
+    slog.Warn("创建用户目录失败", "error", err)
   }
 
   // 初始化本地用户数据库（失败时重试一次）
   if err := auth.InitDB(wd); err != nil {
-    fmt.Fprintf(os.Stderr, "警告: 数据库初始化失败，正在重试: %v\n", err)
+    slog.Warn("数据库初始化失败，正在重试", "error", err)
     os.MkdirAll(wd, 0755)
     if err := auth.InitDB(wd); err != nil {
       return fmt.Errorf("初始化用户数据库失败: %w", err)
@@ -217,12 +218,12 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   // 初始化 Docker 客户端
   dockerOK := false
   if err := dockerpkg.InitClient(); err != nil {
-    fmt.Fprintf(os.Stderr, "警告: Docker 不可用，容器操作将被禁用: %v\n", err)
+    slog.Warn("Docker 不可用，容器操作将被禁用", "error", err)
   } else {
     defer dockerpkg.CloseClient()
     ctx := contextWithTimeout(5)
     if err := dockerpkg.EnsureNetwork(ctx); err != nil {
-      fmt.Fprintf(os.Stderr, "警告: 网络初始化失败: %v\n", err)
+      slog.Warn("网络初始化失败", "error", err)
     }
     dockerOK = true
   }
@@ -343,19 +344,19 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
           }
           http.Redirect(w, r, target, http.StatusMovedPermanently)
         })
-        fmt.Fprintf(os.Stderr, "HTTP→HTTPS 重定向: :80\n")
+        slog.Info("HTTP→HTTPS 重定向已启动", "listen", ":80")
         if err := http.ListenAndServe(":80", redirectMux); err != nil {
-          fmt.Fprintf(os.Stderr, "重定向服务错误: %v\n", err)
+          slog.Error("重定向服务错误", "error", err)
         }
       }()
     }
 
-    fmt.Printf("PicoClaw 管理面板启动: https://%s\n", listenAddr)
-    return http.ListenAndServeTLS(listenAddr, cfg.Web.TLS.CertFile, cfg.Web.TLS.KeyFile, mux)
+    slog.Info("管理面板启动", "url", "https://"+listenAddr)
+    return http.ListenAndServeTLS(listenAddr, cfg.Web.TLS.CertFile, cfg.Web.TLS.KeyFile, logger.AccessMiddleware(mux))
   }
 
-  fmt.Printf("PicoClaw 管理面板启动: http://%s\n", listenAddr)
-  return http.ListenAndServe(listenAddr, mux)
+  slog.Info("管理面板启动", "url", "http://"+listenAddr)
+  return http.ListenAndServe(listenAddr, logger.AccessMiddleware(mux))
 }
 
 func contextWithTimeout(sec int) context.Context {

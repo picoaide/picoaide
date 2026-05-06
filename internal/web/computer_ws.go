@@ -1,7 +1,7 @@
 package web
 
 import (
-  "log"
+  "log/slog"
   "net/http"
   "time"
 
@@ -25,16 +25,16 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 
   ws, err := upgrader.Upgrade(w, r, nil)
   if err != nil {
-    log.Printf("[computer-ws] %s WebSocket 升级失败: %v", username, err)
+    slog.Error("桌面代理 WebSocket 升级失败", "username", username, "error", err)
     return
   }
 
   conn := computerSvc.Register(username, ws, nil)
-  log.Printf("[computer-ws] %s 桌面代理已连接 (%s)", username, ws.RemoteAddr())
+  slog.Info("桌面代理已连接", "username", username, "remote", ws.RemoteAddr())
 
   select {
   case <-conn.done:
-    log.Printf("[computer-ws] %s 桌面代理已断开", username)
+    slog.Info("桌面代理已断开", "username", username)
   }
 
   ws.WriteControl(websocket.CloseMessage,
