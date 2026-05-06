@@ -156,9 +156,9 @@
   <section class="cta">
     <div class="container">
       <h2 class="cta-title">开始使用 PicoAide</h2>
-      <p class="cta-desc">只需一条命令，即可在企业内部署完整的 AI 助手平台。</p>
+      <p class="cta-desc">下载二进制文件，一条命令完成初始化，即可在企业内部署完整的 AI 助手平台。</p>
       <div class="cta-code">
-        <code>docker run -d -p 80:80 -v /var/run/docker.sock:/var/run/docker.sock picoaide/picoaide</code>
+        <code>curl -L https://github.com/picoaide/picoaide/releases/latest/download/picoaide-linux-amd64 -o /usr/sbin/picoaide &amp;&amp; chmod +x /usr/sbin/picoaide &amp;&amp; picoaide init</code>
       </div>
       <div class="cta-actions">
         <a class="btn btn-primary" href="{{ "/docs/quick-start/" | relURL }}">阅读文档</a>
