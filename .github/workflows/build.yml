@@ -181,7 +181,7 @@ jobs:
         run: find artifacts -type f | sort
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/picoaide-linux-amd64/*
