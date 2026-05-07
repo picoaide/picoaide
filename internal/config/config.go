@@ -24,6 +24,8 @@ import (
 // ============================================================
 
 const AppName = "picoaide"
+
+var Version = "dev"
 const configFileName = "config.yaml"
 const SessionSecret = "picoaide-session-key-change-me"
 const SessionMaxAge = 86400 // 24 hours
@@ -173,6 +175,7 @@ type WebConfig struct {
   LDAPEnabled  *bool     `yaml:"ldap_enabled"`
   AuthMode     string    `yaml:"auth_mode"`     // "ldap" | "oidc" | "local"
   LogRetention string    `yaml:"log_retention"` // "1m","3m","6m","1y","3y","5y","forever"
+  LogLevel     string    `yaml:"log_level"`     // "debug","info","warn","error"
   TLS          TLSConfig `yaml:"tls"`
 }
 
@@ -690,6 +693,7 @@ func LoadFromDB() (*GlobalConfig, error) {
   cfg.Web.Password = kv["web.password"]
   cfg.Web.AuthMode = kv["web.auth_mode"]
   cfg.Web.LogRetention = kv["web.log_retention"]
+  cfg.Web.LogLevel = kv["web.log_level"]
 
   // web.ldap_enabled 需要解析为 bool 指针
   if v, ok := kv["web.ldap_enabled"]; ok && v != "" {
@@ -755,6 +759,7 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
   kv["web.password"] = cfg.Web.Password
   kv["web.auth_mode"] = cfg.Web.AuthMode
   kv["web.log_retention"] = cfg.Web.LogRetention
+  kv["web.log_level"] = cfg.Web.LogLevel
 
   if cfg.Web.LDAPEnabled != nil {
     kv["web.ldap_enabled"] = strconv.FormatBool(*cfg.Web.LDAPEnabled)

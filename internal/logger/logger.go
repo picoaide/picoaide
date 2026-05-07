@@ -46,8 +46,8 @@ func RetentionDays(val string) int {
   }
 }
 
-// Init 初始化日志系统。dataDir 为数据目录，retention 为保留策略，isDev 为开发者模式。
-func Init(dataDir string, retention string, isDev bool) {
+// Init 初始化日志系统。dataDir 为数据目录，retention 为保留策略，isDev 为开发者模式，level 为日志级别。
+func Init(dataDir string, retention string, isDev bool, level string) {
   once.Do(func() {
     days := RetentionDays(retention)
     logsDir := filepath.Join(dataDir, "logs")
@@ -64,27 +64,24 @@ func Init(dataDir string, retention string, isDev bool) {
       LocalTime:  true,
     }
 
-    // 同时写文件和控制台
     multiWriter := io.MultiWriter(lw, os.Stdout)
 
-    var handler slog.Handler
-    if isDev {
-      handler = slog.NewJSONHandler(multiWriter, &slog.HandlerOptions{
-        Level: slog.LevelDebug,
-        ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-          if a.Key == slog.SourceKey {
-            s := a.Value.Any().(*slog.Source)
-            s.Function = ""
-            s.File = filepath.Base(s.File)
-          }
-          return a
-        },
-      })
-    } else {
-      handler = slog.NewJSONHandler(multiWriter, &slog.HandlerOptions{
-        Level: slog.LevelInfo,
-      })
+    logLevel := parseLevel(level)
+    if isDev && logLevel > slog.LevelDebug {
+      logLevel = slog.LevelDebug
     }
+
+    handler := slog.NewJSONHandler(multiWriter, &slog.HandlerOptions{
+      Level: logLevel,
+      ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+        if a.Key == slog.SourceKey {
+          s := a.Value.Any().(*slog.Source)
+          s.Function = ""
+          s.File = filepath.Base(s.File)
+        }
+        return a
+      },
+    })
 
     instance = &logManager{
       writer:  lw,
@@ -105,6 +102,19 @@ func Init(dataDir string, retention string, isDev bool) {
 func Close() {
   if instance != nil && instance.writer != nil {
     instance.writer.Close()
+  }
+}
+
+func parseLevel(val string) slog.Level {
+  switch val {
+  case "debug":
+    return slog.LevelDebug
+  case "warn":
+    return slog.LevelWarn
+  case "error":
+    return slog.LevelError
+  default:
+    return slog.LevelInfo
   }
 }
 

@@ -160,3 +160,27 @@ func TestChangePassword_UnifiedAuth(t *testing.T) {
   resp := env.postForm(t, "/api/user/password", "testuser", form)
   assertStatus(t, resp, 403)
 }
+
+func TestHealth_NoAuth(t *testing.T) {
+  env := setupTestServer(t)
+
+  // 健康检查端点不需要认证
+  resp, err := http.Get(env.HTTP.URL + "/api/health")
+  if err != nil {
+    t.Fatal(err)
+  }
+  defer resp.Body.Close()
+
+  if resp.StatusCode != 200 {
+    t.Fatalf("expected 200, got %d", resp.StatusCode)
+  }
+
+  var result map[string]interface{}
+  parseJSON(t, resp, &result)
+  if result["status"] != "ok" {
+    t.Fatalf("expected status ok, got %v", result["status"])
+  }
+  if result["version"] == "" {
+    t.Fatal("expected non-empty version")
+  }
+}

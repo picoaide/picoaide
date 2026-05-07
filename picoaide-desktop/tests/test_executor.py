@@ -24,17 +24,20 @@ def test_check_whitelist_not_in_list():
     assert check_whitelist("/etc/passwd", whitelist) is False
 
 
-def test_check_whitelist_partial_match():
-    # NOTE: 当前 check_whitelist 使用 startswith 前缀匹配，
-    # /home/user/docsx 会匹配 /home/user/docs 前缀（潜在安全问题）
-    # 如果修复为路径分隔符检查，此测试应改为 assert False
+def test_check_whitelist_no_partial_match():
+    # 路径分隔符检查：/home/user/docsx 不应匹配 /home/user/docs
     whitelist = ["/home/user/docs"]
-    assert check_whitelist("/home/user/docsx/file.txt", whitelist) is True
+    assert check_whitelist("/home/user/docsx/file.txt", whitelist) is False
+    assert check_whitelist("/home/user/docs_backup", whitelist) is False
+
+
+def test_check_whitelist_exact_match():
+    whitelist = ["/home/user/docs"]
+    assert check_whitelist("/home/user/docs", whitelist) is True
 
 
 def test_check_whitelist_relative_path():
     whitelist = ["/tmp/test"]
     os.makedirs("/tmp/test/sub", exist_ok=True)
-    # 传入相对路径应被 abspath 处理
     result = check_whitelist("/tmp/test/file.txt", whitelist)
     assert result is True

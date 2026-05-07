@@ -58,6 +58,20 @@ func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) string {
 }
 
 // ============================================================
+// 健康检查 Handler
+// ============================================================
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+  writeJSON(w, http.StatusOK, struct {
+    Status  string `json:"status"`
+    Version string `json:"version"`
+  }{
+    Status:  "ok",
+    Version: config.Version,
+  })
+}
+
+// ============================================================
 // 认证 Handler
 // ============================================================
 

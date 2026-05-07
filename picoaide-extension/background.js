@@ -1,6 +1,14 @@
 // PicoAide Helper — Browser MCP 工具执行
 // 通过 WebSocket 接收 Go Relay 的工具命令，用 Chrome Extension API 执行
 
+// ─── 配置常量 ─────────────────────────────────────────────────────────────────
+const CONFIG = {
+  connectionTimeout: 5000,
+  connectTimeout: 15000,
+  retryDelays: [0, 100, 200, 400, 800],
+  keepaliveInterval: 20000,
+};
+
 // ─── 全局状态 ─────────────────────────────────────────────────────────────────
 
 let currentTabId = null;            // 当前控制的标签页 ID
@@ -100,7 +108,7 @@ async function ungroupAll() {
 }
 
 async function retryOnDrag(fn) {
-  const delays = [0, 100, 200, 400, 800];
+  const delays = CONFIG.retryDelays;
   let lastError;
   for (const delay of delays) {
     if (delay) await new Promise(r => setTimeout(r, delay));
@@ -187,7 +195,7 @@ async function handleNavigate(params) {
     const timeout = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(listener);
       resolve({ success: true });
-    }, 15000);
+    }, CONFIG.connectTimeout);
     const listener = (tabId, changeInfo) => {
       if (tabId === currentTabId && changeInfo.status === 'complete') {
         clearTimeout(timeout);
@@ -411,7 +419,7 @@ async function cdpEnable() {
     const timeout = setTimeout(() => {
       chrome.runtime.onMessage.removeListener(handler);
       reject(new Error('连接超时(5s)'));
-    }, 5000);
+    }, CONFIG.connectionTimeout);
 
     function handler(msg) {
       if (msg.type === 'offscreen-open') {

@@ -100,13 +100,15 @@ function disconnectWebSocket() {
   }
 }
 
+const KEEPALIVE_INTERVAL = 20000;
+
 function startKeepalive() {
   stopKeepalive();
   keepaliveTimer = setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       try { ws.send(''); } catch {}
     }
-  }, 20000);
+  }, KEEPALIVE_INTERVAL);
 }
 
 function stopKeepalive() {

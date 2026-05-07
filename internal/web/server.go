@@ -9,8 +9,10 @@ import (
   "log/slog"
   "net/http"
   "os"
+  "os/signal"
   "strconv"
   "strings"
+  "syscall"
   "time"
 
   "github.com/picoaide/picoaide/internal/auth"
@@ -27,10 +29,11 @@ import (
 
 // Server 是 Web 管理面板服务器
 type Server struct {
-  cfg            *config.GlobalConfig
-  secret         string
-  csrfKey        string
+  cfg             *config.GlobalConfig
+  secret          string
+  csrfKey         string
   dockerAvailable bool
+  loginLimiter    *rateLimiter
 }
 
 // startLDAPSyncScheduler 定时同步 LDAP 组
@@ -140,7 +143,10 @@ func (s *Server) checkCSRF(r *http.Request) bool {
   return hmac.Equal([]byte(token), []byte(s.csrfToken(username)))
 }
 
-// secureHeaders 安全 Header 中间件
+// maxBodyBytes 非 upload 端点的请求体大小上限（1 MB）
+const maxBodyBytes = 1 << 20
+
+// secureHeaders 安全 Header + 请求体大小限制 中间件
 func (s *Server) secureHeaders(next http.HandlerFunc) http.HandlerFunc {
   return func(w http.ResponseWriter, r *http.Request) {
     origin := r.Header.Get("Origin")
@@ -158,91 +164,21 @@ func (s *Server) secureHeaders(next http.HandlerFunc) http.HandlerFunc {
     w.Header().Set("X-Content-Type-Options", "nosniff")
     w.Header().Set("X-Frame-Options", "DENY")
     w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+
+    if (r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH") && r.URL.Path != "/api/files/upload" {
+      r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+    }
+
     next(w, r)
   }
 }
 
-// setSessionCookie 设置 session cookie
-func (s *Server) setSessionCookie(w http.ResponseWriter, value string, maxAge int) {
-  cookie := &http.Cookie{
-    Name:     "session",
-    Value:    value,
-    Path:     "/",
-    HttpOnly: true,
-    SameSite: http.SameSiteLaxMode,
-    MaxAge:   maxAge,
-  }
-  if s.cfg.Web.TLS.Enabled {
-    cookie.Secure = true
-  }
-  http.SetCookie(w, cookie)
-}
-
-// Serve 创建并启动 Web 管理面板服务器
-func Serve(cfg *config.GlobalConfig, listenAddr string) error {
-  if listenAddr == "" {
-    listenAddr = cfg.Web.Listen
-  }
-  if listenAddr == "" {
-    listenAddr = ":80"
-  }
-
-  secret := cfg.Web.Password
-  if secret == "" {
-    secret = config.SessionSecret
-    slog.Warn("未配置 web.password，使用默认 session 密钥，请尽快修改")
-  }
-
-  csrfKey := secret + "-csrf"
-
-  // 确保工作目录存在
-  wd, _ := os.Getwd()
-  if wd != "" {
-    os.MkdirAll(wd, 0755)
-  }
-
-  // 确保 users/ 和 archive/ 目录存在
-  if err := user.EnsureUsersRoot(cfg); err != nil {
-    slog.Warn("创建用户目录失败", "error", err)
-  }
-
-  // 初始化本地用户数据库（失败时重试一次）
-  if err := auth.InitDB(wd); err != nil {
-    slog.Warn("数据库初始化失败，正在重试", "error", err)
-    os.MkdirAll(wd, 0755)
-    if err := auth.InitDB(wd); err != nil {
-      return fmt.Errorf("初始化用户数据库失败: %w", err)
-    }
-  }
-
-  // 初始化 Docker 客户端
-  dockerOK := false
-  if err := dockerpkg.InitClient(); err != nil {
-    slog.Warn("Docker 不可用，容器操作将被禁用", "error", err)
-  } else {
-    defer dockerpkg.CloseClient()
-    ctx := contextWithTimeout(5)
-    if err := dockerpkg.EnsureNetwork(ctx); err != nil {
-      slog.Warn("网络初始化失败", "error", err)
-    }
-    dockerOK = true
-  }
-
-  s := &Server{
-    cfg:            cfg,
-    secret:         secret,
-    csrfKey:        csrfKey,
-    dockerAvailable: dockerOK,
-  }
-
-  // LDAP 定时同步
-  if interval := cfg.SyncIntervalDuration(); interval > 0 && cfg.LDAPEnabled() {
-    go s.startLDAPSyncScheduler(interval)
-  }
-
-  mux := http.NewServeMux()
+// RegisterRoutes 将所有 API 路由注册到 mux
+func (s *Server) RegisterRoutes(mux *http.ServeMux) {
+  // 健康检查（无需认证）
+  mux.HandleFunc("/api/health", s.secureHeaders(s.handleHealth))
   // 认证
-  mux.HandleFunc("/api/login", s.secureHeaders(s.handleLogin))
+  mux.HandleFunc("/api/login", s.secureHeaders(s.rateLimitLogin(s.handleLogin)))
   mux.HandleFunc("/api/logout", s.secureHeaders(s.handleLogout))
   mux.HandleFunc("/api/user/info", s.secureHeaders(s.handleUserInfo))
   mux.HandleFunc("/api/user/password", s.secureHeaders(s.handleChangePassword))
@@ -324,6 +260,109 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
   mux.HandleFunc("/api/admin/images/local-tags", s.secureHeaders(s.handleAdminLocalTags))
   mux.HandleFunc("/api/admin/images/upgrade-candidates", s.secureHeaders(s.handleAdminImageUpgradeCandidates))
   mux.HandleFunc("/api/admin/images/users", s.secureHeaders(s.handleAdminImageUsers))
+}
+
+// setSessionCookie 设置 session cookie
+func (s *Server) setSessionCookie(w http.ResponseWriter, value string, maxAge int) {
+  cookie := &http.Cookie{
+    Name:     "session",
+    Value:    value,
+    Path:     "/",
+    HttpOnly: true,
+    SameSite: http.SameSiteLaxMode,
+    MaxAge:   maxAge,
+  }
+  if s.cfg.Web.TLS.Enabled {
+    cookie.Secure = true
+  }
+  http.SetCookie(w, cookie)
+}
+
+// Serve 创建并启动 Web 管理面板服务器
+func Serve(cfg *config.GlobalConfig, listenAddr string) error {
+  if listenAddr == "" {
+    listenAddr = cfg.Web.Listen
+  }
+  if listenAddr == "" {
+    listenAddr = ":80"
+  }
+
+  secret := cfg.Web.Password
+  if secret == "" {
+    secret = config.SessionSecret
+    slog.Warn("未配置 web.password，使用默认 session 密钥，请尽快修改")
+  }
+
+  csrfKey := secret + "-csrf"
+
+  // 确保工作目录存在
+  wd, _ := os.Getwd()
+  if wd != "" {
+    os.MkdirAll(wd, 0755)
+  }
+
+  // 确保 users/ 和 archive/ 目录存在
+  if err := user.EnsureUsersRoot(cfg); err != nil {
+    slog.Warn("创建用户目录失败", "error", err)
+  }
+
+  // 初始化本地用户数据库（失败时重试一次）
+  if err := auth.InitDB(wd); err != nil {
+    slog.Warn("数据库初始化失败，正在重试", "error", err)
+    os.MkdirAll(wd, 0755)
+    if err := auth.InitDB(wd); err != nil {
+      return fmt.Errorf("初始化用户数据库失败: %w", err)
+    }
+  }
+
+  // 初始化 Docker 客户端
+  dockerOK := false
+  if err := dockerpkg.InitClient(); err != nil {
+    slog.Warn("Docker 不可用，容器操作将被禁用", "error", err)
+  } else {
+    ctx := contextWithTimeout(5)
+    if err := dockerpkg.EnsureNetwork(ctx); err != nil {
+      slog.Warn("网络初始化失败", "error", err)
+    }
+    dockerOK = true
+  }
+
+  s := &Server{
+    cfg:            cfg,
+    secret:         secret,
+    csrfKey:        csrfKey,
+    dockerAvailable: dockerOK,
+    loginLimiter:   newRateLimiter(10, time.Minute),
+  }
+
+  // LDAP 定时同步
+  var ldapStop chan struct{}
+  if interval := cfg.SyncIntervalDuration(); interval > 0 && cfg.LDAPEnabled() {
+    ldapStop = make(chan struct{})
+    go func() {
+      ticker := time.NewTicker(interval)
+      defer ticker.Stop()
+      slog.Info("LDAP 定时同步已启动", "interval", interval)
+      for {
+        select {
+        case <-ticker.C:
+          s.syncLDAPGroups()
+        case <-ldapStop:
+          slog.Info("LDAP 定时同步已停止")
+          return
+        }
+      }
+    }()
+  }
+
+  mux := http.NewServeMux()
+  s.RegisterRoutes(mux)
+
+  // 信号通道：监听 SIGTERM 和 SIGINT
+  sigCh := make(chan os.Signal, 1)
+  signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+
+  var redirectServer *http.Server
 
   if cfg.Web.TLS.Enabled && cfg.Web.TLS.CertFile != "" && cfg.Web.TLS.KeyFile != "" {
     if _, err := os.Stat(cfg.Web.TLS.CertFile); err != nil {
@@ -333,34 +372,89 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
       return fmt.Errorf("私钥文件不存在: %s", cfg.Web.TLS.KeyFile)
     }
 
-    // 如果监听 443，额外启动 80 端口 HTTP→HTTPS 重定向
     if strings.HasSuffix(listenAddr, ":443") {
+      redirectMux := http.NewServeMux()
+      redirectMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        target := "https://" + r.Host + r.URL.Path
+        if r.URL.RawQuery != "" {
+          target += "?" + r.URL.RawQuery
+        }
+        http.Redirect(w, r, target, http.StatusMovedPermanently)
+      })
+      redirectServer = &http.Server{Addr: ":80", Handler: redirectMux}
       go func() {
-        redirectMux := http.NewServeMux()
-        redirectMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-          target := "https://" + r.Host + r.URL.Path
-          if r.URL.RawQuery != "" {
-            target += "?" + r.URL.RawQuery
-          }
-          http.Redirect(w, r, target, http.StatusMovedPermanently)
-        })
         slog.Info("HTTP→HTTPS 重定向已启动", "listen", ":80")
-        if err := http.ListenAndServe(":80", redirectMux); err != nil {
+        if err := redirectServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
           slog.Error("重定向服务错误", "error", err)
         }
       }()
     }
 
-    slog.Info("管理面板启动", "url", "https://"+listenAddr)
-    return http.ListenAndServeTLS(listenAddr, cfg.Web.TLS.CertFile, cfg.Web.TLS.KeyFile, logger.AccessMiddleware(mux))
+    srv := &http.Server{
+      Addr:    listenAddr,
+      Handler: logger.AccessMiddleware(mux),
+    }
+    go func() {
+      slog.Info("管理面板启动", "url", "https://"+listenAddr)
+      if err := srv.ListenAndServeTLS(cfg.Web.TLS.CertFile, cfg.Web.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+        slog.Error("服务启动失败", "error", err)
+      }
+    }()
+
+    <-sigCh
+    slog.Info("收到终止信号，开始优雅关闭...")
+    return gracefulShutdown(srv, redirectServer, dockerOK, ldapStop)
   }
 
-  slog.Info("管理面板启动", "url", "http://"+listenAddr)
-  return http.ListenAndServe(listenAddr, logger.AccessMiddleware(mux))
+  srv := &http.Server{
+    Addr:    listenAddr,
+    Handler: logger.AccessMiddleware(mux),
+  }
+  go func() {
+    slog.Info("管理面板启动", "url", "http://"+listenAddr)
+    if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+      slog.Error("服务启动失败", "error", err)
+    }
+  }()
+
+  <-sigCh
+  slog.Info("收到终止信号，开始优雅关闭...")
+  return gracefulShutdown(srv, redirectServer, dockerOK, ldapStop)
+}
+
+// gracefulShutdown 优雅关闭 HTTP 服务器及相关资源
+func gracefulShutdown(srv, redirectSrv *http.Server, dockerOK bool, ldapStop chan struct{}) error {
+  if ldapStop != nil {
+    close(ldapStop)
+  }
+
+  if redirectSrv != nil {
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    redirectSrv.Shutdown(shutdownCtx)
+    cancel()
+  }
+
+  shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+  defer cancel()
+  if err := srv.Shutdown(shutdownCtx); err != nil {
+    slog.Error("服务器关闭失败", "error", err)
+    return err
+  }
+
+  if dockerOK {
+    dockerpkg.CloseClient()
+  }
+
+  slog.Info("服务器已优雅关闭")
+  return nil
 }
 
 func contextWithTimeout(sec int) context.Context {
-  ctx, _ := context.WithTimeout(context.Background(), time.Duration(sec)*time.Second)
+  ctx, cancel := context.WithTimeout(context.Background(), time.Duration(sec)*time.Second)
+  go func() {
+    <-ctx.Done()
+    cancel()
+  }()
   return ctx
 }
 
