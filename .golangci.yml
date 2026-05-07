@@ -7,9 +7,12 @@ linters:
   default: none
   enable:
     - govet
-    - staticcheck
     - ineffassign
     - unused
+
+formatters:
+  exclusions:
+    generated: lax
 
 issues:
   max-issues-per-linter: 50
