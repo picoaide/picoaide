@@ -87,7 +87,7 @@ jobs:
           [ "${GOOS}" = "windows" ] && ext=".exe"
           go build -o picoaide-${{ matrix.suffix }}${ext} ./cmd/picoaide/
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: picoaide-${{ matrix.suffix }}
           path: picoaide-${{ matrix.suffix }}*
@@ -106,7 +106,7 @@ jobs:
       - name: Package extension
         run: cd picoaide-extension && zip -r ../picoaide-extension.zip .
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: picoaide-extension
           path: picoaide-extension.zip
@@ -155,7 +155,7 @@ jobs:
         env:
           CI: 1
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: picoaide-desktop-${{ matrix.suffix }}
           path: |
@@ -172,7 +172,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: false
