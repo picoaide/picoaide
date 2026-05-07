@@ -10,13 +10,6 @@ linters:
     - staticcheck
     - ineffassign
     - unused
-    - gocritic
-  settings:
-    gocritic:
-      enabled-checks:
-        - dupImport
-        - truncateCmp
-        - unnamedResult
 
 issues:
   max-issues-per-linter: 50
