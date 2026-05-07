@@ -22,7 +22,17 @@ go build -o picoaide ./cmd/picoaide/
 GOOS=linux GOARCH=amd64 go build -o picoaide ./cmd/picoaide/
 ```
 
-本项目没有测试套件。
+本项目使用 Go `testing` + Python `pytest` + Node.js `node:test` 三套测试框架，详见 Makefile。
+
+```bash
+# 运行全部测试
+make test
+
+# 单独运行
+make test-go        # Go 单元测试 + 集成测试
+make test-python    # Python 桌面客户端测试
+make test-js        # JS 浏览器扩展测试
+```
 
 ## 架构
 
@@ -126,3 +136,14 @@ POST /api/admin/skills/install         安装技能
 - **上传代码后必须监控构建状态**：推送代码后持续跟踪 GitHub Actions 工作流运行状态，直至构建成功或报告失败原因。
 - 仓库地址：`github.com:picoaide/picoaide.git`
 - 镜像会自动构建并推送到 `ghcr.io/picoaide/picoaide`
+
+### 分支保护与合并规则
+
+- **所有代码必须通过 PR 合并到 main**：禁止任何人直接推送 main 分支（包括仓库管理员）。
+- **测试必须通过才能合并**：PR 必须通过 `test` 状态检查（Go/Python/JS 全部测试通过），否则不允许合并。所有 build job 依赖 test job，测试不过不编译。
+- **新增 API 必须包含对应的单元测试或集成测试**：没有测试覆盖的新功能代码不允许合并。
+- **PR 审批规则**：
+  - 需要 1 人审批才能合并。
+  - 别人不能自己审批自己的 PR（`require_last_push_approval`）。
+  - 仓库管理员（`lostmaniac`）的 PR 由 `auto-approve` 工作流自动审批，无需等待他人。
+- **开发流程**：在 `dev` 或功能分支上开发 → 推送 → 创建 PR 到 main → CI 测试通过 + 审批通过 → 合并。

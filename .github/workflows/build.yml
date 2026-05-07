@@ -12,9 +12,39 @@ on:
 
 jobs:
   # ============================================================
+  # 单元测试
+  # ============================================================
+  test:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Go tests
+        run: go test ./internal/... -v -count=1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python tests
+        run: |
+          pip install pytest
+          cd picoaide-desktop && python -m pytest tests/ -v
+
+      - name: JS tests
+        run: cd picoaide-extension && node --test tests/*.test.js
+
+  # ============================================================
   # Go 后端编译
   # ============================================================
   build-go:
+    needs: [test]
     permissions:
       contents: read
     strategy:
@@ -61,6 +91,7 @@ jobs:
   # 浏览器插件打包
   # ============================================================
   build-extension:
+    needs: [test]
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -79,6 +110,7 @@ jobs:
   # 桌面客户端编译 (PyInstaller)
   # ============================================================
   build-desktop:
+    needs: [test]
     strategy:
       matrix:
         include:
@@ -130,7 +162,7 @@ jobs:
   # ============================================================
   release:
     if: github.event_name == 'release'
-    needs: [build-go, build-extension, build-desktop]
+    needs: [test, build-go, build-extension, build-desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
