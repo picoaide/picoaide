@@ -8,11 +8,6 @@ linters:
   enable:
     - govet
     - ineffassign
-    - unused
-
-formatters:
-  exclusions:
-    generated: lax
 
 issues:
   max-issues-per-linter: 50
