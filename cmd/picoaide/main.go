@@ -155,7 +155,7 @@ func main() {
   if retention == "" {
     retention = "6m"
   }
-  logger.Init(wd, retention, false)
+  logger.Init(wd, retention, false, cfg.Web.LogLevel)
   defer logger.Close()
 
   switch command {

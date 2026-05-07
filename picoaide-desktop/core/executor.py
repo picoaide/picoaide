@@ -37,7 +37,8 @@ def check_whitelist(path, whitelist_dirs):
     return False
   abs_path = os.path.abspath(path)
   for d in whitelist_dirs:
-    if abs_path.startswith(os.path.abspath(d)):
+    allowed = os.path.abspath(d)
+    if abs_path == allowed or abs_path.startswith(allowed + os.sep):
       return True
   return False
 

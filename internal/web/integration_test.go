@@ -10,6 +10,7 @@ import (
   "path/filepath"
   "strings"
   "testing"
+  "time"
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
@@ -92,10 +93,12 @@ func setupTestServer(t *testing.T) *testEnv {
     secret:         "test-integration-secret",
     csrfKey:        "test-integration-secret-csrf",
     dockerAvailable: false,
+    loginLimiter:   newRateLimiter(10, time.Minute),
   }
 
   // 注册所有路由
-  mux := buildTestMux(s)
+  mux := http.NewServeMux()
+  s.RegisterRoutes(mux)
 
   // 创建 HTTP 测试服务器
   httpServer := httptest.NewServer(mux)
@@ -106,96 +109,6 @@ func setupTestServer(t *testing.T) *testEnv {
     HTTP:   httpServer,
     Cfg:    cfg,
   }
-}
-
-// buildTestMux 注册所有 API 路由（与 Serve() 一致）
-func buildTestMux(s *Server) *http.ServeMux {
-  mux := http.NewServeMux()
-  // 认证
-  mux.HandleFunc("/api/login", s.secureHeaders(s.handleLogin))
-  mux.HandleFunc("/api/logout", s.secureHeaders(s.handleLogout))
-  mux.HandleFunc("/api/user/info", s.secureHeaders(s.handleUserInfo))
-  mux.HandleFunc("/api/user/password", s.secureHeaders(s.handleChangePassword))
-  // 钉钉配置
-  mux.HandleFunc("/api/dingtalk", s.secureHeaders(s.handleDingTalk))
-  // 配置管理（超管）
-  mux.HandleFunc("/api/config", s.secureHeaders(s.handleConfig))
-  mux.HandleFunc("/api/admin/config/apply", s.secureHeaders(s.handleAdminConfigApply))
-  mux.HandleFunc("/api/admin/task/status", s.secureHeaders(s.handleAdminTaskStatus))
-  // 文件管理
-  mux.HandleFunc("/api/files", s.secureHeaders(s.handleFiles))
-  mux.HandleFunc("/api/files/upload", s.secureHeaders(s.handleFileUpload))
-  mux.HandleFunc("/api/files/download", s.secureHeaders(s.handleFileDownload))
-  mux.HandleFunc("/api/files/delete", s.secureHeaders(s.handleFileDelete))
-  mux.HandleFunc("/api/files/mkdir", s.secureHeaders(s.handleFileMkdir))
-  mux.HandleFunc("/api/files/edit", s.secureHeaders(s.handleFileEdit))
-  // Cookie 同步
-  mux.HandleFunc("/api/cookies", s.secureHeaders(s.handleCookies))
-  // CSRF token
-  mux.HandleFunc("/api/csrf", s.secureHeaders(s.handleCSRF))
-  // MCP token
-  mux.HandleFunc("/api/mcp/token", s.secureHeaders(s.handleMCPToken))
-  // MCP SSE 服务
-  mux.HandleFunc("/api/mcp/sse/{service}", func(w http.ResponseWriter, r *http.Request) {
-    s.secureHeaders(func(w http.ResponseWriter, r *http.Request) {
-      s.handleMCPSSEService(w, r, r.PathValue("service"))
-    })(w, r)
-  })
-  // Browser Extension WebSocket
-  mux.HandleFunc("/api/browser/ws", s.secureHeaders(s.handleBrowserWS))
-  // Computer 桌面代理 WebSocket
-  mux.HandleFunc("/api/computer/ws", s.secureHeaders(s.handleComputerWS))
-  // 超管 - 用户管理
-  mux.HandleFunc("/api/admin/users", s.secureHeaders(s.handleAdminUsers))
-  mux.HandleFunc("/api/admin/users/create", s.secureHeaders(s.handleAdminUserCreate))
-  mux.HandleFunc("/api/admin/users/delete", s.secureHeaders(s.handleAdminUserDelete))
-  // 超管 - 超管账户管理
-  mux.HandleFunc("/api/admin/superadmins", s.secureHeaders(s.handleAdminSuperadmins))
-  mux.HandleFunc("/api/admin/superadmins/create", s.secureHeaders(s.handleAdminSuperadminCreate))
-  mux.HandleFunc("/api/admin/superadmins/delete", s.secureHeaders(s.handleAdminSuperadminDelete))
-  mux.HandleFunc("/api/admin/superadmins/reset", s.secureHeaders(s.handleAdminSuperadminReset))
-  mux.HandleFunc("/api/admin/container/start", s.secureHeaders(s.handleAdminContainerStart))
-  mux.HandleFunc("/api/admin/container/stop", s.secureHeaders(s.handleAdminContainerStop))
-  mux.HandleFunc("/api/admin/container/restart", s.secureHeaders(s.handleAdminContainerRestart))
-  mux.HandleFunc("/api/admin/container/logs", s.secureHeaders(s.handleAdminContainerLogs))
-  // 超管 - 白名单
-  mux.HandleFunc("/api/admin/whitelist", s.secureHeaders(s.handleAdminWhitelist))
-  // 超管 - 认证配置
-  mux.HandleFunc("/api/admin/auth/test-ldap", s.secureHeaders(s.handleAdminAuthTestLDAP))
-  mux.HandleFunc("/api/admin/auth/ldap-users", s.secureHeaders(s.handleAdminAuthLDAPUsers))
-  mux.HandleFunc("/api/admin/auth/sync-groups", s.secureHeaders(s.handleAdminAuthSyncGroups))
-  // 超管 - 用户组
-  mux.HandleFunc("/api/admin/groups", s.secureHeaders(s.handleAdminGroups))
-  mux.HandleFunc("/api/admin/groups/create", s.secureHeaders(s.handleAdminGroupCreate))
-  mux.HandleFunc("/api/admin/groups/delete", s.secureHeaders(s.handleAdminGroupDelete))
-  mux.HandleFunc("/api/admin/groups/members", s.secureHeaders(s.handleAdminGroupMembers))
-  mux.HandleFunc("/api/admin/groups/members/add", s.secureHeaders(s.handleAdminGroupMembersAdd))
-  mux.HandleFunc("/api/admin/groups/members/remove", s.secureHeaders(s.handleAdminGroupMembersRemove))
-  mux.HandleFunc("/api/admin/groups/skills/bind", s.secureHeaders(s.handleAdminGroupSkillsBind))
-  mux.HandleFunc("/api/admin/groups/skills/unbind", s.secureHeaders(s.handleAdminGroupSkillsUnbind))
-  // 超管 - 技能库
-  mux.HandleFunc("/api/admin/skills", s.secureHeaders(s.handleAdminSkills))
-  mux.HandleFunc("/api/admin/skills/deploy", s.secureHeaders(s.handleAdminSkillsDeploy))
-  mux.HandleFunc("/api/admin/skills/download", s.secureHeaders(s.handleAdminSkillsDownload))
-  mux.HandleFunc("/api/admin/skills/remove", s.secureHeaders(s.handleAdminSkillsRemove))
-  // 超管 - 技能仓库
-  mux.HandleFunc("/api/admin/skills/repos/list", s.secureHeaders(s.handleAdminSkillsReposList))
-  mux.HandleFunc("/api/admin/skills/repos/add", s.secureHeaders(s.handleAdminSkillsReposAdd))
-  mux.HandleFunc("/api/admin/skills/repos/pull", s.secureHeaders(s.handleAdminSkillsReposPull))
-  mux.HandleFunc("/api/admin/skills/repos/remove", s.secureHeaders(s.handleAdminSkillsReposRemove))
-  mux.HandleFunc("/api/admin/skills/install", s.secureHeaders(s.handleAdminSkillsInstall))
-  // 超管 - 镜像管理
-  mux.HandleFunc("/api/admin/images", s.secureHeaders(s.handleAdminImages))
-  mux.HandleFunc("/api/admin/images/pull", s.secureHeaders(s.handleAdminImagePull))
-  mux.HandleFunc("/api/admin/images/delete", s.secureHeaders(s.handleAdminImageDelete))
-  mux.HandleFunc("/api/admin/images/migrate", s.secureHeaders(s.handleAdminImageMigrate))
-  mux.HandleFunc("/api/admin/images/upgrade", s.secureHeaders(s.handleAdminImageUpgrade))
-  mux.HandleFunc("/api/admin/images/registry", s.secureHeaders(s.handleAdminImageRegistry))
-  mux.HandleFunc("/api/admin/images/local-tags", s.secureHeaders(s.handleAdminLocalTags))
-  mux.HandleFunc("/api/admin/images/upgrade-candidates", s.secureHeaders(s.handleAdminImageUpgradeCandidates))
-  mux.HandleFunc("/api/admin/images/users", s.secureHeaders(s.handleAdminImageUsers))
-
-  return mux
 }
 
 // ============================================================
