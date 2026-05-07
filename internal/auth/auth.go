@@ -62,6 +62,15 @@ func InitDB(dataDir string) error {
   return nil
 }
 
+// ResetDB 关闭当前数据库连接并重置全局状态（测试用）
+func ResetDB() {
+  if db != nil {
+    db.Close()
+  }
+  db = nil
+  dbDataDir = ""
+}
+
 // GetDB 返回数据库连接（供其他包直接操作 DB）
 func GetDB() (*sql.DB, error) {
   if err := ensureDB(); err != nil {
