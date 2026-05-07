@@ -12,15 +12,13 @@ linters:
     - ineffassign
     - unused
     - gocritic
-
-linters-settings:
-  gocritic:
-    enabled-checks:
-      - dupImport
-      - truncateCmp
-      - unnamedResult
+  settings:
+    gocritic:
+      enabled-checks:
+        - dupImport
+        - truncateCmp
+        - unnamedResult
 
 issues:
-  exclude-use-default: false
   max-issues-per-linter: 50
   max-same-issues: 5
