@@ -38,7 +38,7 @@ jobs:
           cd picoaide-desktop && python -m pytest tests/ -v
 
       - name: JS tests
-        run: cd picoaide-extension && node --test 'tests/*.test.js'
+        run: cd picoaide-extension && node --test tests/*.test.js
 
   # ============================================================
   # Go 后端编译
