@@ -1,5 +1,4 @@
 import sys
-import types
 from unittest.mock import MagicMock
 
 # Mock heavy dependencies before any project imports
