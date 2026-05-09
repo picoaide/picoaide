@@ -3,6 +3,7 @@ package web
 import (
   "fmt"
   "io"
+  "io/fs"
   "net/http"
   "os"
   "path/filepath"
@@ -53,47 +54,6 @@ type editResponse struct {
 
 const maxUploadSize = 32 << 20 // 32 MB
 
-// workspaceRoot 返回指定用户的工作区根目录路径
-func (s *Server) workspaceRoot(username string) string {
-  base := filepath.Base(username) // 防御性截取：确保不会拼出子路径
-  return filepath.Join(user.UserDir(s.cfg, base), ".picoclaw", "workspace")
-}
-
-// safePath 安全解析相对路径，防止路径遍历和符号链接逃逸
-func (s *Server) safePath(username, relPath string) (string, error) {
-  root := s.workspaceRoot(username)
-  cleaned := filepath.Clean("/" + relPath)
-  absPath := filepath.Join(root, cleaned)
-
-  evalRoot, err := filepath.EvalSymlinks(root)
-  if err != nil {
-    evalRoot = root
-  }
-
-  evalPath, err := filepath.EvalSymlinks(absPath)
-  if err != nil {
-    if !os.IsNotExist(err) {
-      return "", fmt.Errorf("路径验证失败")
-    }
-    // 文件不存在时，验证父目录
-    parent := filepath.Dir(absPath)
-    evalParent, err2 := filepath.EvalSymlinks(parent)
-    if err2 != nil {
-      return "", fmt.Errorf("路径验证失败")
-    }
-    if !strings.HasPrefix(evalParent, evalRoot+string(os.PathSeparator)) && evalParent != evalRoot {
-      return "", fmt.Errorf("路径越界")
-    }
-    return absPath, nil
-  }
-
-  if !strings.HasPrefix(evalPath, evalRoot+string(os.PathSeparator)) && evalPath != evalRoot {
-    return "", fmt.Errorf("路径越界")
-  }
-  // 返回解析后的路径，防止 TOCTOU 竞态
-  return evalPath, nil
-}
-
 func safeWorkspaceRelPath(relPath string) string {
   cleaned := filepath.Clean("/" + relPath)
   if cleaned == string(os.PathSeparator) {
@@ -103,11 +63,14 @@ func safeWorkspaceRelPath(relPath string) string {
 }
 
 func (s *Server) openWorkspaceRoot(username string) (*os.Root, error) {
-  root := s.workspaceRoot(username)
-  if err := os.MkdirAll(root, 0755); err != nil {
+  if err := user.ValidateUsername(username); err != nil {
     return nil, err
   }
-  return os.OpenRoot(root)
+  workspaceDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace")
+  if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+    return nil, err
+  }
+  return os.OpenRoot(workspaceDir)
 }
 
 // parentDir 返回 relPath 的父目录相对路径
@@ -128,29 +91,28 @@ func (s *Server) handleFiles(c *gin.Context) {
 
   relPath := c.Query("path")
 
-  root := s.workspaceRoot(username)
-  os.MkdirAll(root, 0755)
-
-  absPath, err := s.safePath(username, relPath)
+  root, err := s.openWorkspaceRoot(username)
   if err != nil {
     writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
+  defer root.Close()
+  safeRelPath := safeWorkspaceRelPath(relPath)
 
-  info, err := os.Stat(absPath)
+  info, err := root.Stat(safeRelPath)
   if err != nil || !info.IsDir() {
     writeError(c, http.StatusNotFound, "目录不存在")
     return
   }
 
-  entries, err := os.ReadDir(absPath)
+  dirEntries, err := fs.ReadDir(root.FS(), safeRelPath)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "读取目录失败")
     return
   }
 
   var fileEntries []FileEntry
-  for _, e := range entries {
+  for _, e := range dirEntries {
     fi, _ := e.Info()
     if fi == nil {
       continue
@@ -161,7 +123,7 @@ func (s *Server) handleFiles(c *gin.Context) {
       Size:    fi.Size(),
       SizeStr: util.FormatSize(fi.Size()),
       ModTime: fi.ModTime().Format("2006-01-02 15:04"),
-      RelPath: filepath.Join(relPath, e.Name()),
+      RelPath: filepath.Join(safeRelPath, e.Name()),
     })
   }
 
@@ -213,13 +175,15 @@ func (s *Server) handleFileUpload(c *gin.Context) {
 
   relPath := c.PostForm("path")
 
-  targetDir, err := s.safePath(username, relPath)
+  root, err := s.openWorkspaceRoot(username)
   if err != nil {
     writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
+  defer root.Close()
+  safeRelPath := safeWorkspaceRelPath(relPath)
 
-  info, err := os.Stat(targetDir)
+  info, err := root.Stat(safeRelPath)
   if err != nil || !info.IsDir() {
     writeError(c, http.StatusBadRequest, "目标目录不存在")
     return
@@ -233,9 +197,7 @@ func (s *Server) handleFileUpload(c *gin.Context) {
   defer file.Close()
 
   filename := filepath.Base(header.Filename)
-  dstPath := filepath.Join(targetDir, filename)
-
-  dst, err := os.Create(dstPath)
+  dst, err := root.OpenFile(filepath.Join(safeRelPath, filename), os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "创建文件失败")
     return
@@ -297,29 +259,30 @@ func (s *Server) handleFileDelete(c *gin.Context) {
 
   relPath := c.PostForm("path")
 
-  absPath, err := s.safePath(username, relPath)
+  root, err := s.openWorkspaceRoot(username)
   if err != nil {
     writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
+  defer root.Close()
+  safeRelPath := safeWorkspaceRelPath(relPath)
 
-  root := s.workspaceRoot(username)
-  if absPath == root {
+  if safeRelPath == "." {
     writeError(c, http.StatusBadRequest, "不能删除工作区根目录")
     return
   }
 
-  info, err := os.Stat(absPath)
+  info, err := root.Stat(safeRelPath)
   if err != nil {
     writeError(c, http.StatusNotFound, "文件不存在")
     return
   }
 
-  name := filepath.Base(absPath)
+  name := filepath.Base(safeRelPath)
   if info.IsDir() {
-    err = os.RemoveAll(absPath)
+    err = root.RemoveAll(safeRelPath)
   } else {
-    err = os.Remove(absPath)
+    err = root.Remove(safeRelPath)
   }
   if err != nil {
     writeError(c, http.StatusInternalServerError, "删除失败")
@@ -348,13 +311,15 @@ func (s *Server) handleFileMkdir(c *gin.Context) {
     return
   }
 
-  parentAbsDir, err := s.safePath(username, relPath)
+  root, err := s.openWorkspaceRoot(username)
   if err != nil {
     writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
+  defer root.Close()
+  safeRelPath := safeWorkspaceRelPath(relPath)
 
-  if err := os.Mkdir(filepath.Join(parentAbsDir, name), 0755); err != nil {
+  if err := root.Mkdir(filepath.Join(safeRelPath, name), 0755); err != nil {
     writeError(c, http.StatusInternalServerError, "创建目录失败")
     return
   }
