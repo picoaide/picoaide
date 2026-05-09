@@ -621,7 +621,6 @@ export async function init(ctx) {
   }
 
   async function pollUpgradeProgress(progressDiv) {
-    const serverBase = await getServerUrl();
     const poll = async () => {
       try {
         const data = await Api.get('/api/admin/task/status');

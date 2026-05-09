@@ -1,7 +1,7 @@
 var rawConfig = {};
 
 export async function init(ctx) {
-  const { Api, showMsg, $, $$ } = ctx;
+  const { Api, showMsg, $ } = ctx;
   await loadConfig();
 
   $('#auth-mode').addEventListener('change', function() {

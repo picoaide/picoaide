@@ -94,6 +94,22 @@ func (s *Server) safePath(username, relPath string) (string, error) {
   return evalPath, nil
 }
 
+func safeWorkspaceRelPath(relPath string) string {
+  cleaned := filepath.Clean("/" + relPath)
+  if cleaned == string(os.PathSeparator) {
+    return "."
+  }
+  return strings.TrimPrefix(cleaned, string(os.PathSeparator))
+}
+
+func (s *Server) openWorkspaceRoot(username string) (*os.Root, error) {
+  root := s.workspaceRoot(username)
+  if err := os.MkdirAll(root, 0755); err != nil {
+    return nil, err
+  }
+  return os.OpenRoot(root)
+}
+
 // parentDir 返回 relPath 的父目录相对路径
 func parentDir(relPath string) string {
   p := filepath.Dir(relPath)
@@ -243,20 +259,29 @@ func (s *Server) handleFileDownload(c *gin.Context) {
 
   relPath := c.Query("path")
 
-  absPath, err := s.safePath(username, relPath)
+  root, err := s.openWorkspaceRoot(username)
   if err != nil {
     writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
+  defer root.Close()
+  safeRelPath := safeWorkspaceRelPath(relPath)
 
-  info, err := os.Stat(absPath)
+  info, err := root.Stat(safeRelPath)
   if err != nil || info.IsDir() {
     writeError(c, http.StatusNotFound, "文件不存在")
     return
   }
 
-  c.Writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(absPath)))
-  http.ServeFile(c.Writer, c.Request, absPath)
+  file, err := root.Open(safeRelPath)
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "读取文件失败")
+    return
+  }
+  defer file.Close()
+
+  c.Writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(safeRelPath)))
+  http.ServeContent(c.Writer, c.Request, filepath.Base(safeRelPath), info.ModTime(), file)
 }
 
 // handleFileDelete 删除文件或目录
@@ -350,19 +375,28 @@ func (s *Server) handleFileEditGet(c *gin.Context) {
     return
   }
 
-  absPath, err := s.safePath(username, relPath)
+  root, err := s.openWorkspaceRoot(username)
   if err != nil {
     writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
+  defer root.Close()
+  safeRelPath := safeWorkspaceRelPath(relPath)
 
   // 只允许编辑文本文件
-  if !util.IsTextFile(absPath) {
+  if !util.IsTextFile(safeRelPath) {
     writeError(c, http.StatusBadRequest, "不支持的文件类型")
     return
   }
 
-  data, err := os.ReadFile(absPath)
+  file, err := root.Open(safeRelPath)
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "读取文件失败")
+    return
+  }
+  defer file.Close()
+
+  data, err := io.ReadAll(file)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "读取文件失败")
     return
@@ -370,7 +404,7 @@ func (s *Server) handleFileEditGet(c *gin.Context) {
 
   writeJSON(c, http.StatusOK, editResponse{
     Success:  true,
-    Filename: filepath.Base(absPath),
+    Filename: filepath.Base(safeRelPath),
     Content:  string(data),
     Path:     relPath,
   })
@@ -392,14 +426,16 @@ func (s *Server) handleFileEditSave(c *gin.Context) {
     return
   }
 
-  absPath, err := s.safePath(username, relPath)
+  root, err := s.openWorkspaceRoot(username)
   if err != nil {
     writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
+  defer root.Close()
+  safeRelPath := safeWorkspaceRelPath(relPath)
 
   // 只允许编辑文本文件
-  if !util.IsTextFile(absPath) {
+  if !util.IsTextFile(safeRelPath) {
     writeError(c, http.StatusBadRequest, "不支持的文件类型")
     return
   }
@@ -409,10 +445,16 @@ func (s *Server) handleFileEditSave(c *gin.Context) {
     return
   }
 
-  if err := os.WriteFile(absPath, []byte(c.PostForm("content")), 0644); err != nil {
+  file, err := root.OpenFile(safeRelPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "保存文件失败")
+    return
+  }
+  defer file.Close()
+  if _, err := file.WriteString(c.PostForm("content")); err != nil {
     writeError(c, http.StatusInternalServerError, "保存文件失败")
     return
   }
 
-  writeSuccess(c, fmt.Sprintf("文件 %s 已保存", filepath.Base(absPath)))
+  writeSuccess(c, fmt.Sprintf("文件 %s 已保存", filepath.Base(safeRelPath)))
 }
