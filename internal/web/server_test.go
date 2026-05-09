@@ -7,6 +7,8 @@ import (
   "strings"
   "testing"
 
+  "github.com/gin-gonic/gin"
+
   "github.com/picoaide/picoaide/internal/config"
 )
 
@@ -101,13 +103,15 @@ func TestCheckCSRF(t *testing.T) {
   sessionToken := s.createSessionToken("admin")
   csrfToken := s.csrfToken("admin")
 
-  req := httptest.NewRequest("POST", "/test", strings.NewReader(
+  w := httptest.NewRecorder()
+  c, _ := gin.CreateTestContext(w)
+  c.Request = httptest.NewRequest("POST", "/test", strings.NewReader(
     url.Values{"csrf_token": {csrfToken}}.Encode(),
   ))
-  req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-  req.AddCookie(&http.Cookie{Name: "session", Value: sessionToken})
+  c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+  c.Request.AddCookie(&http.Cookie{Name: "session", Value: sessionToken})
 
-  if !s.checkCSRF(req) {
+  if !s.checkCSRF(c) {
     t.Error("checkCSRF should pass with valid token")
   }
 }
@@ -116,19 +120,23 @@ func TestCheckCSRFInvalid(t *testing.T) {
   s := newTestServer(t)
 
   // 无 cookie
-  req := httptest.NewRequest("POST", "/test", nil)
-  if s.checkCSRF(req) {
+  w := httptest.NewRecorder()
+  c, _ := gin.CreateTestContext(w)
+  c.Request = httptest.NewRequest("POST", "/test", nil)
+  if s.checkCSRF(c) {
     t.Error("checkCSRF should fail without session")
   }
 
   // 错误 CSRF token
   sessionToken := s.createSessionToken("admin")
-  req = httptest.NewRequest("POST", "/test", strings.NewReader(
+  w = httptest.NewRecorder()
+  c, _ = gin.CreateTestContext(w)
+  c.Request = httptest.NewRequest("POST", "/test", strings.NewReader(
     url.Values{"csrf_token": {"wrongtoken"}}.Encode(),
   ))
-  req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-  req.AddCookie(&http.Cookie{Name: "session", Value: sessionToken})
-  if s.checkCSRF(req) {
+  c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+  c.Request.AddCookie(&http.Cookie{Name: "session", Value: sessionToken})
+  if s.checkCSRF(c) {
     t.Error("checkCSRF should fail with wrong token")
   }
 }
@@ -137,23 +145,48 @@ func TestGetSessionUser(t *testing.T) {
   s := newTestServer(t)
 
   // 无 cookie
-  req := httptest.NewRequest("GET", "/test", nil)
-  if u := s.getSessionUser(req); u != "" {
+  w := httptest.NewRecorder()
+  c, _ := gin.CreateTestContext(w)
+  c.Request = httptest.NewRequest("GET", "/test", nil)
+  if u := s.getSessionUser(c); u != "" {
     t.Errorf("getSessionUser without cookie = %q, want empty", u)
   }
 
   // 有效 cookie
   sessionToken := s.createSessionToken("testuser")
-  req = httptest.NewRequest("GET", "/test", nil)
-  req.AddCookie(&http.Cookie{Name: "session", Value: sessionToken})
-  if u := s.getSessionUser(req); u != "testuser" {
+  w = httptest.NewRecorder()
+  c, _ = gin.CreateTestContext(w)
+  c.Request = httptest.NewRequest("GET", "/test", nil)
+  c.Request.AddCookie(&http.Cookie{Name: "session", Value: sessionToken})
+  if u := s.getSessionUser(c); u != "testuser" {
     t.Errorf("getSessionUser = %q, want %q", u, "testuser")
   }
 
   // 无效 cookie
-  req = httptest.NewRequest("GET", "/test", nil)
-  req.AddCookie(&http.Cookie{Name: "session", Value: "invalid"})
-  if u := s.getSessionUser(req); u != "" {
+  w = httptest.NewRecorder()
+  c, _ = gin.CreateTestContext(w)
+  c.Request = httptest.NewRequest("GET", "/test", nil)
+  c.Request.AddCookie(&http.Cookie{Name: "session", Value: "invalid"})
+  if u := s.getSessionUser(c); u != "" {
     t.Errorf("getSessionUser with invalid cookie = %q, want empty", u)
+  }
+}
+
+func TestRootRedirectsToLogin(t *testing.T) {
+  s := newTestServer(t)
+
+  gin.SetMode(gin.TestMode)
+  r := gin.New()
+  s.registerUIRoutes(r)
+
+  w := httptest.NewRecorder()
+  req := httptest.NewRequest("GET", "/", nil)
+  r.ServeHTTP(w, req)
+
+  if w.Code != http.StatusFound {
+    t.Fatalf("status=%d, want %d", w.Code, http.StatusFound)
+  }
+  if got := w.Header().Get("Location"); got != "/login" {
+    t.Fatalf("Location=%q, want /login", got)
   }
 }

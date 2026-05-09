@@ -2,9 +2,9 @@ package web
 
 import (
   "log/slog"
-  "net/http"
   "time"
 
+  "github.com/gin-gonic/gin"
   "github.com/gorilla/websocket"
 )
 
@@ -12,18 +12,13 @@ import (
 var computerSvc = NewServiceHub("computer")
 
 // handleComputerWS 处理桌面代理 WebSocket 连接（GET /api/computer/ws?token=xxx）
-func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
-    return
-  }
-
-  username := validateBearerOrQueryToken(w, r)
+func (s *Server) handleComputerWS(c *gin.Context) {
+  username := validateBearerOrQueryToken(c)
   if username == "" {
     return
   }
 
-  ws, err := upgrader.Upgrade(w, r, nil)
+  ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
   if err != nil {
     slog.Error("桌面代理 WebSocket 升级失败", "username", username, "error", err)
     return

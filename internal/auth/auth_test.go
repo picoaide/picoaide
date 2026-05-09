@@ -9,8 +9,8 @@ import (
 func testInitDB(t *testing.T) {
   t.Helper()
   tmpDir := t.TempDir()
-  // 重置全局 db 状态
-  db = nil
+  // 重置全局 engine 状态
+  engine = nil
   dbDataDir = ""
   if err := InitDB(tmpDir); err != nil {
     t.Fatalf("InitDB failed: %v", err)
@@ -229,7 +229,7 @@ func TestIsSuperadmin(t *testing.T) {
 
 func TestDBFilePath(t *testing.T) {
   tmpDir := t.TempDir()
-  db = nil
+  engine = nil
   dbDataDir = ""
   InitDB(tmpDir)
 

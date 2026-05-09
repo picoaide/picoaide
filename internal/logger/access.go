@@ -1,7 +1,9 @@
 package logger
 
 import (
+  "bufio"
   "log/slog"
+  "net"
   "net/http"
   "time"
 )
@@ -14,6 +16,11 @@ type responseRecorder struct {
 func (r *responseRecorder) WriteHeader(code int) {
   r.statusCode = code
   r.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack 实现 http.Hijacker 接口，使 WebSocket 升级能透传到底层连接
+func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+  return r.ResponseWriter.(http.Hijacker).Hijack()
 }
 
 // AccessMiddleware HTTP 请求日志中间件

@@ -3,7 +3,6 @@ package config
 import (
   "bufio"
   "bytes"
-  "database/sql"
   "encoding/json"
   "fmt"
   "net"
@@ -26,6 +25,7 @@ import (
 const AppName = "picoaide"
 
 var Version = "dev"
+
 const configFileName = "config.yaml"
 const SessionSecret = "picoaide-session-key-change-me"
 const SessionMaxAge = 86400 // 24 hours
@@ -117,7 +117,7 @@ type LDAPConfig struct {
   BaseDN               string `yaml:"base_dn"`
   Filter               string `yaml:"filter"`
   UsernameAttribute    string `yaml:"username_attribute"`
-  GroupSearchMode      string `yaml:"group_search_mode"`      // "member_of" | "group_search"
+  GroupSearchMode      string `yaml:"group_search_mode"` // "member_of" | "group_search"
   GroupBaseDN          string `yaml:"group_base_dn"`
   GroupFilter          string `yaml:"group_filter"`
   GroupMemberAttribute string `yaml:"group_member_attribute"`
@@ -127,6 +127,7 @@ type LDAPConfig struct {
 
 type ImageConfig struct {
   Name     string `yaml:"name"`
+  Tag      string `yaml:"tag"`
   Timezone string `yaml:"timezone"`
   Registry string `yaml:"registry"` // "github" | "tencent"
 }
@@ -190,13 +191,13 @@ type SkillsConfig struct {
 }
 
 type GlobalConfig struct {
-  LDAP        LDAPConfig  `yaml:"ldap"`
-  Image       ImageConfig `yaml:"image"`
-  UsersRoot   string      `yaml:"users_root"`
-  ArchiveRoot string      `yaml:"archive_root"`
-  Web         WebConfig   `yaml:"web"`
-  PicoClaw    interface{} `yaml:"picoclaw"`
-  Security    interface{} `yaml:"security"`
+  LDAP        LDAPConfig   `yaml:"ldap"`
+  Image       ImageConfig  `yaml:"image"`
+  UsersRoot   string       `yaml:"users_root"`
+  ArchiveRoot string       `yaml:"archive_root"`
+  Web         WebConfig    `yaml:"web"`
+  PicoClaw    interface{}  `yaml:"picoclaw"`
+  Security    interface{}  `yaml:"security"`
   Skills      SkillsConfig `yaml:"skills"`
 }
 
@@ -343,6 +344,13 @@ type WhitelistFile struct {
 // WhitelistPath 返回白名单文件路径（与 config.yaml 同目录）
 func WhitelistPath() string {
   return filepath.Join(filepath.Dir(ConfigPath()), whitelistFileName)
+}
+
+func RuleCacheDir() string {
+  if hcfg, err := LoadHome(); err == nil && hcfg != nil && hcfg.RuleCacheDir != "" {
+    return hcfg.RuleCacheDir
+  }
+  return filepath.Join(filepath.Dir(ConfigPath()), "rules")
 }
 
 // EnsureWhitelistFile 首次 init 时创建白名单文件（带注释模板）
@@ -636,39 +644,33 @@ func SaveRaw(data []byte) error {
 
 // SettingsCount 返回 settings 表中的配置项数量
 func SettingsCount() (int, error) {
-  d, err := auth.GetDB()
+  engine, err := auth.GetEngine()
   if err != nil {
-    return 0, fmt.Errorf("获取数据库连接失败: %w", err)
+    return 0, fmt.Errorf("获取数据库引擎失败: %w", err)
   }
-  var count int
-  err = d.QueryRow("SELECT COUNT(*) FROM settings").Scan(&count)
+  count, err := engine.Count(&auth.Setting{})
   if err != nil {
     return 0, fmt.Errorf("查询配置数量失败: %w", err)
   }
-  return count, nil
+  return int(count), nil
 }
 
 // LoadFromDB 从数据库加载全局配置
 func LoadFromDB() (*GlobalConfig, error) {
-  d, err := auth.GetDB()
+  engine, err := auth.GetEngine()
   if err != nil {
-    return nil, fmt.Errorf("获取数据库连接失败: %w", err)
+    return nil, fmt.Errorf("获取数据库引擎失败: %w", err)
   }
 
-  rows, err := d.Query("SELECT key, value FROM settings")
-  if err != nil {
+  var settings []auth.Setting
+  if err := engine.Find(&settings); err != nil {
     return nil, fmt.Errorf("查询配置失败: %w", err)
   }
-  defer rows.Close()
 
   // 读取所有键值对
   kv := make(map[string]string)
-  for rows.Next() {
-    var key, value string
-    if err := rows.Scan(&key, &value); err != nil {
-      return nil, fmt.Errorf("读取配置行失败: %w", err)
-    }
-    kv[key] = value
+  for _, s := range settings {
+    kv[s.Key] = s.Value
   }
 
   cfg := &GlobalConfig{}
@@ -685,6 +687,7 @@ func LoadFromDB() (*GlobalConfig, error) {
   cfg.LDAP.GroupFilter = kv["ldap.group_filter"]
   cfg.LDAP.GroupMemberAttribute = kv["ldap.group_member_attribute"]
   cfg.Image.Name = kv["image.name"]
+  cfg.Image.Tag = kv["image.tag"]
   cfg.Image.Timezone = kv["image.timezone"]
   cfg.Image.Registry = kv["image.registry"]
   cfg.UsersRoot = kv["users_root"]
@@ -733,9 +736,9 @@ func LoadFromDB() (*GlobalConfig, error) {
 
 // SaveToDB 将全局配置保存到数据库
 func SaveToDB(cfg *GlobalConfig, changedBy string) error {
-  d, err := auth.GetDB()
+  engine, err := auth.GetEngine()
   if err != nil {
-    return fmt.Errorf("获取数据库连接失败: %w", err)
+    return fmt.Errorf("获取数据库引擎失败: %w", err)
   }
 
   // 构建键值映射
@@ -751,6 +754,7 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
   kv["ldap.group_filter"] = cfg.LDAP.GroupFilter
   kv["ldap.group_member_attribute"] = cfg.LDAP.GroupMemberAttribute
   kv["image.name"] = cfg.Image.Name
+  kv["image.tag"] = cfg.Image.Tag
   kv["image.timezone"] = cfg.Image.Timezone
   kv["image.registry"] = cfg.Image.Registry
   kv["users_root"] = cfg.UsersRoot
@@ -795,66 +799,66 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
   }
 
   // 事务写入
-  tx, err := d.Begin()
-  if err != nil {
+  session := engine.NewSession()
+  defer session.Close()
+
+  if err := session.Begin(); err != nil {
     return fmt.Errorf("开启事务失败: %w", err)
   }
-  defer tx.Rollback()
 
   for key, newValue := range kv {
     // 查询当前值
-    var oldValue sql.NullString
-    tx.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&oldValue)
+    var existing auth.Setting
+    has, err := session.Where("key = ?", key).Get(&existing)
+    if err != nil {
+      return fmt.Errorf("查询配置失败: %w", err)
+    }
 
     // 值相同则跳过
-    if oldValue.Valid && oldValue.String == newValue {
+    if has && existing.Value == newValue {
       continue
     }
 
     // 记录变更历史
-    if oldValue.Valid {
-      _, err := tx.Exec(
-        "INSERT INTO settings_history (key, old_value, new_value, changed_by) VALUES (?, ?, ?, ?)",
-        key, oldValue.String, newValue, changedBy,
-      )
-      if err != nil {
+    if has {
+      history := &auth.SettingsHistory{
+        Key:       key,
+        OldValue:  existing.Value,
+        NewValue:  newValue,
+        ChangedBy: changedBy,
+      }
+      if _, err := session.Insert(history); err != nil {
         return fmt.Errorf("写入配置历史失败: %w", err)
       }
     }
 
-    // 写入新值
-    _, err := tx.Exec(
+    // 写入新值（INSERT OR REPLACE）
+    if _, err := session.Exec(
       "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
       key, newValue,
-    )
-    if err != nil {
+    ); err != nil {
       return fmt.Errorf("写入配置失败: %w", err)
     }
   }
 
-  return tx.Commit()
+  return session.Commit()
 }
 
 // LoadRawFromDB 从数据库加载配置并返回嵌套 JSON 结构（与 LoadRaw 返回格式一致）
 func LoadRawFromDB() (map[string]interface{}, error) {
-  d, err := auth.GetDB()
+  engine, err := auth.GetEngine()
   if err != nil {
-    return nil, fmt.Errorf("获取数据库连接失败: %w", err)
+    return nil, fmt.Errorf("获取数据库引擎失败: %w", err)
   }
 
-  rows, err := d.Query("SELECT key, value FROM settings")
-  if err != nil {
+  var settings []auth.Setting
+  if err := engine.Find(&settings); err != nil {
     return nil, fmt.Errorf("查询配置失败: %w", err)
   }
-  defer rows.Close()
 
   kv := make(map[string]string)
-  for rows.Next() {
-    var key, value string
-    if err := rows.Scan(&key, &value); err != nil {
-      return nil, fmt.Errorf("读取配置行失败: %w", err)
-    }
-    kv[key] = value
+  for _, s := range settings {
+    kv[s.Key] = s.Value
   }
 
   return buildNested(kv), nil
@@ -864,49 +868,54 @@ func LoadRawFromDB() (map[string]interface{}, error) {
 func SaveRawToDB(data map[string]interface{}, changedBy string) error {
   flat := flattenConfig(data)
 
-  d, err := auth.GetDB()
+  engine, err := auth.GetEngine()
   if err != nil {
-    return fmt.Errorf("获取数据库连接失败: %w", err)
+    return fmt.Errorf("获取数据库引擎失败: %w", err)
   }
 
-  tx, err := d.Begin()
-  if err != nil {
+  session := engine.NewSession()
+  defer session.Close()
+
+  if err := session.Begin(); err != nil {
     return fmt.Errorf("开启事务失败: %w", err)
   }
-  defer tx.Rollback()
 
   for key, newValue := range flat {
     // 查询当前值
-    var oldValue sql.NullString
-    tx.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&oldValue)
+    var existing auth.Setting
+    has, err := session.Where("key = ?", key).Get(&existing)
+    if err != nil {
+      return fmt.Errorf("查询配置失败: %w", err)
+    }
 
     // 值相同则跳过
-    if oldValue.Valid && oldValue.String == newValue {
+    if has && existing.Value == newValue {
       continue
     }
 
     // 记录变更历史
-    if oldValue.Valid {
-      _, err := tx.Exec(
-        "INSERT INTO settings_history (key, old_value, new_value, changed_by) VALUES (?, ?, ?, ?)",
-        key, oldValue.String, newValue, changedBy,
-      )
-      if err != nil {
+    if has {
+      history := &auth.SettingsHistory{
+        Key:       key,
+        OldValue:  existing.Value,
+        NewValue:  newValue,
+        ChangedBy: changedBy,
+      }
+      if _, err := session.Insert(history); err != nil {
         return fmt.Errorf("写入配置历史失败: %w", err)
       }
     }
 
-    // 写入新值
-    _, err := tx.Exec(
+    // 写入新值（INSERT OR REPLACE）
+    if _, err := session.Exec(
       "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
       key, newValue,
-    )
-    if err != nil {
+    ); err != nil {
       return fmt.Errorf("写入配置失败: %w", err)
     }
   }
 
-  return tx.Commit()
+  return session.Commit()
 }
 
 // InitDBDefaults 将默认配置写入数据库（不覆盖已有值）
@@ -919,29 +928,29 @@ func InitDBDefaults() error {
 
   flat := flattenConfig(raw)
 
-  d, err := auth.GetDB()
+  engine, err := auth.GetEngine()
   if err != nil {
-    return fmt.Errorf("获取数据库连接失败: %w", err)
+    return fmt.Errorf("获取数据库引擎失败: %w", err)
   }
 
-  tx, err := d.Begin()
-  if err != nil {
+  session := engine.NewSession()
+  defer session.Close()
+
+  if err := session.Begin(); err != nil {
     return fmt.Errorf("开启事务失败: %w", err)
   }
-  defer tx.Rollback()
 
   for key, value := range flat {
     // INSERT OR IGNORE：键已存在时不覆盖
-    _, err := tx.Exec(
+    if _, err := session.Exec(
       "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
       key, value,
-    )
-    if err != nil {
+    ); err != nil {
       return fmt.Errorf("写入默认配置失败: %w", err)
     }
   }
 
-  return tx.Commit()
+  return session.Commit()
 }
 
 // MigrateFromYAML 从 config.yaml 和 whitelist.yaml 迁移配置到数据库
@@ -959,24 +968,24 @@ func MigrateFromYAML(yamlPath string) error {
 
   flat := flattenConfig(raw)
 
-  d, err := auth.GetDB()
+  engine, err := auth.GetEngine()
   if err != nil {
-    return fmt.Errorf("获取数据库连接失败: %w", err)
+    return fmt.Errorf("获取数据库引擎失败: %w", err)
   }
 
-  tx, err := d.Begin()
-  if err != nil {
+  session := engine.NewSession()
+  defer session.Close()
+
+  if err := session.Begin(); err != nil {
     return fmt.Errorf("开启事务失败: %w", err)
   }
-  defer tx.Rollback()
 
   // 写入配置项
   for key, value := range flat {
-    _, err := tx.Exec(
+    if _, err := session.Exec(
       "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
       key, value,
-    )
-    if err != nil {
+    ); err != nil {
       return fmt.Errorf("写入配置失败: %w", err)
     }
   }
@@ -989,11 +998,10 @@ func MigrateFromYAML(yamlPath string) error {
       var wl WhitelistFile
       if err := yaml.Unmarshal(wlData, &wl); err == nil {
         for _, username := range wl.Users {
-          _, err := tx.Exec(
+          if _, err := session.Exec(
             "INSERT OR IGNORE INTO whitelist (username, added_by) VALUES (?, 'migration')",
             username,
-          )
-          if err != nil {
+          ); err != nil {
             fmt.Fprintf(os.Stderr, "警告: 迁移白名单用户 %s 失败: %v\n", username, err)
           }
         }
@@ -1004,7 +1012,7 @@ func MigrateFromYAML(yamlPath string) error {
     }
   }
 
-  if err := tx.Commit(); err != nil {
+  if err := session.Commit(); err != nil {
     return fmt.Errorf("提交迁移事务失败: %w", err)
   }
 

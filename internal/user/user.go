@@ -39,24 +39,19 @@ func ValidateUsername(username string) error {
 
 // LoadWhitelist 从数据库读取白名单，返回用户名集合
 func LoadWhitelist() (map[string]bool, error) {
-  d, err := auth.GetDB()
+  engine, err := auth.GetEngine()
   if err != nil {
     return nil, nil
   }
 
-  rows, err := d.Query("SELECT username FROM whitelist")
-  if err != nil {
+  var entries []auth.WhitelistEntry
+  if err := engine.Find(&entries); err != nil {
     return nil, nil
   }
-  defer rows.Close()
 
   m := make(map[string]bool)
-  for rows.Next() {
-    var username string
-    if err := rows.Scan(&username); err != nil {
-      continue
-    }
-    m[username] = true
+  for _, e := range entries {
+    m[e.Username] = true
   }
 
   if len(m) == 0 {
@@ -154,9 +149,9 @@ func InitUser(cfg *config.GlobalConfig, username string, imageTag string) error 
     }
 
     imageRef := ""
-      if imageTag != "" {
-        imageRef = cfg.Image.Name + ":" + imageTag
-      }
+    if imageTag != "" {
+      imageRef = cfg.Image.Name + ":" + imageTag
+    }
     rec = &auth.ContainerRecord{
       Username: username,
       Image:    imageRef,
@@ -223,6 +218,16 @@ func ArchiveUser(cfg *config.GlobalConfig, username string) error {
 
 // ApplyConfigToJSON 将全局 picoclaw 配置合并到用户的 config.json，并注入 MCP 配置
 func ApplyConfigToJSON(cfg *config.GlobalConfig, picoclawDir string, username string) error {
+  return ApplyConfigToJSONForTag(cfg, picoclawDir, username, cfg.Image.Tag)
+}
+
+// ApplyConfigToJSONForTag 按目标 PicoClaw 镜像版本迁移并下发 config.json
+func ApplyConfigToJSONForTag(cfg *config.GlobalConfig, picoclawDir string, username string, targetTag string) error {
+  return ApplyConfigToJSONWithMigration(cfg, picoclawDir, username, targetTag, targetTag)
+}
+
+// ApplyConfigToJSONWithMigration 按迁移规则链升级 config.json，再下发全局配置和 MCP 配置
+func ApplyConfigToJSONWithMigration(cfg *config.GlobalConfig, picoclawDir string, username string, fromTag string, targetTag string) error {
   configPath := filepath.Join(picoclawDir, "config.json")
 
   existing := make(map[string]interface{})
@@ -240,6 +245,14 @@ func ApplyConfigToJSON(cfg *config.GlobalConfig, picoclawDir string, username st
   }
 
   merged := util.MergeMap(existing, globalPico)
+  migrator, err := NewPicoClawMigrationService(config.RuleCacheDir())
+  if err != nil {
+    return err
+  }
+  _ = migrator.RefreshIfDue()
+  if err := migrator.Migrate(merged, fromTag, targetTag); err != nil {
+    return err
+  }
 
   // 注入 browser MCP 配置
   mcpToken, _ := auth.GetMCPToken(username)
@@ -291,15 +304,15 @@ func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config
   }
 
   servers["browser"] = map[string]interface{}{
-    "enabled":   true,
-    "url":       fmt.Sprintf("%s://%s:%s/api/mcp/sse/browser?token=%s", scheme, host, port, mcpToken),
-    "transport": "sse",
+    "enabled": true,
+    "type":    "sse",
+    "url":     fmt.Sprintf("%s://%s:%s/api/mcp/sse/browser?token=%s", scheme, host, port, mcpToken),
   }
 
   servers["computer"] = map[string]interface{}{
-    "enabled":   true,
-    "url":       fmt.Sprintf("%s://%s:%s/api/mcp/sse/computer?token=%s", scheme, host, port, mcpToken),
-    "transport": "sse",
+    "enabled": true,
+    "type":    "sse",
+    "url":     fmt.Sprintf("%s://%s:%s/api/mcp/sse/computer?token=%s", scheme, host, port, mcpToken),
   }
 
   // 清理旧配置
@@ -488,4 +501,3 @@ func SaveDingTalkConfig(cfg *config.GlobalConfig, username, clientID, clientSecr
 // ============================================================
 // 旧版目录迁移
 // ============================================================
-

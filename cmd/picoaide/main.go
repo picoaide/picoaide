@@ -67,6 +67,12 @@ func main() {
         fmt.Fprintf(os.Stderr, "警告: 无法切换到工作目录 %s: %v\n", hcfg.WorkDir, err)
       }
     }
+    if hcfg.RuleCacheDir == "" {
+      hcfg.RuleCacheDir = filepath.Join(hcfg.WorkDir, "rules")
+      if err := config.SaveHome(hcfg); err != nil {
+        fmt.Fprintf(os.Stderr, "警告: 保存规则缓存目录失败: %v\n", err)
+      }
+    }
   }
 
   var configPathOverride string
@@ -147,6 +153,9 @@ func main() {
   if err != nil {
     fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
     os.Exit(1)
+  }
+  if err := user.ReleasePicoClawMigrationRulesCache(config.RuleCacheDir()); err != nil {
+    fmt.Fprintf(os.Stderr, "警告: 初始化迁移规则缓存失败: %v\n", err)
   }
 
   // 初始化日志
@@ -359,6 +368,7 @@ func runFirstRun(reader *bufio.Reader) {
     hcfg = &config.HomeConfig{}
   }
   hcfg.WorkDir = dataDir
+  hcfg.RuleCacheDir = filepath.Join(dataDir, "rules")
   if err := config.SaveHome(hcfg); err != nil {
     fmt.Fprintf(os.Stderr, "保存 home 配置失败: %v\n", err)
     os.Exit(1)

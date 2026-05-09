@@ -3,6 +3,7 @@ package web
 import (
   "net/http"
   "net/url"
+  "strings"
   "testing"
 )
 
@@ -35,6 +36,42 @@ func TestLogin_WrongPassword(t *testing.T) {
   assertStatus(t, resp, 401)
 }
 
+func TestLogin_SuperadminAllowedFromWeb(t *testing.T) {
+  env := setupTestServer(t)
+  resp, _ := http.PostForm(env.HTTP.URL+"/api/login", url.Values{
+    "username": {"testadmin"},
+    "password": {"admin123"},
+  })
+  assertStatus(t, resp, 200)
+}
+
+func TestLogin_SuperadminBlockedFromExtension(t *testing.T) {
+  env := setupTestServer(t)
+  form := url.Values{
+    "username": {"testadmin"},
+    "password": {"admin123"},
+  }
+  req, err := http.NewRequest("POST", env.HTTP.URL+"/api/login", strings.NewReader(form.Encode()))
+  if err != nil {
+    t.Fatal(err)
+  }
+  req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+  req.Header.Set("Origin", "chrome-extension://picoaide-test")
+
+  resp, err := http.DefaultClient.Do(req)
+  if err != nil {
+    t.Fatal(err)
+  }
+  assertStatus(t, resp, 403)
+  var result struct {
+    Error string `json:"error"`
+  }
+  parseJSON(t, resp, &result)
+  if result.Error != "超管用户不允许登录插件，使用普通用户登录" {
+    t.Errorf("error=%q", result.Error)
+  }
+}
+
 func TestLogin_MissingFields(t *testing.T) {
   env := setupTestServer(t)
   resp, _ := http.PostForm(env.HTTP.URL+"/api/login", url.Values{
@@ -47,7 +84,8 @@ func TestLogin_MissingFields(t *testing.T) {
 func TestLogin_WrongMethod(t *testing.T) {
   env := setupTestServer(t)
   resp, _ := http.Get(env.HTTP.URL + "/api/login")
-  assertStatus(t, resp, 405)
+  // Gin 按方法注册路由，GET /api/login 未注册故返回 404（而非 405）
+  assertStatus(t, resp, 404)
 }
 
 func TestLogout_Success(t *testing.T) {
@@ -109,6 +147,34 @@ func TestCSRF_Get(t *testing.T) {
   parseJSON(t, resp, &result)
   if result.CSRFToken == "" {
     t.Error("expected non-empty CSRF token")
+  }
+}
+
+func TestExtensionOnlyAPIs_BlockSuperadmin(t *testing.T) {
+  env := setupTestServer(t)
+  resp := env.get(t, "/api/mcp/token", "testadmin")
+  assertStatus(t, resp, 403)
+  var tokenResult struct {
+    Error string `json:"error"`
+  }
+  parseJSON(t, resp, &tokenResult)
+  if tokenResult.Error != "超管用户不允许登录插件，使用普通用户登录" {
+    t.Errorf("mcp error=%q", tokenResult.Error)
+  }
+
+  form := url.Values{
+    "domain":  {"example.com"},
+    "cookies": {"sid=1"},
+  }
+  resp = env.postForm(t, "/api/cookies", "testadmin", form)
+  assertStatus(t, resp, 403)
+}
+
+func TestRegularUserAPIs_BlockSuperadmin(t *testing.T) {
+  env := setupTestServer(t)
+  for _, path := range []string{"/api/dingtalk", "/api/files"} {
+    resp := env.get(t, path, "testadmin")
+    assertStatus(t, resp, 403)
   }
 }
 

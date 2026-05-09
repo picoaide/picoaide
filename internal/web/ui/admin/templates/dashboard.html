@@ -1,0 +1,19 @@
+<section class="page-header">
+  <div>
+    <div class="page-kicker">管理后台</div>
+    <h2>概览</h2>
+    <p>集中查看用户容器、镜像状态和 Skill 交付规模。</p>
+  </div>
+</section>
+<div class="grid-4 mb-2">
+  <div class="stat-card"><div class="stat-value" id="stat-users">-</div><div class="stat-label">用户总数</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-running">-</div><div class="stat-label">运行中</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-stopped">-</div><div class="stat-label">已停止</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-skills">-</div><div class="stat-label">技能数量</div></div>
+</div>
+<div id="dash-image-tip" class="msg msg-err hidden">部分用户容器镜像未拉取，无法启动容器，请先拉取所需镜像。</div>
+<h3>用户状态</h3>
+<table>
+  <thead><tr><th>用户名</th><th>状态</th><th>镜像版本</th><th>IP</th></tr></thead>
+  <tbody id="dash-users"></tbody>
+</table>

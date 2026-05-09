@@ -5,6 +5,8 @@ import (
   "net/http"
   "sync"
   "time"
+
+  "github.com/gin-gonic/gin"
 )
 
 type rateLimiter struct {
@@ -67,7 +69,7 @@ func (rl *rateLimiter) allow(ip string) bool {
   return true
 }
 
-func clientIP(r *http.Request) string {
+func clientIPFromRequest(r *http.Request) string {
   if ip := r.Header.Get("X-Real-IP"); ip != "" {
     return ip
   }
@@ -93,17 +95,20 @@ func stringsIndex(s, substr string) int {
   return -1
 }
 
-func (s *Server) rateLimitLogin(next http.HandlerFunc) http.HandlerFunc {
-  return func(w http.ResponseWriter, r *http.Request) {
+// rateLimitLogin 返回 Gin 中间件用于登录限流
+func (s *Server) rateLimitLogin() gin.HandlerFunc {
+  return func(c *gin.Context) {
     if s.loginLimiter != nil {
-      ip := clientIP(r)
+      ip := clientIPFromRequest(c.Request)
       if !s.loginLimiter.allow(ip) {
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusTooManyRequests)
-        w.Write([]byte(`{"success":false,"error":"请求过于频繁，请稍后再试"}`))
+        c.JSON(http.StatusTooManyRequests, gin.H{
+          "success": false,
+          "error":   "请求过于频繁，请稍后再试",
+        })
+        c.Abort()
         return
       }
     }
-    next(w, r)
+    c.Next()
   }
 }

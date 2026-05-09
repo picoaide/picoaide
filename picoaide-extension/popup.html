@@ -8,17 +8,21 @@
   <div class="container">
     <div class="header">
       <img src="icons/icon48.png" alt="PicoAide" class="logo">
-      <span class="title">PicoAide</span>
+      <div>
+        <div class="title">PicoAide</div>
+        <div class="subtitle">浏览器助手</div>
+      </div>
     </div>
 
     <!-- 未登录 -->
     <div id="login-view">
+      <p class="hint">登录普通用户账号，用于同步当前网页登录状态并授权 AI 控制当前标签页。</p>
       <label>服务器地址</label>
       <input type="text" id="server-url" placeholder="http://192.168.1.100:80">
       <label>用户名</label>
-      <input type="text" id="username" placeholder="用户名">
+      <input type="text" id="username" placeholder="普通用户">
       <label>密码</label>
-      <input type="password" id="password" placeholder="密码">
+      <input type="password" id="password" placeholder="登录密码">
       <div id="login-error" class="msg"></div>
       <button id="login-btn" class="action-btn">登录</button>
     </div>
@@ -29,11 +33,11 @@
         <span id="user-display"></span>
         <button id="logout-btn" class="btn-logout">退出</button>
       </div>
+      <p class="hint">插件仅保留两个授权动作；配置管理会打开后端页面并沿用当前登录态。</p>
       <div id="status" class="status"></div>
       <button id="sync-btn" class="action-btn">同步登录状态给AI</button>
       <button id="cdp-btn" class="action-btn secondary">授权AI控制当前标签页</button>
       <button id="manage-btn" class="action-btn secondary">配置管理</button>
-      <button id="admin-btn" class="action-btn secondary" style="display:none">管理后台</button>
     </div>
   </div>
 

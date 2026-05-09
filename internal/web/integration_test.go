@@ -12,6 +12,8 @@ import (
   "testing"
   "time"
 
+  "github.com/gin-gonic/gin"
+
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/user"
@@ -89,19 +91,21 @@ func setupTestServer(t *testing.T) *testEnv {
 
   // 创建 Server 实例（Docker 不可用）
   s := &Server{
-    cfg:            cfg,
-    secret:         "test-integration-secret",
-    csrfKey:        "test-integration-secret-csrf",
+    cfg:             cfg,
+    secret:          "test-integration-secret",
+    csrfKey:         "test-integration-secret-csrf",
     dockerAvailable: false,
-    loginLimiter:   newRateLimiter(10, time.Minute),
+    loginLimiter:    newRateLimiter(10, time.Minute),
   }
 
-  // 注册所有路由
-  mux := http.NewServeMux()
-  s.RegisterRoutes(mux)
+  // 注册所有路由到 Gin 引擎
+  gin.SetMode(gin.TestMode)
+  r := gin.New()
+  r.Use(s.secureHeaders())
+  s.RegisterRoutes(r)
 
   // 创建 HTTP 测试服务器
-  httpServer := httptest.NewServer(mux)
+  httpServer := httptest.NewServer(r)
   t.Cleanup(httpServer.Close)
 
   return &testEnv{

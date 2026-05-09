@@ -2,25 +2,20 @@ package web
 
 import (
   "log/slog"
-  "net/http"
   "time"
 
+  "github.com/gin-gonic/gin"
   "github.com/gorilla/websocket"
 )
 
 // handleBrowserWS 处理 Extension WebSocket 连接（GET /api/browser/ws?token=xxx）
-func (s *Server) handleBrowserWS(w http.ResponseWriter, r *http.Request) {
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
-    return
-  }
-
-  username := validateBearerOrQueryToken(w, r)
+func (s *Server) handleBrowserWS(c *gin.Context) {
+  username := validateBearerOrQueryToken(c)
   if username == "" {
     return
   }
 
-  ws, err := upgrader.Upgrade(w, r, nil)
+  ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
   if err != nil {
     slog.Error("Extension WebSocket 升级失败", "username", username, "error", err)
     return

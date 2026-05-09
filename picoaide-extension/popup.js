@@ -41,7 +41,6 @@ const logoutBtn = document.getElementById('logout-btn');
 const syncBtn = document.getElementById('sync-btn');
 const cdpBtn = document.getElementById('cdp-btn');
 const manageBtn = document.getElementById('manage-btn');
-const adminBtn = document.getElementById('admin-btn');
 
 function showLogin() {
   loginView.style.display = '';
@@ -53,28 +52,10 @@ function showMain(username) {
   mainView.style.display = '';
   userDisplay.textContent = username;
   setStatus('已连接', 'ok');
-  checkAdminRole();
-}
-
-async function checkAdminRole() {
-  try {
-    const info = await apiJSON('GET', '/api/user/info');
-    if (info.success && info.role === 'superadmin') {
-      adminBtn.style.display = '';
-      syncBtn.style.display = 'none';
-      cdpBtn.style.display = 'none';
-      manageBtn.style.display = 'none';
-      setStatus('超级管理员', 'ok');
-    } else {
-      adminBtn.style.display = 'none';
-      syncBtn.style.display = '';
-      cdpBtn.style.display = '';
-      manageBtn.style.display = '';
-      updateCdpUI();
-    }
-  } catch {
-    adminBtn.style.display = 'none';
-  }
+  syncBtn.style.display = '';
+  cdpBtn.style.display = '';
+  manageBtn.style.display = '';
+  updateCdpUI();
 }
 
 // --- 登录 ---
@@ -144,14 +125,15 @@ syncBtn.addEventListener('click', async () => {
   }
 });
 
-// --- 配置管理（打开扩展自带的管理页面）---
-manageBtn.addEventListener('click', () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('manage.html') });
-});
-
-// --- 管理后台（超管）---
-adminBtn.addEventListener('click', () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('admin/index.html') });
+// --- 配置管理（打开后端管理页面，沿用当前登录态）---
+manageBtn.addEventListener('click', async () => {
+  try {
+    const base = await getServerUrl();
+    if (!base) { setStatus('未设置服务器地址', 'err'); return; }
+    chrome.tabs.create({ url: base + '/manage' });
+  } catch (e) {
+    setStatus(e.message, 'err');
+  }
 });
 
 // --- AI 浏览器控制（通过 background service worker）---
@@ -216,9 +198,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!base) { showLogin(); return; }
 
   try {
-    const data = await apiJSON('GET', '/api/csrf');
-    if (data.success) {
-      showMain('');  // 已有 session，跳转主界面
+    const info = await apiJSON('GET', '/api/user/info');
+    if (info.success) {
+      if (info.role === 'superadmin') {
+        showLogin();
+        loginError.textContent = '超管用户不允许登录插件，使用普通用户登录';
+        return;
+      }
+      showMain(info.username || '');
       return;
     }
   } catch {}
