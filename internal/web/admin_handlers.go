@@ -41,8 +41,8 @@ func cleanPathSegment(value string) (string, error) {
   return cleaned, nil
 }
 
-func copyDirFromFS(source fs.FS, sourceDir string, dst string) error {
-  return fs.WalkDir(source, sourceDir, func(path string, entry fs.DirEntry, err error) error {
+func copyDirBetweenRoots(source *os.Root, sourceDir string, target *os.Root, targetDir string) error {
+  return fs.WalkDir(source.FS(), sourceDir, func(path string, entry fs.DirEntry, err error) error {
     if err != nil {
       return err
     }
@@ -50,23 +50,23 @@ func copyDirFromFS(source fs.FS, sourceDir string, dst string) error {
     if err != nil {
       return err
     }
-    targetPath := filepath.Join(dst, relPath)
+    targetPath := filepath.Join(targetDir, relPath)
     info, err := entry.Info()
     if err != nil {
       return err
     }
     if entry.IsDir() {
-      return os.MkdirAll(targetPath, info.Mode())
+      return target.MkdirAll(targetPath, info.Mode())
     }
     in, err := source.Open(path)
     if err != nil {
       return err
     }
     defer in.Close()
-    if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+    if err := target.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
       return err
     }
-    out, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+    out, err := target.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
     if err != nil {
       return err
     }
@@ -1377,6 +1377,12 @@ func (s *Server) handleAdminSkillsInstall(c *gin.Context) {
     return
   }
   defer repoRoot.Close()
+  skillRoot, err := os.OpenRoot(skillDir)
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "读取技能目录失败")
+    return
+  }
+  defer skillRoot.Close()
 
   if skillName == "" {
     // 安装仓库中所有技能
@@ -1390,8 +1396,7 @@ func (s *Server) handleAdminSkillsInstall(c *gin.Context) {
       if !e.IsDir() || e.Name() == ".git" {
         continue
       }
-      dst := filepath.Join(skillDir, e.Name())
-      if err := copyDirFromFS(repoRoot.FS(), e.Name(), dst); err != nil {
+      if err := copyDirBetweenRoots(repoRoot, e.Name(), skillRoot, e.Name()); err != nil {
         writeError(c, http.StatusInternalServerError, fmt.Sprintf("安装 %s 失败: %v", e.Name(), err))
         return
       }
@@ -1411,8 +1416,7 @@ func (s *Server) handleAdminSkillsInstall(c *gin.Context) {
     writeError(c, http.StatusNotFound, "技能在仓库中不存在")
     return
   }
-  dst := filepath.Join(skillDir, skillName)
-  if err := copyDirFromFS(repoRoot.FS(), skillName, dst); err != nil {
+  if err := copyDirBetweenRoots(repoRoot, skillName, skillRoot, skillName); err != nil {
     writeError(c, http.StatusInternalServerError, "安装失败: "+err.Error())
     return
   }
