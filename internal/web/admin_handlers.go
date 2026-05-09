@@ -6,6 +6,7 @@ import (
   "encoding/json"
   "fmt"
   "io"
+  "io/fs"
   "log/slog"
   "net/http"
   "os"
@@ -38,6 +39,41 @@ func cleanPathSegment(value string) (string, error) {
     return "", err
   }
   return cleaned, nil
+}
+
+func copyDirFromFS(source fs.FS, sourceDir string, dst string) error {
+  return fs.WalkDir(source, sourceDir, func(path string, entry fs.DirEntry, err error) error {
+    if err != nil {
+      return err
+    }
+    relPath, err := filepath.Rel(sourceDir, path)
+    if err != nil {
+      return err
+    }
+    targetPath := filepath.Join(dst, relPath)
+    info, err := entry.Info()
+    if err != nil {
+      return err
+    }
+    if entry.IsDir() {
+      return os.MkdirAll(targetPath, info.Mode())
+    }
+    in, err := source.Open(path)
+    if err != nil {
+      return err
+    }
+    defer in.Close()
+    if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+      return err
+    }
+    out, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+    if err != nil {
+      return err
+    }
+    defer out.Close()
+    _, err = io.Copy(out, in)
+    return err
+  })
 }
 
 func (s *Server) requireSuperadmin(c *gin.Context) string {
@@ -1335,10 +1371,16 @@ func (s *Server) handleAdminSkillsInstall(c *gin.Context) {
   repoDir := filepath.Join(skillReposDir(), repoName)
   skillDir := config.SkillsDirPath()
   os.MkdirAll(skillDir, 0755)
+  repoRoot, err := os.OpenRoot(repoDir)
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "读取仓库失败")
+    return
+  }
+  defer repoRoot.Close()
 
   if skillName == "" {
     // 安装仓库中所有技能
-    entries, err := os.ReadDir(repoDir)
+    entries, err := fs.ReadDir(repoRoot.FS(), ".")
     if err != nil {
       writeError(c, http.StatusInternalServerError, "读取仓库失败")
       return
@@ -1348,9 +1390,8 @@ func (s *Server) handleAdminSkillsInstall(c *gin.Context) {
       if !e.IsDir() || e.Name() == ".git" {
         continue
       }
-      src := filepath.Join(repoDir, e.Name())
       dst := filepath.Join(skillDir, e.Name())
-      if err := util.CopyDir(src, dst); err != nil {
+      if err := copyDirFromFS(repoRoot.FS(), e.Name(), dst); err != nil {
         writeError(c, http.StatusInternalServerError, fmt.Sprintf("安装 %s 失败: %v", e.Name(), err))
         return
       }
@@ -1365,13 +1406,13 @@ func (s *Server) handleAdminSkillsInstall(c *gin.Context) {
   }
 
   // 安装单个技能
-  src := filepath.Join(repoDir, skillName)
-  if _, err := os.Stat(src); err != nil {
+  info, err := repoRoot.Stat(skillName)
+  if err != nil || !info.IsDir() {
     writeError(c, http.StatusNotFound, "技能在仓库中不存在")
     return
   }
   dst := filepath.Join(skillDir, skillName)
-  if err := util.CopyDir(src, dst); err != nil {
+  if err := copyDirFromFS(repoRoot.FS(), skillName, dst); err != nil {
     writeError(c, http.StatusInternalServerError, "安装失败: "+err.Error())
     return
   }
