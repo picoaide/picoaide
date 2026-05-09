@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "PicoAide Helper",
   "version": "1.0.0",
-  "description": "PicoAide 管理助手 — 浏览器标签页控制、用户管理、镜像管理、配置下发与 AI 集成",
+  "description": "PicoAide 浏览器助手 — 同步登录状态给 AI，并授权 AI 控制当前标签页",
   "permissions": ["storage", "cookies", "activeTab", "scripting", "tabs", "tabGroups", "offscreen"],
   "host_permissions": ["<all_urls>"],
   "background": {

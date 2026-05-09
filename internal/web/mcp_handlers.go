@@ -4,6 +4,7 @@ import (
   "log/slog"
   "net/http"
 
+  "github.com/gin-gonic/gin"
   "github.com/gorilla/websocket"
 
   "github.com/picoaide/picoaide/internal/auth"
@@ -18,31 +19,27 @@ var upgrader = websocket.Upgrader{
 }
 
 // handleMCPToken 返回当前用户的 MCP token
-func (s *Server) handleMCPToken(w http.ResponseWriter, r *http.Request) {
-  username := s.requireAuth(w, r)
+func (s *Server) handleMCPToken(c *gin.Context) {
+  username := s.requireNonSuperadmin(c)
   if username == "" {
-    return
-  }
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
 
   token, err := auth.GetMCPToken(username)
   if err != nil {
-    writeError(w, http.StatusInternalServerError, err.Error())
+    writeError(c, http.StatusInternalServerError, err.Error())
     return
   }
   if token == "" {
     token, err = auth.GenerateMCPToken(username)
     if err != nil {
-      writeError(w, http.StatusInternalServerError, "生成 MCP token 失败: "+err.Error())
+      writeError(c, http.StatusInternalServerError, "生成 MCP token 失败: "+err.Error())
       return
     }
     slog.Info("自动生成 MCP token", "username", username)
   }
 
-  writeJSON(w, http.StatusOK, struct {
+  writeJSON(c, http.StatusOK, struct {
     Success bool   `json:"success"`
     Token   string `json:"token"`
   }{

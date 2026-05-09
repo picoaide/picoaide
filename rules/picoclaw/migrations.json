@@ -1,0 +1,28 @@
+{
+  "versions": [
+    {
+      "version": "0.2.8",
+      "config_changed": true,
+      "actions": [
+        {
+          "op": "set",
+          "path": "version",
+          "value": 3
+        },
+        {
+          "op": "rename",
+          "from": "channels",
+          "to": "channel_list",
+          "mode": "channels_to_nested"
+        },
+        {
+          "op": "map",
+          "path": "tools.mcp.servers",
+          "field": "transport",
+          "to": "type",
+          "value": "sse"
+        }
+      ]
+    }
+  ]
+}

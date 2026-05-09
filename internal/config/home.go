@@ -13,7 +13,8 @@ import (
 // ============================================================
 
 type HomeConfig struct {
-  WorkDir string `yaml:"work_dir"`
+  WorkDir      string `yaml:"work_dir"`
+  RuleCacheDir string `yaml:"rule_cache_dir,omitempty"`
 }
 
 func getHomeConfigPath() string {

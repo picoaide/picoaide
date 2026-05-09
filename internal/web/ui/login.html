@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PicoAide 登录</title>
+  <link rel="stylesheet" href="css/common.css">
+</head>
+<body>
+  <main class="login-shell">
+    <aside class="login-aside">
+      <div class="login-aside-content">
+        <div class="login-kicker">企业级 AI 统一管理</div>
+        <h2>统一管理 Skill，让企业 AI 能力标准化交付。</h2>
+        <p>PicoAide 将用户、分组、镜像、Skill 和认证策略集中到一个管理后台，普通用户获得独立工作环境，管理员保持全局可控。</p>
+        <div class="login-highlights">
+          <div>
+            <strong>Skill 统一治理</strong>
+            <span>按用户组部署、回收和更新企业能力包。</span>
+          </div>
+          <div>
+            <strong>容器级隔离</strong>
+            <span>每个用户拥有独立运行环境和配置边界。</span>
+          </div>
+          <div>
+            <strong>认证与白名单</strong>
+            <span>支持本地超管与 LDAP 用户体系协同。</span>
+          </div>
+          <div>
+            <strong>浏览器与桌面接入</strong>
+            <span>让 AI 在授权范围内执行实际工作流。</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <section class="login-panel">
+      <div class="login-brand">
+        <div class="login-logo">P</div>
+        <div>
+          <div class="login-product">PicoAide</div>
+          <div class="login-subtitle">企业级 AI 工作平台</div>
+        </div>
+      </div>
+
+      <div class="login-heading">
+        <h1>统一登录</h1>
+        <p>管理员进入管理后台，普通用户进入个人配置中心。</p>
+      </div>
+
+      <form id="login-form" class="login-form">
+        <div class="field">
+          <label>用户名</label>
+          <input type="text" id="login-user" autocomplete="username" autofocus>
+        </div>
+        <div class="field">
+          <label>密码</label>
+          <input type="password" id="login-pass" autocomplete="current-password">
+        </div>
+        <div id="login-msg" class="msg"></div>
+        <button class="btn btn-primary login-submit" id="login-btn" type="submit">登录</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="js/common.js"></script>
+  <script src="login.js"></script>
+</body>
+</html>

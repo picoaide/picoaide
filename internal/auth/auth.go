@@ -13,15 +13,140 @@ import (
   "time"
 
   _ "modernc.org/sqlite"
+  "xorm.io/xorm"
   "golang.org/x/crypto/bcrypt"
 )
 
 const dbFileName = "picoaide.db"
 
 var (
-  db       *sql.DB
+  engine    *xorm.Engine
   dbDataDir string
 )
+
+// ============================================================
+// ORM 模型定义
+// ============================================================
+
+// LocalUser 本地用户表
+type LocalUser struct {
+  ID           int64  `xorm:"pk autoincr 'id'"`
+  Username     string `xorm:"unique notnull 'username'"`
+  PasswordHash string `xorm:"notnull 'password_hash'"`
+  Role         string `xorm:"notnull 'role'"`
+  CreatedAt    string `xorm:"notnull 'created_at'"`
+}
+
+func (LocalUser) TableName() string {
+  return "local_users"
+}
+
+// ContainerRecord 容器数据库记录
+type ContainerRecord struct {
+  ID          int64   `xorm:"pk autoincr 'id'"`
+  Username    string  `xorm:"unique notnull 'username'"`
+  ContainerID string  `xorm:"'container_id'"`
+  Image       string  `xorm:"notnull 'image'"`
+  Status      string  `xorm:"'status'"`
+  IP          string  `xorm:"'ip'"`
+  CPULimit    float64 `xorm:"'cpu_limit'"`
+  MemoryLimit int64   `xorm:"'memory_limit'"`
+  MCPToken    string  `xorm:"'mcp_token'"`
+  CreatedAt   string  `xorm:"'created_at'"`
+  UpdatedAt   string  `xorm:"'updated_at'"`
+}
+
+func (ContainerRecord) TableName() string {
+  return "containers"
+}
+
+// Setting 系统设置表
+type Setting struct {
+  Key       string `xorm:"pk 'key'"`
+  Value     string `xorm:"notnull 'value'"`
+  UpdatedAt string `xorm:"notnull 'updated_at'"`
+}
+
+func (Setting) TableName() string {
+  return "settings"
+}
+
+// SettingsHistory 设置变更历史表
+type SettingsHistory struct {
+  ID        int64  `xorm:"pk autoincr 'id'"`
+  Key       string `xorm:"notnull 'key'"`
+  OldValue  string `xorm:"'old_value'"`
+  NewValue  string `xorm:"'new_value'"`
+  ChangedBy string `xorm:"notnull 'changed_by'"`
+  ChangedAt string `xorm:"notnull 'changed_at'"`
+}
+
+func (SettingsHistory) TableName() string {
+  return "settings_history"
+}
+
+// WhitelistEntry 白名单表
+type WhitelistEntry struct {
+  ID       int64  `xorm:"pk autoincr 'id'"`
+  Username string `xorm:"unique notnull 'username'"`
+  AddedBy  string `xorm:"notnull 'added_by'"`
+  AddedAt  string `xorm:"notnull 'added_at'"`
+}
+
+func (WhitelistEntry) TableName() string {
+  return "whitelist"
+}
+
+// Group 用户组表
+type Group struct {
+  ID          int64  `xorm:"pk autoincr 'id'"`
+  Name        string `xorm:"unique notnull 'name'"`
+  ParentID    *int64 `xorm:"'parent_id'"`
+  Source      string `xorm:"notnull 'source'"`
+  Description string `xorm:"notnull 'description'"`
+  CreatedAt   string `xorm:"notnull 'created_at'"`
+}
+
+func (Group) TableName() string {
+  return "groups"
+}
+
+// UserGroup 用户-组关联表
+type UserGroup struct {
+  ID       int64  `xorm:"pk autoincr 'id'"`
+  Username string `xorm:"notnull 'username'"`
+  GroupID  int64  `xorm:"notnull 'group_id'"`
+}
+
+func (UserGroup) TableName() string {
+  return "user_groups"
+}
+
+// GroupSkill 组-技能关联表
+type GroupSkill struct {
+  ID        int64  `xorm:"pk autoincr 'id'"`
+  GroupID   int64  `xorm:"notnull 'group_id'"`
+  SkillName string `xorm:"notnull 'skill_name'"`
+}
+
+func (GroupSkill) TableName() string {
+  return "group_skills"
+}
+
+// GroupInfo 组信息（包含成员数和绑定技能数），非数据库模型，仅用于查询结果
+type GroupInfo struct {
+  ID          int64  `json:"id"`
+  Name        string `json:"name"`
+  ParentID    *int64 `json:"parent_id"`
+  Source      string `json:"source"`
+  Description string `json:"description"`
+  MemberCount int    `json:"member_count"`
+  SkillCount  int    `json:"skill_count"`
+}
+
+// ============================================================
+// 数据库初始化
+// ============================================================
 
 // InitDB 打开或创建 SQLite 数据库
 func InitDB(dataDir string) error {
@@ -34,28 +159,30 @@ func InitDB(dataDir string) error {
   dbPath := filepath.Join(dataDir, dbFileName)
 
   var err error
-  db, err = sql.Open("sqlite", dbPath)
+  engine, err = xorm.NewEngine("sqlite", dbPath)
   if err != nil {
     return fmt.Errorf("打开数据库失败: %w", err)
   }
 
-  if err := db.Ping(); err != nil {
+  if err := engine.Ping(); err != nil {
     // 数据库损坏，备份后重建
-    db.Close()
-    db = nil
+    engine.Close()
+    engine = nil
     backupPath := dbPath + ".broken." + time.Now().Format("20060102-150405")
     fmt.Fprintf(os.Stderr, "数据库损坏，已备份到 %s，正在重建\n", backupPath)
     os.Rename(dbPath, backupPath)
 
-    db, err = sql.Open("sqlite", dbPath)
+    engine, err = xorm.NewEngine("sqlite", dbPath)
     if err != nil {
       return fmt.Errorf("重建数据库失败: %w", err)
     }
   }
 
-  db.SetMaxOpenConns(1)
+  engine.SetMaxOpenConns(1)
+  // 禁用 xorm 缓存，避免与手动 SQL 操作产生不一致
+  engine.SetDefaultCacher(nil)
 
-  if err := createTables(); err != nil {
+  if err := syncSchema(); err != nil {
     return fmt.Errorf("创建数据表失败: %w", err)
   }
 
@@ -64,24 +191,40 @@ func InitDB(dataDir string) error {
 
 // ResetDB 关闭当前数据库连接并重置全局状态（测试用）
 func ResetDB() {
-  if db != nil {
-    db.Close()
+  if engine != nil {
+    engine.Close()
   }
-  db = nil
+  engine = nil
   dbDataDir = ""
 }
 
-// GetDB 返回数据库连接（供其他包直接操作 DB）
+// GetDB 返回底层 *sql.DB 连接（供其他包直接操作 DB，向后兼容）
 func GetDB() (*sql.DB, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
-  return db, nil
+  return engine.DB().DB, nil
 }
 
-// ensureDB 确保数据库连接可用，db 为 nil 时自动重连
+// GetEngine 返回 xorm 引擎（供新代码使用）
+func GetEngine() (*xorm.Engine, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
+  return engine, nil
+}
+
+// DB 返回底层 *sql.DB 连接（供其他包使用，向后兼容）
+func DB() *sql.DB {
+  if engine == nil {
+    return nil
+  }
+  return engine.DB().DB
+}
+
+// ensureDB 确保数据库连接可用，engine 为 nil 时自动重连
 func ensureDB() error {
-  if db != nil {
+  if engine != nil {
     return nil
   }
   if dbDataDir == "" {
@@ -90,8 +233,9 @@ func ensureDB() error {
   return InitDB(dbDataDir)
 }
 
-func createTables() error {
-  _, err := db.Exec(`CREATE TABLE IF NOT EXISTS local_users (
+// syncSchema 使用原始 SQL 创建表结构（保留 SQLite datetime 默认值），并做必要的迁移
+func syncSchema() error {
+  _, err := engine.Exec(`CREATE TABLE IF NOT EXISTS local_users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
@@ -101,7 +245,7 @@ func createTables() error {
   if err != nil {
     return err
   }
-  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS containers (
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS containers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     container_id TEXT,
@@ -118,8 +262,8 @@ func createTables() error {
     return err
   }
   // 迁移：已有表添加 mcp_token 字段
-  db.Exec(`ALTER TABLE containers ADD COLUMN mcp_token TEXT DEFAULT ''`)
-  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS settings (
+  engine.Exec(`ALTER TABLE containers ADD COLUMN mcp_token TEXT DEFAULT ''`)
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT '',
     updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
@@ -127,7 +271,7 @@ func createTables() error {
   if err != nil {
     return err
   }
-  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS settings_history (
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS settings_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT NOT NULL,
     old_value TEXT,
@@ -138,7 +282,7 @@ func createTables() error {
   if err != nil {
     return err
   }
-  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS whitelist (
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS whitelist (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     added_by TEXT NOT NULL DEFAULT 'system',
@@ -147,7 +291,7 @@ func createTables() error {
   if err != nil {
     return err
   }
-  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS groups (
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     parent_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
@@ -158,7 +302,7 @@ func createTables() error {
   if err != nil {
     return err
   }
-  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS user_groups (
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS user_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL,
     group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -167,15 +311,15 @@ func createTables() error {
   if err != nil {
     return err
   }
-  _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_user_groups_username ON user_groups(username)`)
+  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_groups_username ON user_groups(username)`)
   if err != nil {
     return err
   }
-  _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_user_groups_group_id ON user_groups(group_id)`)
+  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_groups_group_id ON user_groups(group_id)`)
   if err != nil {
     return err
   }
-  _, err = db.Exec(`CREATE TABLE IF NOT EXISTS group_skills (
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS group_skills (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     skill_name TEXT NOT NULL,
@@ -186,10 +330,14 @@ func createTables() error {
   }
 
   // 迁移：旧数据库 groups 表没有 parent_id 列
-  db.Exec(`ALTER TABLE groups ADD COLUMN parent_id INTEGER REFERENCES groups(id) ON DELETE SET NULL`)
+  engine.Exec(`ALTER TABLE groups ADD COLUMN parent_id INTEGER REFERENCES groups(id) ON DELETE SET NULL`)
 
   return nil
 }
+
+// ============================================================
+// 用户认证管理
+// ============================================================
 
 // CreateUser 创建本地用户
 func CreateUser(username, password, role string) error {
@@ -201,10 +349,12 @@ func CreateUser(username, password, role string) error {
     return fmt.Errorf("密码哈希失败: %w", err)
   }
 
-  _, err = db.Exec(
-    "INSERT INTO local_users (username, password_hash, role) VALUES (?, ?, ?)",
-    username, string(hash), role,
-  )
+  user := &LocalUser{
+    Username:     username,
+    PasswordHash: string(hash),
+    Role:         role,
+  }
+  _, err = engine.Insert(user)
   if err != nil {
     return fmt.Errorf("创建用户失败: %w", err)
   }
@@ -216,24 +366,20 @@ func AuthenticateLocal(username, password string) (bool, string, error) {
   if err := ensureDB(); err != nil {
     return false, "", err
   }
-  var hash, role string
-  err := db.QueryRow(
-    "SELECT password_hash, role FROM local_users WHERE username = ?",
-    username,
-  ).Scan(&hash, &role)
-
-  if err == sql.ErrNoRows {
-    return false, "", nil
-  }
+  var user LocalUser
+  has, err := engine.Where("username = ?", username).Get(&user)
   if err != nil {
     return false, "", fmt.Errorf("查询用户失败: %w", err)
   }
-
-  if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
+  if !has {
     return false, "", nil
   }
 
-  return true, role, nil
+  if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+    return false, "", nil
+  }
+
+  return true, user.Role, nil
 }
 
 // UserExists 检查本地用户是否存在
@@ -241,15 +387,8 @@ func UserExists(username string) bool {
   if ensureDB() != nil {
     return false
   }
-  var count int
-  db.QueryRow("SELECT COUNT(*) FROM local_users WHERE username = ?", username).Scan(&count)
-  return count > 0
-}
-
-// LocalUser 记录本地用户基本信息
-type LocalUser struct {
-  Username string
-  Role     string
+  has, _ := engine.Where("username = ?", username).Exist(&LocalUser{})
+  return has
 }
 
 // GetAllLocalUsers 返回所有本地用户
@@ -257,20 +396,17 @@ func GetAllLocalUsers() ([]LocalUser, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
-  rows, err := db.Query("SELECT username, role FROM local_users ORDER BY username")
+  var users []LocalUser
+  err := engine.OrderBy("username").Find(&users)
   if err != nil {
     return nil, err
   }
-  defer rows.Close()
-  var list []LocalUser
-  for rows.Next() {
-    var u LocalUser
-    if err := rows.Scan(&u.Username, &u.Role); err != nil {
-      return nil, err
-    }
-    list = append(list, u)
+  // 转换为只含 Username/Role 的结构（保持原返回类型）
+  result := make([]LocalUser, 0, len(users))
+  for _, u := range users {
+    result = append(result, LocalUser{Username: u.Username, Role: u.Role})
   }
-  return list, nil
+  return result, nil
 }
 
 // GetSuperadmins 返回所有超管列表
@@ -278,18 +414,14 @@ func GetSuperadmins() ([]string, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
-  rows, err := db.Query("SELECT username FROM local_users WHERE role = 'superadmin' ORDER BY username")
+  var users []LocalUser
+  err := engine.Where("role = ?", "superadmin").OrderBy("username").Find(&users)
   if err != nil {
     return nil, err
   }
-  defer rows.Close()
-  var list []string
-  for rows.Next() {
-    var name string
-    if err := rows.Scan(&name); err != nil {
-      return nil, err
-    }
-    list = append(list, name)
+  list := make([]string, 0, len(users))
+  for _, u := range users {
+    list = append(list, u.Username)
   }
   return list, nil
 }
@@ -299,14 +431,8 @@ func HasAnySuperadmin() bool {
   if ensureDB() != nil {
     return false
   }
-  var count int
-  db.QueryRow("SELECT COUNT(*) FROM local_users WHERE role = 'superadmin'").Scan(&count)
+  count, _ := engine.Where("role = ?", "superadmin").Count(&LocalUser{})
   return count > 0
-}
-
-// DB 返回数据库连接（供其他包使用）
-func DB() *sql.DB {
-  return db
 }
 
 // IsSuperadmin 检查指定用户是否是超管
@@ -314,15 +440,12 @@ func IsSuperadmin(username string) bool {
   if ensureDB() != nil {
     return false
   }
-  var role string
-  err := db.QueryRow(
-    "SELECT role FROM local_users WHERE username = ?",
-    username,
-  ).Scan(&role)
-  if err != nil {
+  var user LocalUser
+  has, err := engine.Where("username = ?", username).Get(&user)
+  if err != nil || !has {
     return false
   }
-  return role == "superadmin"
+  return user.Role == "superadmin"
 }
 
 // GetUserRole 获取用户角色
@@ -330,15 +453,12 @@ func GetUserRole(username string) string {
   if ensureDB() != nil {
     return ""
   }
-  var role string
-  err := db.QueryRow(
-    "SELECT role FROM local_users WHERE username = ?",
-    username,
-  ).Scan(&role)
-  if err != nil {
+  var user LocalUser
+  has, err := engine.Where("username = ?", username).Get(&user)
+  if err != nil || !has {
     return ""
   }
-  return role
+  return user.Role
 }
 
 // ChangePassword 修改本地用户密码
@@ -350,15 +470,13 @@ func ChangePassword(username, newPassword string) error {
   if err != nil {
     return fmt.Errorf("密码哈希失败: %w", err)
   }
-  result, err := db.Exec(
-    "UPDATE local_users SET password_hash = ? WHERE username = ?",
-    string(hash), username,
-  )
+  affected, err := engine.Where("username = ?", username).
+    Cols("password_hash").
+    Update(&LocalUser{PasswordHash: string(hash)})
   if err != nil {
     return fmt.Errorf("更新密码失败: %w", err)
   }
-  n, _ := result.RowsAffected()
-  if n == 0 {
+  if affected == 0 {
     return fmt.Errorf("用户 %s 不存在", username)
   }
   return nil
@@ -380,12 +498,11 @@ func DeleteUser(username string) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  result, err := db.Exec("DELETE FROM local_users WHERE username = ?", username)
+  affected, err := engine.Where("username = ?", username).Delete(&LocalUser{})
   if err != nil {
     return fmt.Errorf("删除用户失败: %w", err)
   }
-  n, _ := result.RowsAffected()
-  if n == 0 {
+  if affected == 0 {
     return fmt.Errorf("用户 %s 不存在", username)
   }
   return nil
@@ -395,27 +512,13 @@ func DeleteUser(username string) error {
 // 容器记录管理
 // ============================================================
 
-// ContainerRecord 容器数据库记录
-type ContainerRecord struct {
-  ID          int64
-  Username    string
-  ContainerID string
-  Image       string
-  Status      string
-  IP          string
-  CPULimit    float64
-  MemoryLimit int64
-  MCPToken    string
-  CreatedAt   string
-  UpdatedAt   string
-}
-
 // UpsertContainer 插入或更新容器记录
 func UpsertContainer(rec *ContainerRecord) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  _, err := db.Exec(`INSERT INTO containers (username, container_id, image, status, ip, cpu_limit, memory_limit)
+  // SQLite 的 ON CONFLICT 语句需要原始 SQL
+  _, err := engine.Exec(`INSERT INTO containers (username, container_id, image, status, ip, cpu_limit, memory_limit)
     VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(username) DO UPDATE SET
       container_id = excluded.container_id,
@@ -434,24 +537,15 @@ func GetContainerByUsername(username string) (*ContainerRecord, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
-  var r ContainerRecord
-  var containerID, image, status, ip, mcpToken, createdAt, updatedAt sql.NullString
-  err := db.QueryRow(`SELECT id, username, container_id, image, status, ip, cpu_limit, memory_limit, mcp_token, created_at, updated_at
-    FROM containers WHERE username = ?`, username).Scan(&r.ID, &r.Username, &containerID, &image, &status, &ip, &r.CPULimit, &r.MemoryLimit, &mcpToken, &createdAt, &updatedAt)
-  if err == sql.ErrNoRows {
-    return nil, nil
-  }
+  var rec ContainerRecord
+  has, err := engine.Where("username = ?", username).Get(&rec)
   if err != nil {
     return nil, err
   }
-  r.ContainerID = containerID.String
-  r.Image = image.String
-  r.Status = status.String
-  r.IP = ip.String
-  r.MCPToken = mcpToken.String
-  r.CreatedAt = createdAt.String
-  r.UpdatedAt = updatedAt.String
-  return &r, nil
+  if !has {
+    return nil, nil
+  }
+  return &rec, nil
 }
 
 // GetAllContainers 返回所有容器记录
@@ -459,26 +553,10 @@ func GetAllContainers() ([]ContainerRecord, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
-  rows, err := db.Query(`SELECT id, username, container_id, image, status, ip, cpu_limit, memory_limit, mcp_token, created_at, updated_at FROM containers ORDER BY id`)
+  var list []ContainerRecord
+  err := engine.OrderBy("id").Find(&list)
   if err != nil {
     return nil, err
-  }
-  defer rows.Close()
-  var list []ContainerRecord
-  for rows.Next() {
-    var r ContainerRecord
-    var containerID, image, status, ip, mcpToken, createdAt, updatedAt sql.NullString
-    if err := rows.Scan(&r.ID, &r.Username, &containerID, &image, &status, &ip, &r.CPULimit, &r.MemoryLimit, &mcpToken, &createdAt, &updatedAt); err != nil {
-      return nil, err
-    }
-    r.ContainerID = containerID.String
-    r.Image = image.String
-    r.Status = status.String
-    r.IP = ip.String
-    r.MCPToken = mcpToken.String
-    r.CreatedAt = createdAt.String
-    r.UpdatedAt = updatedAt.String
-    list = append(list, r)
   }
   return list, nil
 }
@@ -488,7 +566,7 @@ func DeleteContainer(username string) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  _, err := db.Exec("DELETE FROM containers WHERE username = ?", username)
+  _, err := engine.Where("username = ?", username).Delete(&ContainerRecord{})
   return err
 }
 
@@ -497,7 +575,9 @@ func UpdateContainerStatus(username, status string) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  _, err := db.Exec("UPDATE containers SET status = ?, updated_at = datetime('now','localtime') WHERE username = ?", status, username)
+  _, err := engine.Where("username = ?", username).
+    Cols("status", "updated_at").
+    Update(&ContainerRecord{Status: status, UpdatedAt: time.Now().Format("2006-01-02 15:04:05")})
   return err
 }
 
@@ -506,7 +586,9 @@ func UpdateContainerID(username, containerID string) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  _, err := db.Exec("UPDATE containers SET container_id = ?, updated_at = datetime('now','localtime') WHERE username = ?", containerID, username)
+  _, err := engine.Where("username = ?", username).
+    Cols("container_id", "updated_at").
+    Update(&ContainerRecord{ContainerID: containerID, UpdatedAt: time.Now().Format("2006-01-02 15:04:05")})
   return err
 }
 
@@ -515,7 +597,9 @@ func UpdateContainerImage(username, imageRef string) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  _, err := db.Exec("UPDATE containers SET image = ?, updated_at = datetime('now','localtime') WHERE username = ?", imageRef, username)
+  _, err := engine.Where("username = ?", username).
+    Cols("image", "updated_at").
+    Update(&ContainerRecord{Image: imageRef, UpdatedAt: time.Now().Format("2006-01-02 15:04:05")})
   return err
 }
 
@@ -524,13 +608,13 @@ func AllocateNextIP() (string, error) {
   if err := ensureDB(); err != nil {
     return "", err
   }
-  var maxIP string
-  db.QueryRow("SELECT ip FROM containers WHERE ip IS NOT NULL ORDER BY id DESC LIMIT 1").Scan(&maxIP)
-  if maxIP == "" {
+  var rec ContainerRecord
+  has, _ := engine.Where("ip IS NOT NULL AND ip != ''").OrderBy("id DESC").Limit(1).Get(&rec)
+  if !has || rec.IP == "" {
     return "100.64.0.2", nil
   }
   // 解析最后一段递增
-  parts := strings.SplitN(maxIP, ".", 4)
+  parts := strings.SplitN(rec.IP, ".", 4)
   if len(parts) != 4 {
     return "100.64.0.2", nil
   }
@@ -546,23 +630,18 @@ func AllocateNextIP() (string, error) {
 // 用户组管理
 // ============================================================
 
-// GroupInfo 组信息（包含成员数和绑定技能数）
-type GroupInfo struct {
-  ID          int64  `json:"id"`
-  Name        string `json:"name"`
-  ParentID    *int64 `json:"parent_id"`
-  Source      string `json:"source"`
-  Description string `json:"description"`
-  MemberCount int    `json:"member_count"`
-  SkillCount  int    `json:"skill_count"`
-}
-
 // CreateGroup 创建组，parentID 为 nil 表示顶级组
 func CreateGroup(name, source, description string, parentID *int64) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  _, err := db.Exec("INSERT INTO groups (name, parent_id, source, description) VALUES (?, ?, ?, ?)", name, parentID, source, description)
+  group := &Group{
+    Name:        name,
+    ParentID:    parentID,
+    Source:      source,
+    Description: description,
+  }
+  _, err := engine.Insert(group)
   if err != nil {
     return fmt.Errorf("创建组失败: %w", err)
   }
@@ -574,12 +653,11 @@ func DeleteGroup(name string) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  result, err := db.Exec("DELETE FROM groups WHERE name = ?", name)
+  affected, err := engine.Where("name = ?", name).Delete(&Group{})
   if err != nil {
     return fmt.Errorf("删除组失败: %w", err)
   }
-  n, _ := result.RowsAffected()
-  if n == 0 {
+  if affected == 0 {
     return fmt.Errorf("组 %s 不存在", name)
   }
   return nil
@@ -590,21 +668,13 @@ func ListGroups() ([]GroupInfo, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
-  rows, err := db.Query(`SELECT g.id, g.name, g.parent_id, g.source, g.description,
+  var list []GroupInfo
+  err := engine.SQL(`SELECT g.id, g.name, g.parent_id, g.source, g.description,
     (SELECT COUNT(*) FROM user_groups ug WHERE ug.group_id = g.id) AS member_count,
     (SELECT COUNT(*) FROM group_skills gs WHERE gs.group_id = g.id) AS skill_count
-    FROM groups g ORDER BY g.name`)
+    FROM groups g ORDER BY g.name`).Find(&list)
   if err != nil {
     return nil, err
-  }
-  defer rows.Close()
-  var list []GroupInfo
-  for rows.Next() {
-    var g GroupInfo
-    if err := rows.Scan(&g.ID, &g.Name, &g.ParentID, &g.Source, &g.Description, &g.MemberCount, &g.SkillCount); err != nil {
-      return nil, err
-    }
-    list = append(list, g)
   }
   return list, nil
 }
@@ -614,12 +684,15 @@ func GetGroupID(name string) (int64, error) {
   if err := ensureDB(); err != nil {
     return 0, err
   }
-  var id int64
-  err := db.QueryRow("SELECT id FROM groups WHERE name = ?", name).Scan(&id)
-  if err == sql.ErrNoRows {
+  var group Group
+  has, err := engine.Where("name = ?", name).Get(&group)
+  if err != nil {
+    return 0, err
+  }
+  if !has {
     return 0, fmt.Errorf("组 %s 不存在", name)
   }
-  return id, err
+  return group.ID, nil
 }
 
 // AddUsersToGroup 批量添加用户到组
@@ -629,7 +702,8 @@ func AddUsersToGroup(groupName string, usernames []string) error {
     return err
   }
   for _, u := range usernames {
-    db.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", u, gid)
+    // INSERT OR IGNORE 避免重复插入
+    engine.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", u, gid)
   }
   return nil
 }
@@ -640,7 +714,7 @@ func RemoveUserFromGroup(groupName, username string) error {
   if err != nil {
     return err
   }
-  _, err = db.Exec("DELETE FROM user_groups WHERE group_id = ? AND username = ?", gid, username)
+  _, err = engine.Where("group_id = ? AND username = ?", gid, username).Delete(&UserGroup{})
   return err
 }
 
@@ -650,18 +724,14 @@ func GetGroupMembers(groupName string) ([]string, error) {
   if err != nil {
     return nil, err
   }
-  rows, err := db.Query("SELECT username FROM user_groups WHERE group_id = ? ORDER BY username", gid)
+  var userGroups []UserGroup
+  err = engine.Where("group_id = ?", gid).OrderBy("username").Find(&userGroups)
   if err != nil {
     return nil, err
   }
-  defer rows.Close()
-  var list []string
-  for rows.Next() {
-    var u string
-    if err := rows.Scan(&u); err != nil {
-      return nil, err
-    }
-    list = append(list, u)
+  list := make([]string, 0, len(userGroups))
+  for _, ug := range userGroups {
+    list = append(list, ug.Username)
   }
   return list, nil
 }
@@ -671,18 +741,16 @@ func GetGroupsForUser(username string) ([]string, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
-  rows, err := db.Query(`SELECT g.name FROM groups g JOIN user_groups ug ON g.id = ug.group_id WHERE ug.username = ? ORDER BY g.name`, username)
+  var results []struct {
+    Name string `xorm:"name"`
+  }
+  err := engine.SQL(`SELECT g.name FROM groups g JOIN user_groups ug ON g.id = ug.group_id WHERE ug.username = ? ORDER BY g.name`, username).Find(&results)
   if err != nil {
     return nil, err
   }
-  defer rows.Close()
-  var list []string
-  for rows.Next() {
-    var n string
-    if err := rows.Scan(&n); err != nil {
-      return nil, err
-    }
-    list = append(list, n)
+  list := make([]string, 0, len(results))
+  for _, r := range results {
+    list = append(list, r.Name)
   }
   return list, nil
 }
@@ -692,30 +760,32 @@ func SyncUserGroups(username string, groupNames []string) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  tx, err := db.Begin()
-  if err != nil {
+  session := engine.NewSession()
+  defer session.Close()
+
+  if err := session.Begin(); err != nil {
     return err
   }
-  defer tx.Rollback()
 
   // 确保所有组存在
   for _, name := range groupNames {
-    tx.Exec("INSERT OR IGNORE INTO groups (name, source) VALUES (?, 'ldap')", name)
+    session.Exec("INSERT OR IGNORE INTO groups (name, source) VALUES (?, 'ldap')", name)
   }
 
   // 删除用户当前所有组关系
-  tx.Exec("DELETE FROM user_groups WHERE username = ?", username)
+  session.Where("username = ?", username).Delete(&UserGroup{})
 
   // 添加新的组关系
   for _, name := range groupNames {
-    var gid int64
-    if err := tx.QueryRow("SELECT id FROM groups WHERE name = ?", name).Scan(&gid); err != nil {
+    var group Group
+    has, err := session.Where("name = ?", name).Get(&group)
+    if err != nil || !has {
       continue
     }
-    tx.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", username, gid)
+    session.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", username, group.ID)
   }
 
-  return tx.Commit()
+  return session.Commit()
 }
 
 // BindSkillToGroup 绑定技能到组
@@ -724,7 +794,7 @@ func BindSkillToGroup(groupName, skillName string) error {
   if err != nil {
     return err
   }
-  _, err = db.Exec("INSERT OR IGNORE INTO group_skills (group_id, skill_name) VALUES (?, ?)", gid, skillName)
+  _, err = engine.Exec("INSERT OR IGNORE INTO group_skills (group_id, skill_name) VALUES (?, ?)", gid, skillName)
   return err
 }
 
@@ -734,7 +804,7 @@ func UnbindSkillFromGroup(groupName, skillName string) error {
   if err != nil {
     return err
   }
-  _, err = db.Exec("DELETE FROM group_skills WHERE group_id = ? AND skill_name = ?", gid, skillName)
+  _, err = engine.Where("group_id = ? AND skill_name = ?", gid, skillName).Delete(&GroupSkill{})
   return err
 }
 
@@ -744,18 +814,14 @@ func GetGroupSkills(groupName string) ([]string, error) {
   if err != nil {
     return nil, err
   }
-  rows, err := db.Query("SELECT skill_name FROM group_skills WHERE group_id = ? ORDER BY skill_name", gid)
+  var skills []GroupSkill
+  err = engine.Where("group_id = ?", gid).OrderBy("skill_name").Find(&skills)
   if err != nil {
     return nil, err
   }
-  defer rows.Close()
-  var list []string
-  for rows.Next() {
-    var s string
-    if err := rows.Scan(&s); err != nil {
-      return nil, err
-    }
-    list = append(list, s)
+  list := make([]string, 0, len(skills))
+  for _, s := range skills {
+    list = append(list, s.SkillName)
   }
   return list, nil
 }
@@ -766,14 +832,15 @@ func GetGroupMembersForDeploy(groupName string) ([]string, error) {
     return nil, err
   }
 
-  var groupID int64
-  if err := db.QueryRow("SELECT id FROM groups WHERE name = ?", groupName).Scan(&groupID); err != nil {
+  var group Group
+  has, err := engine.Where("name = ?", groupName).Get(&group)
+  if err != nil || !has {
     return nil, fmt.Errorf("组 %s 不存在", groupName)
   }
 
   // 收集目标组及所有子组 ID
-  ids := []int64{groupID}
-  subIDs, err := GetSubGroupIDs(groupID)
+  ids := []int64{group.ID}
+  subIDs, err := GetSubGroupIDs(group.ID)
   if err != nil {
     return nil, err
   }
@@ -783,18 +850,17 @@ func GetGroupMembersForDeploy(groupName string) ([]string, error) {
   seen := make(map[string]bool)
   var members []string
   for _, gid := range ids {
-    rows, err := db.Query("SELECT username FROM user_groups WHERE group_id = ?", gid)
+    var userGroups []UserGroup
+    err := engine.Where("group_id = ?", gid).Find(&userGroups)
     if err != nil {
       continue
     }
-    for rows.Next() {
-      var u string
-      if rows.Scan(&u) == nil && !seen[u] {
-        seen[u] = true
-        members = append(members, u)
+    for _, ug := range userGroups {
+      if !seen[ug.Username] {
+        seen[ug.Username] = true
+        members = append(members, ug.Username)
       }
     }
-    rows.Close()
   }
   return members, nil
 }
@@ -807,18 +873,14 @@ func GetSubGroupIDs(groupID int64) ([]int64, error) {
   var result []int64
   var walk func(pid int64) error
   walk = func(pid int64) error {
-    rows, err := db.Query("SELECT id FROM groups WHERE parent_id = ?", pid)
+    var children []Group
+    err := engine.Where("parent_id = ?", pid).Find(&children)
     if err != nil {
       return err
     }
-    defer rows.Close()
-    for rows.Next() {
-      var id int64
-      if err := rows.Scan(&id); err != nil {
-        continue
-      }
-      result = append(result, id)
-      walk(id)
+    for _, child := range children {
+      result = append(result, child.ID)
+      walk(child.ID)
     }
     return nil
   }
@@ -833,7 +895,9 @@ func SetGroupParent(groupName string, parentID *int64) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  _, err := db.Exec("UPDATE groups SET parent_id = ? WHERE name = ?", parentID, groupName)
+  _, err := engine.Where("name = ?", groupName).
+    Cols("parent_id").
+    Update(&Group{ParentID: parentID})
   return err
 }
 
@@ -842,10 +906,20 @@ func GetGroupIDByName(name string) (int64, error) {
   if err := ensureDB(); err != nil {
     return 0, err
   }
-  var id int64
-  err := db.QueryRow("SELECT id FROM groups WHERE name = ?", name).Scan(&id)
-  return id, err
+  var group Group
+  has, err := engine.Where("name = ?", name).Get(&group)
+  if err != nil {
+    return 0, err
+  }
+  if !has {
+    return 0, fmt.Errorf("组 %s 不存在", name)
+  }
+  return group.ID, nil
 }
+
+// ============================================================
+// MCP Token 管理
+// ============================================================
 
 // GenerateMCPToken 为用户生成 MCP token（用户名:随机hex）并存入 DB
 func GenerateMCPToken(username string) (string, error) {
@@ -859,13 +933,20 @@ func GenerateMCPToken(username string) (string, error) {
   token := username + ":" + hex.EncodeToString(b)
 
   // 先尝试 UPDATE，如果无匹配行则 INSERT
-  result, err := db.Exec(`UPDATE containers SET mcp_token = ? WHERE username = ?`, token, username)
+  affected, err := engine.Where("username = ?", username).
+    Cols("mcp_token").
+    Update(&ContainerRecord{MCPToken: token})
   if err != nil {
     return "", fmt.Errorf("保存 MCP token 失败: %w", err)
   }
-  affected, _ := result.RowsAffected()
   if affected == 0 {
-    _, err = db.Exec(`INSERT INTO containers (username, image, status, mcp_token) VALUES (?, '', 'stopped', ?)`, username, token)
+    // 无匹配行，执行 INSERT
+    _, err = engine.Insert(&ContainerRecord{
+      Username: username,
+      Image:    "",
+      Status:   "stopped",
+      MCPToken: token,
+    })
     if err != nil {
       return "", fmt.Errorf("创建容器记录失败: %w", err)
     }
@@ -878,12 +959,15 @@ func GetMCPToken(username string) (string, error) {
   if err := ensureDB(); err != nil {
     return "", err
   }
-  var token string
-  err := db.QueryRow(`SELECT mcp_token FROM containers WHERE username = ?`, username).Scan(&token)
-  if err == sql.ErrNoRows {
+  var rec ContainerRecord
+  has, err := engine.Where("username = ?", username).Get(&rec)
+  if err != nil {
+    return "", err
+  }
+  if !has {
     return "", nil
   }
-  return token, err
+  return rec.MCPToken, nil
 }
 
 // ValidateMCPToken 验证 MCP token，返回用户名
@@ -901,4 +985,13 @@ func ValidateMCPToken(token string) (string, bool) {
     return "", false
   }
   return username, true
+}
+
+// ensure interface compatibility: core.DB embeds *sql.DB
+var _ = func() *sql.DB {
+  var e *xorm.Engine
+  if e != nil {
+    return e.DB().DB
+  }
+  return nil
 }

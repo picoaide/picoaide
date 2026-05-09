@@ -17,6 +17,7 @@ import (
   "sync"
   "time"
 
+  "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
   dockerpkg "github.com/picoaide/picoaide/internal/docker"
@@ -28,13 +29,13 @@ import (
 
 var gitMutex sync.Mutex
 
-func (s *Server) requireSuperadmin(w http.ResponseWriter, r *http.Request) string {
-  username := s.requireAuth(w, r)
+func (s *Server) requireSuperadmin(c *gin.Context) string {
+  username := s.requireAuth(c)
   if username == "" {
     return ""
   }
   if !auth.IsSuperadmin(username) {
-    writeError(w, http.StatusForbidden, "仅超级管理员可访问")
+    writeError(c, http.StatusForbidden, "仅超级管理员可访问")
     return ""
   }
   return username
@@ -44,18 +45,18 @@ func (s *Server) requireSuperadmin(w http.ResponseWriter, r *http.Request) strin
 // 用户管理
 // ============================================================
 
-func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminUsers(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+  if c.Request.Method != "GET" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
 
   containers, err := auth.GetAllContainers()
   if err != nil {
-    writeError(w, http.StatusInternalServerError, err.Error())
+    writeError(c, http.StatusInternalServerError, err.Error())
     return
   }
 
@@ -128,7 +129,7 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
     list = []UserInfo{}
   }
 
-  writeJSON(w, http.StatusOK, struct {
+  writeJSON(c, http.StatusOK, struct {
     Success     bool       `json:"success"`
     Users       []UserInfo `json:"users"`
     AuthMode    string     `json:"auth_mode"`
@@ -140,41 +141,41 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 // 用户创建与删除（仅本地模式）
 // ============================================================
 
-func (s *Server) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminUserCreate(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
   if s.cfg.UnifiedAuthEnabled() {
-    writeError(w, http.StatusForbidden, "统一认证模式下不允许手动创建用户")
+    writeError(c, http.StatusForbidden, "统一认证模式下不允许手动创建用户")
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  username := r.FormValue("username")
+  username := c.PostForm("username")
   if err := user.ValidateUsername(username); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
   if auth.UserExists(username) {
-    writeError(w, http.StatusBadRequest, "用户 "+username+" 已存在")
+    writeError(c, http.StatusBadRequest, "用户 "+username+" 已存在")
     return
   }
 
   password := auth.GenerateRandomPassword(12)
   if err := auth.CreateUser(username, password, "user"); err != nil {
-    writeError(w, http.StatusInternalServerError, "创建用户失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "创建用户失败: "+err.Error())
     return
   }
 
   // 获取镜像标签参数，未指定时自动使用本地最新标签
-  imageTag := r.FormValue("image_tag")
+  imageTag := c.PostForm("image_tag")
   if imageTag == "" && s.dockerAvailable {
     ctx := contextWithTimeout(10)
     localTags, err := dockerpkg.ListLocalTags(ctx, s.cfg.Image.Name)
@@ -184,7 +185,7 @@ func (s *Server) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
   }
   if imageTag == "" {
     auth.DeleteUser(username)
-    writeError(w, http.StatusBadRequest, "未指定镜像标签且本地无可用镜像，请先拉取镜像")
+    writeError(c, http.StatusBadRequest, "未指定镜像标签且本地无可用镜像，请先拉取镜像")
     return
   }
 
@@ -192,7 +193,7 @@ func (s *Server) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
   if err := user.InitUser(s.cfg, username, imageTag); err != nil {
     // 回滚：删除已创建的用户记录
     auth.DeleteUser(username)
-    writeError(w, http.StatusInternalServerError, "初始化用户目录失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "初始化用户目录失败: "+err.Error())
     return
   }
 
@@ -201,8 +202,8 @@ func (s *Server) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
     go s.autoStartUserContainer(username)
   }
 
-  logger.Audit("user.create", "username", username, "operator", s.getSessionUser(r))
-  writeJSON(w, http.StatusOK, struct {
+  logger.Audit("user.create", "username", username, "operator", s.getSessionUser(c))
+  writeJSON(c, http.StatusOK, struct {
     Success  bool   `json:"success"`
     Message  string `json:"message"`
     Username string `json:"username"`
@@ -210,30 +211,30 @@ func (s *Server) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
   }{true, "用户创建成功，容器启动中", username, password})
 }
 
-func (s *Server) handleAdminUserDelete(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminUserDelete(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
   if s.cfg.UnifiedAuthEnabled() {
-    writeError(w, http.StatusForbidden, "统一认证模式下不允许删除用户")
+    writeError(c, http.StatusForbidden, "统一认证模式下不允许删除用户")
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  username := r.FormValue("username")
+  username := c.PostForm("username")
   if username == "" {
-    writeError(w, http.StatusBadRequest, "用户名不能为空")
+    writeError(c, http.StatusBadRequest, "用户名不能为空")
     return
   }
   if err := user.ValidateUsername(username); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
 
@@ -247,64 +248,64 @@ func (s *Server) handleAdminUserDelete(w http.ResponseWriter, r *http.Request) {
 
   // 归档用户目录
   if err := user.ArchiveUser(s.cfg, username); err != nil {
-    writeError(w, http.StatusInternalServerError, "归档用户目录失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "归档用户目录失败: "+err.Error())
     return
   }
 
   // 删除本地用户记录
   if err := auth.DeleteUser(username); err != nil {
-    writeError(w, http.StatusInternalServerError, err.Error())
+    writeError(c, http.StatusInternalServerError, err.Error())
     return
   }
 
-  logger.Audit("user.delete", "username", username, "operator", s.getSessionUser(r))
-  writeSuccess(w, "用户 "+username+" 已删除并归档")
+  logger.Audit("user.delete", "username", username, "operator", s.getSessionUser(c))
+  writeSuccess(c, "用户 "+username+" 已删除并归档")
 }
 
 // ============================================================
 // 容器操作
 // ============================================================
 
-func (s *Server) handleAdminContainerStart(w http.ResponseWriter, r *http.Request) {
-  s.handleContainerAction(w, r, "start")
+func (s *Server) handleAdminContainerStart(c *gin.Context) {
+  s.handleContainerAction(c, "start")
 }
-func (s *Server) handleAdminContainerStop(w http.ResponseWriter, r *http.Request) {
-  s.handleContainerAction(w, r, "stop")
+func (s *Server) handleAdminContainerStop(c *gin.Context) {
+  s.handleContainerAction(c, "stop")
 }
-func (s *Server) handleAdminContainerRestart(w http.ResponseWriter, r *http.Request) {
-  s.handleContainerAction(w, r, "restart")
+func (s *Server) handleAdminContainerRestart(c *gin.Context) {
+  s.handleContainerAction(c, "restart")
 }
 
-func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, action string) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleContainerAction(c *gin.Context, action string) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
   if !s.dockerAvailable {
-    writeError(w, http.StatusServiceUnavailable, "Docker 服务不可用，请联系管理员")
+    writeError(c, http.StatusServiceUnavailable, "Docker 服务不可用，请联系管理员")
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  username := r.FormValue("username")
+  username := c.PostForm("username")
   if username == "" {
-    writeError(w, http.StatusBadRequest, "用户名不能为空")
+    writeError(c, http.StatusBadRequest, "用户名不能为空")
     return
   }
   if err := user.ValidateUsername(username); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
 
   rec, err := auth.GetContainerByUsername(username)
   if err != nil || rec == nil {
-    writeError(w, http.StatusBadRequest, "用户 "+username+" 未初始化")
+    writeError(c, http.StatusBadRequest, "用户 "+username+" 未初始化")
     return
   }
 
@@ -313,7 +314,7 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
   // 启动/重启前检查镜像是否存在
   if action == "start" || action == "restart" {
     if rec.Image == "" || !dockerpkg.ImageExists(ctx, rec.Image) {
-      writeError(w, http.StatusBadRequest, "容器镜像 "+rec.Image+" 不存在，请先拉取镜像")
+      writeError(c, http.StatusBadRequest, "容器镜像 "+rec.Image+" 不存在，请先拉取镜像")
       return
     }
   }
@@ -325,29 +326,29 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
       ud := user.UserDir(s.cfg, username)
       cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
       if createErr != nil {
-        writeError(w, http.StatusInternalServerError, "创建容器失败: "+createErr.Error())
+        writeError(c, http.StatusInternalServerError, "创建容器失败: "+createErr.Error())
         return
       }
       auth.UpdateContainerID(username, cid)
       rec.ContainerID = cid
     }
+    picoclawDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw")
+    configPath := filepath.Join(picoclawDir, "config.json")
+    shouldApplyAfterStart := false
+    if _, err := os.Stat(configPath); err == nil {
+      if err := s.applyConfigForImage(username, rec.Image); err != nil {
+        writeError(c, http.StatusInternalServerError, "下发配置失败: "+err.Error())
+        return
+      }
+    } else {
+      shouldApplyAfterStart = true
+    }
     if err := dockerpkg.Start(ctx, rec.ContainerID); err != nil {
-      writeError(w, http.StatusInternalServerError, err.Error())
+      writeError(c, http.StatusInternalServerError, err.Error())
       return
     }
     auth.UpdateContainerStatus(username, "running")
-
-    // 配置下发：确保 config.json 包含全局配置和 MCP 注入
-    picoclawDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw")
-    configPath := filepath.Join(picoclawDir, "config.json")
-    if _, err := os.Stat(configPath); err == nil {
-      if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
-        slog.Error("下发配置失败", "username", username, "error", err)
-      }
-      if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
-        slog.Error("下发安全配置失败", "username", username, "error", err)
-      }
-    } else {
+    if shouldApplyAfterStart {
       go s.applyConfigAsync(username, picoclawDir, rec.ContainerID)
     }
 
@@ -370,34 +371,34 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request, a
     ud := user.UserDir(s.cfg, username)
     cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
     if createErr != nil {
-      writeError(w, http.StatusInternalServerError, "创建容器失败: "+createErr.Error())
+      writeError(c, http.StatusInternalServerError, "创建容器失败: "+createErr.Error())
       return
     }
     auth.UpdateContainerID(username, cid)
+    picoclawDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw")
+    configPath := filepath.Join(picoclawDir, "config.json")
+    shouldApplyAfterStart := false
+    if _, err := os.Stat(configPath); err == nil {
+      if err := s.applyConfigForImage(username, rec.Image); err != nil {
+        writeError(c, http.StatusInternalServerError, "下发配置失败: "+err.Error())
+        return
+      }
+    } else {
+      shouldApplyAfterStart = true
+    }
     if err := dockerpkg.Start(ctx, cid); err != nil {
-      writeError(w, http.StatusInternalServerError, err.Error())
+      writeError(c, http.StatusInternalServerError, err.Error())
       return
     }
     auth.UpdateContainerStatus(username, "running")
-
-    // 配置下发
-    picoclawDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw")
-    configPath := filepath.Join(picoclawDir, "config.json")
-    if _, err := os.Stat(configPath); err == nil {
-      if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
-        slog.Error("下发配置失败", "username", username, "error", err)
-      }
-      if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
-        slog.Error("下发安全配置失败", "username", username, "error", err)
-      }
-    } else {
+    if shouldApplyAfterStart {
       go s.applyConfigAsync(username, picoclawDir, cid)
     }
   }
 
-  logger.Audit("container."+action, "username", username, "operator", s.getSessionUser(r))
+  logger.Audit("container."+action, "username", username, "operator", s.getSessionUser(c))
   labels := map[string]string{"start": "启动", "stop": "停止", "restart": "重启"}
-  writeSuccess(w, fmt.Sprintf("容器已%s", labels[action]))
+  writeSuccess(c, fmt.Sprintf("容器已%s", labels[action]))
 }
 
 // autoStartUserContainer 为新创建的用户自动启动容器并下发配置
@@ -451,7 +452,12 @@ func (s *Server) applyConfigAsync(username, picoclawDir, containerID string) {
   }
 
   // 下发配置
-  if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
+  rec, _ := auth.GetContainerByUsername(username)
+  targetTag := ""
+  if rec != nil {
+    targetTag = imageTagFromRef(rec.Image)
+  }
+  if err := user.ApplyConfigToJSONForTag(s.cfg, picoclawDir, username, targetTag); err != nil {
     slog.Error("下发配置失败", "username", username, "error", err)
     return
   }
@@ -469,6 +475,34 @@ func (s *Server) applyConfigAsync(username, picoclawDir, containerID string) {
   slog.Info("容器已重启，配置生效", "username", username)
 }
 
+func (s *Server) applyConfigForImage(username string, imageRef string) error {
+  picoclawDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw")
+  if err := os.MkdirAll(picoclawDir, 0755); err != nil {
+    return fmt.Errorf("创建配置目录失败: %w", err)
+  }
+  if err := user.ApplyConfigToJSONForTag(s.cfg, picoclawDir, username, imageTagFromRef(imageRef)); err != nil {
+    return fmt.Errorf("下发配置失败: %w", err)
+  }
+  if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
+    slog.Error("下发安全配置失败", "username", username, "error", err)
+  }
+  return nil
+}
+
+func (s *Server) applyConfigForUpgrade(username string, fromTag string, targetTag string) error {
+  picoclawDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw")
+  if err := os.MkdirAll(picoclawDir, 0755); err != nil {
+    return fmt.Errorf("创建配置目录失败: %w", err)
+  }
+  if err := user.ApplyConfigToJSONWithMigration(s.cfg, picoclawDir, username, fromTag, targetTag); err != nil {
+    return fmt.Errorf("下发配置失败: %w", err)
+  }
+  if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
+    slog.Error("下发安全配置失败", "username", username, "error", err)
+  }
+  return nil
+}
+
 // applyConfigToUser 向单个用户下发配置并重启容器
 func (s *Server) applyConfigToUser(username string) error {
   picoclawDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw")
@@ -479,7 +513,12 @@ func (s *Server) applyConfigToUser(username string) error {
     return fmt.Errorf("config.json 不存在")
   }
 
-  if err := user.ApplyConfigToJSON(s.cfg, picoclawDir, username); err != nil {
+  rec, err := auth.GetContainerByUsername(username)
+  targetTag := ""
+  if rec != nil {
+    targetTag = imageTagFromRef(rec.Image)
+  }
+  if err := user.ApplyConfigToJSONForTag(s.cfg, picoclawDir, username, targetTag); err != nil {
     return fmt.Errorf("下发配置失败: %w", err)
   }
   if err := user.ApplySecurityToYAML(s.cfg, picoclawDir); err != nil {
@@ -487,7 +526,6 @@ func (s *Server) applyConfigToUser(username string) error {
   }
 
   // 重启容器使配置生效
-  rec, err := auth.GetContainerByUsername(username)
   if err != nil || rec == nil || rec.ContainerID == "" {
     return fmt.Errorf("容器记录不存在")
   }
@@ -502,21 +540,21 @@ func (s *Server) applyConfigToUser(username string) error {
 }
 
 // handleAdminConfigApply 下发配置到指定用户/组/全部用户并重启容器
-func (s *Server) handleAdminConfigApply(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminConfigApply(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  username := r.FormValue("username")
-  group := r.FormValue("group")
+  username := c.PostForm("username")
+  group := c.PostForm("group")
 
   var targets []string
   var err error
@@ -524,25 +562,25 @@ func (s *Server) handleAdminConfigApply(w http.ResponseWriter, r *http.Request) 
   switch {
   case username != "":
     if err := user.ValidateUsername(username); err != nil {
-      writeError(w, http.StatusBadRequest, err.Error())
+      writeError(c, http.StatusBadRequest, err.Error())
       return
     }
     targets = []string{username}
   case group != "":
     targets, err = auth.GetGroupMembersForDeploy(group)
     if err != nil {
-      writeError(w, http.StatusBadRequest, "获取组成员失败: "+err.Error())
+      writeError(c, http.StatusBadRequest, "获取组成员失败: "+err.Error())
       return
     }
     if len(targets) == 0 {
-      writeError(w, http.StatusBadRequest, "组 "+group+" 没有成员")
+      writeError(c, http.StatusBadRequest, "组 "+group+" 没有成员")
       return
     }
   default:
     // 不指定用户和组时，下发到所有用户
     targets, err = user.GetUserList(s.cfg)
     if err != nil {
-      writeError(w, http.StatusInternalServerError, "获取用户列表失败: "+err.Error())
+      writeError(c, http.StatusInternalServerError, "获取用户列表失败: "+err.Error())
       return
     }
   }
@@ -550,9 +588,9 @@ func (s *Server) handleAdminConfigApply(w http.ResponseWriter, r *http.Request) 
   // 单个用户直接同步执行
   if len(targets) == 1 {
     if err := s.applyConfigToUser(targets[0]); err != nil {
-      writeError(w, http.StatusInternalServerError, err.Error())
+      writeError(c, http.StatusInternalServerError, err.Error())
     } else {
-      writeSuccess(w, "配置已下发并重启")
+      writeSuccess(c, "配置已下发并重启")
     }
     return
   }
@@ -563,75 +601,94 @@ func (s *Server) handleAdminConfigApply(w http.ResponseWriter, r *http.Request) 
   }
   taskID, err := enqueueTask("config-apply", targets, applyFn)
   if err != nil {
-    writeError(w, http.StatusConflict, err.Error())
+    writeError(c, http.StatusConflict, err.Error())
     return
   }
-  writeJSON(w, http.StatusOK, map[string]interface{}{
+  writeJSON(c, http.StatusOK, map[string]interface{}{
     "success": true,
     "message": fmt.Sprintf("已提交配置下发任务，共 %d 个用户", len(targets)),
     "task_id": taskID,
   })
 }
 
-// handleAdminTaskStatus 返回当前任务队列状态
-func (s *Server) handleAdminTaskStatus(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminMigrationRulesRefresh(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
+    return
+  }
+  if err := user.RefreshPicoClawMigrationRules(config.RuleCacheDir()); err != nil {
+    writeError(c, http.StatusBadGateway, "更新迁移规则失败: "+err.Error())
+    return
+  }
+  writeSuccess(c, "迁移规则已更新")
+}
+
+// handleAdminTaskStatus 返回当前任务队列状态
+func (s *Server) handleAdminTaskStatus(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
+    return
+  }
+  if c.Request.Method != "GET" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
   status := getTaskStatus()
-  writeJSON(w, http.StatusOK, status)
+  writeJSON(c, http.StatusOK, status)
 }
 
 // handleAdminContainerLogs 返回容器日志
-func (s *Server) handleAdminContainerLogs(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminContainerLogs(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+  if c.Request.Method != "GET" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
   if !s.dockerAvailable {
-    writeError(w, http.StatusServiceUnavailable, "Docker 服务不可用")
+    writeError(c, http.StatusServiceUnavailable, "Docker 服务不可用")
     return
   }
 
-  username := r.URL.Query().Get("username")
+  username := c.Query("username")
   if username == "" {
-    writeError(w, http.StatusBadRequest, "用户名不能为空")
+    writeError(c, http.StatusBadRequest, "用户名不能为空")
     return
   }
   if err := user.ValidateUsername(username); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
 
   rec, err := auth.GetContainerByUsername(username)
   if err != nil || rec == nil {
-    writeError(w, http.StatusBadRequest, "用户 "+username+" 未初始化")
+    writeError(c, http.StatusBadRequest, "用户 "+username+" 未初始化")
     return
   }
   if rec.ContainerID == "" {
-    writeError(w, http.StatusBadRequest, "容器未创建")
+    writeError(c, http.StatusBadRequest, "容器未创建")
     return
   }
 
-  tail := r.URL.Query().Get("tail")
+  tail := c.Query("tail")
 
   ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
   defer cancel()
 
   logs, err := dockerpkg.ContainerLogs(ctx, rec.ContainerID, tail)
   if err != nil {
-    writeError(w, http.StatusInternalServerError, err.Error())
+    writeError(c, http.StatusInternalServerError, err.Error())
     return
   }
 
-  writeJSON(w, http.StatusOK, struct {
+  writeJSON(c, http.StatusOK, struct {
     Success  bool   `json:"success"`
     Username string `json:"username"`
     Logs     string `json:"logs"`
@@ -646,38 +703,38 @@ func (s *Server) handleAdminContainerLogs(w http.ResponseWriter, r *http.Request
 // 认证配置 — LDAP 测试 & 用户搜索
 // ============================================================
 
-func (s *Server) handleAdminAuthTestLDAP(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminAuthTestLDAP(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  host := r.FormValue("host")
-  bindDN := r.FormValue("bind_dn")
-  bindPassword := r.FormValue("bind_password")
-  baseDN := r.FormValue("base_dn")
-  filter := r.FormValue("filter")
-  usernameAttr := r.FormValue("username_attribute")
-  groupSearchMode := r.FormValue("group_search_mode")
-  groupBaseDN := r.FormValue("group_base_dn")
-  groupFilter := r.FormValue("group_filter")
-  groupMemberAttr := r.FormValue("group_member_attribute")
+  host := c.PostForm("host")
+  bindDN := c.PostForm("bind_dn")
+  bindPassword := c.PostForm("bind_password")
+  baseDN := c.PostForm("base_dn")
+  filter := c.PostForm("filter")
+  usernameAttr := c.PostForm("username_attribute")
+  groupSearchMode := c.PostForm("group_search_mode")
+  groupBaseDN := c.PostForm("group_base_dn")
+  groupFilter := c.PostForm("group_filter")
+  groupMemberAttr := c.PostForm("group_member_attribute")
 
   if host == "" || bindDN == "" || baseDN == "" {
-    writeError(w, http.StatusBadRequest, "LDAP 地址、Bind DN 和 Base DN 不能为空")
+    writeError(c, http.StatusBadRequest, "LDAP 地址、Bind DN 和 Base DN 不能为空")
     return
   }
 
   users, err := ldap.TestConnection(host, bindDN, bindPassword, baseDN, filter, usernameAttr)
   if err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
 
@@ -691,7 +748,7 @@ func (s *Server) handleAdminAuthTestLDAP(w http.ResponseWriter, r *http.Request)
     groups = []ldap.GroupPreview{}
   }
 
-  writeJSON(w, http.StatusOK, struct {
+  writeJSON(c, http.StatusOK, struct {
     Success    bool                `json:"success"`
     Message    string              `json:"message"`
     UserCount  int                 `json:"user_count"`
@@ -701,25 +758,25 @@ func (s *Server) handleAdminAuthTestLDAP(w http.ResponseWriter, r *http.Request)
   }{true, fmt.Sprintf("连接成功，找到 %d 个用户", len(users)), len(users), users, groups, groupError})
 }
 
-func (s *Server) handleAdminAuthLDAPUsers(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminAuthLDAPUsers(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+  if c.Request.Method != "GET" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
 
   users, err := ldap.FetchUsers(s.cfg)
   if err != nil {
-    writeError(w, http.StatusInternalServerError, err.Error())
+    writeError(c, http.StatusInternalServerError, err.Error())
     return
   }
 
   if users == nil {
     users = []string{}
   }
-  writeJSON(w, http.StatusOK, struct {
+  writeJSON(c, http.StatusOK, struct {
     Success bool     `json:"success"`
     Users   []string `json:"users"`
   }{true, users})
@@ -729,77 +786,75 @@ func (s *Server) handleAdminAuthLDAPUsers(w http.ResponseWriter, r *http.Request
 // 白名单管理
 // ============================================================
 
-func (s *Server) handleAdminWhitelist(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+// handleAdminWhitelistGet 返回白名单列表
+func (s *Server) handleAdminWhitelistGet(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-
-  if r.Method == "GET" {
-    whitelist, err := user.LoadWhitelist()
-    if err != nil {
-      writeError(w, http.StatusInternalServerError, err.Error())
-      return
-    }
-    var users []string
-    if whitelist != nil {
-      for u := range whitelist {
-        users = append(users, u)
-      }
-      sort.Strings(users)
-    }
-    if users == nil {
-      users = []string{}
-    }
-    writeJSON(w, http.StatusOK, struct {
-      Success bool     `json:"success"`
-      Users   []string `json:"users"`
-    }{true, users})
+  whitelist, err := user.LoadWhitelist()
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, err.Error())
     return
   }
-
-  if r.Method == "POST" {
-    if !s.checkCSRF(r) {
-      writeError(w, http.StatusForbidden, "无效请求")
-      return
-    }
-    usersStr := r.FormValue("users")
-    var users []string
-    if usersStr != "" {
-      for _, u := range strings.Split(usersStr, ",") {
-        u = strings.TrimSpace(u)
-        if u != "" {
-          users = append(users, u)
-        }
-      }
+  var users []string
+  if whitelist != nil {
+    for u := range whitelist {
+      users = append(users, u)
     }
     sort.Strings(users)
+  }
+  if users == nil {
+    users = []string{}
+  }
+  writeJSON(c, http.StatusOK, struct {
+    Success bool     `json:"success"`
+    Users   []string `json:"users"`
+  }{true, users})
+}
 
-    // 写入数据库
-    d, err := auth.GetDB()
-    if err != nil {
-      writeError(w, http.StatusInternalServerError, "数据库连接失败")
-      return
-    }
-    tx, err := d.Begin()
-    if err != nil {
-      writeError(w, http.StatusInternalServerError, err.Error())
-      return
-    }
-    defer tx.Rollback()
-    tx.Exec("DELETE FROM whitelist")
-    for _, u := range users {
-      tx.Exec("INSERT OR IGNORE INTO whitelist (username, added_by) VALUES (?, ?)", u, s.getSessionUser(r))
-    }
-    if err := tx.Commit(); err != nil {
-      writeError(w, http.StatusInternalServerError, err.Error())
-      return
-    }
-    writeSuccess(w, "白名单已更新")
-    logger.Audit("whitelist.update", "count", len(users), "operator", s.getSessionUser(r))
+// handleAdminWhitelistPost 更新白名单
+func (s *Server) handleAdminWhitelistPost(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
+    return
+  }
+  usersStr := c.PostForm("users")
+  var users []string
+  if usersStr != "" {
+    for _, u := range strings.Split(usersStr, ",") {
+      u = strings.TrimSpace(u)
+      if u != "" {
+        users = append(users, u)
+      }
+    }
+  }
+  sort.Strings(users)
 
-  writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 和 POST 方法")
+  // 写入数据库（使用 xorm）
+  engine, err := auth.GetEngine()
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "数据库连接失败")
+    return
+  }
+  session := engine.NewSession()
+  defer session.Close()
+  if err := session.Begin(); err != nil {
+    writeError(c, http.StatusInternalServerError, err.Error())
+    return
+  }
+  session.Exec("DELETE FROM whitelist")
+  for _, u := range users {
+    session.Exec("INSERT OR IGNORE INTO whitelist (username, added_by) VALUES (?, ?)", u, s.getSessionUser(c))
+  }
+  if err := session.Commit(); err != nil {
+    writeError(c, http.StatusInternalServerError, err.Error())
+    return
+  }
+  writeSuccess(c, "白名单已更新")
+  logger.Audit("whitelist.update", "count", len(users), "operator", s.getSessionUser(c))
 }
 
 // ============================================================
@@ -812,12 +867,12 @@ func skillReposDir() string {
   return filepath.Join(wd, "skill-repos")
 }
 
-func (s *Server) handleAdminSkills(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSkills(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+  if c.Request.Method != "GET" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
 
@@ -869,39 +924,39 @@ func (s *Server) handleAdminSkills(w http.ResponseWriter, r *http.Request) {
     skills = []SkillInfo{}
   }
 
-  writeJSON(w, http.StatusOK, struct {
-    Success bool        `json:"success"`
-    Skills  []SkillInfo `json:"skills"`
+  writeJSON(c, http.StatusOK, struct {
+    Success bool               `json:"success"`
+    Skills  []SkillInfo        `json:"skills"`
     Repos   []config.SkillRepo `json:"repos"`
   }{true, skills, s.cfg.Skills.Repos})
 }
 
-func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  skillName := strings.TrimSpace(r.FormValue("skill_name"))
-  targetUser := strings.TrimSpace(r.FormValue("username"))
-  targetGroup := strings.TrimSpace(r.FormValue("group_name"))
+  skillName := strings.TrimSpace(c.PostForm("skill_name"))
+  targetUser := strings.TrimSpace(c.PostForm("username"))
+  targetGroup := strings.TrimSpace(c.PostForm("group_name"))
 
   if skillName != "" {
     if err := util.SafePathSegment(skillName); err != nil {
-      writeError(w, http.StatusBadRequest, "技能名称不合法: "+err.Error())
+      writeError(c, http.StatusBadRequest, "技能名称不合法: "+err.Error())
       return
     }
   }
   if targetUser != "" {
     if err := user.ValidateUsername(targetUser); err != nil {
-      writeError(w, http.StatusBadRequest, err.Error())
+      writeError(c, http.StatusBadRequest, err.Error())
       return
     }
   }
@@ -909,7 +964,7 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
   skillDir := config.SkillsDirPath()
   entries, err := os.ReadDir(skillDir)
   if err != nil {
-    writeError(w, http.StatusInternalServerError, "读取技能目录失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "读取技能目录失败: "+err.Error())
     return
   }
 
@@ -923,7 +978,7 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
     }
   }
   if len(deploySkills) == 0 {
-    writeError(w, http.StatusBadRequest, "没有找到可部署的技能")
+    writeError(c, http.StatusBadRequest, "没有找到可部署的技能")
     return
   }
 
@@ -942,10 +997,10 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
   if targetUser != "" {
     // 单个用户直接执行
     if err := deployFn(targetUser); err != nil {
-      writeError(w, http.StatusInternalServerError, err.Error())
+      writeError(c, http.StatusInternalServerError, err.Error())
       return
     }
-    writeJSON(w, http.StatusOK, map[string]interface{}{
+    writeJSON(c, http.StatusOK, map[string]interface{}{
       "success":     true,
       "message":     fmt.Sprintf("已将 %d 个技能部署到 %s", len(deploySkills), targetUser),
       "skill_count": len(deploySkills),
@@ -959,23 +1014,23 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
   if targetGroup != "" {
     targets, err = auth.GetGroupMembersForDeploy(targetGroup)
     if err != nil {
-      writeError(w, http.StatusBadRequest, "获取组成员失败: "+err.Error())
+      writeError(c, http.StatusBadRequest, "获取组成员失败: "+err.Error())
       return
     }
   } else {
     targets, err = user.GetUserList(s.cfg)
     if err != nil {
-      writeError(w, http.StatusInternalServerError, "获取用户列表失败: "+err.Error())
+      writeError(c, http.StatusInternalServerError, "获取用户列表失败: "+err.Error())
       return
     }
   }
 
   taskID, err := enqueueTask("skills-deploy", targets, deployFn)
   if err != nil {
-    writeError(w, http.StatusConflict, err.Error())
+    writeError(c, http.StatusConflict, err.Error())
     return
   }
-  writeJSON(w, http.StatusOK, map[string]interface{}{
+  writeJSON(c, http.StatusOK, map[string]interface{}{
     "success":     true,
     "message":     fmt.Sprintf("已提交技能部署任务，共 %d 个用户", len(targets)),
     "task_id":     taskID,
@@ -983,28 +1038,29 @@ func (s *Server) handleAdminSkillsDeploy(w http.ResponseWriter, r *http.Request)
   })
 }
 
-func (s *Server) handleAdminSkillsDownload(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSkillsDownload(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+  if c.Request.Method != "GET" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
-  name := r.URL.Query().Get("name")
+  name := c.Query("name")
   if name == "" {
-    writeError(w, http.StatusBadRequest, "技能名称不能为空")
+    writeError(c, http.StatusBadRequest, "技能名称不能为空")
     return
   }
   if err := util.SafePathSegment(name); err != nil {
-    writeError(w, http.StatusBadRequest, "技能名称不合法")
+    writeError(c, http.StatusBadRequest, "技能名称不合法")
     return
   }
   skillPath := filepath.Join(config.SkillsDirPath(), name)
   if _, err := os.Stat(skillPath); err != nil {
-    writeError(w, http.StatusNotFound, "技能不存在")
+    writeError(c, http.StatusNotFound, "技能不存在")
     return
   }
+  w := c.Writer
   w.Header().Set("Content-Type", "application/zip")
   w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, name))
   zw := zip.NewWriter(w)
@@ -1038,33 +1094,33 @@ func (s *Server) handleAdminSkillsDownload(w http.ResponseWriter, r *http.Reques
 }
 
 // handleAdminSkillsRemove 从 skill/ 删除技能
-func (s *Server) handleAdminSkillsRemove(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSkillsRemove(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  name := strings.TrimSpace(r.FormValue("name"))
+  name := strings.TrimSpace(c.PostForm("name"))
   if name == "" {
-    writeError(w, http.StatusBadRequest, "技能名称不能为空")
+    writeError(c, http.StatusBadRequest, "技能名称不能为空")
     return
   }
   if err := util.SafePathSegment(name); err != nil {
-    writeError(w, http.StatusBadRequest, "技能名称不合法")
+    writeError(c, http.StatusBadRequest, "技能名称不合法")
     return
   }
   skillPath := filepath.Join(config.SkillsDirPath(), name)
   if err := os.RemoveAll(skillPath); err != nil {
-    writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "删除失败: "+err.Error())
     return
   }
-  writeSuccess(w, "技能已删除")
+  writeSuccess(c, "技能已删除")
 }
 
 // ============================================================
@@ -1072,32 +1128,32 @@ func (s *Server) handleAdminSkillsRemove(w http.ResponseWriter, r *http.Request)
 // ============================================================
 
 // handleAdminSkillsReposAdd 添加并克隆技能仓库
-func (s *Server) handleAdminSkillsReposAdd(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSkillsReposAdd(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  repoName := strings.TrimSpace(r.FormValue("name"))
-  repoURL := strings.TrimSpace(r.FormValue("url"))
+  repoName := strings.TrimSpace(c.PostForm("name"))
+  repoURL := strings.TrimSpace(c.PostForm("url"))
   if repoName == "" || repoURL == "" {
-    writeError(w, http.StatusBadRequest, "仓库名称和地址不能为空")
+    writeError(c, http.StatusBadRequest, "仓库名称和地址不能为空")
     return
   }
   if err := util.SafePathSegment(repoName); err != nil {
-    writeError(w, http.StatusBadRequest, "仓库名称不合法: "+err.Error())
+    writeError(c, http.StatusBadRequest, "仓库名称不合法: "+err.Error())
     return
   }
   // 验证仓库 URL 必须是合法的 Git 远程地址
   if !strings.HasPrefix(repoURL, "https://") && !strings.HasPrefix(repoURL, "git@") && !strings.HasPrefix(repoURL, "ssh://") {
-    writeError(w, http.StatusBadRequest, "仓库地址必须是 https://、git@ 或 ssh:// 开头的 Git 地址")
+    writeError(c, http.StatusBadRequest, "仓库地址必须是 https://、git@ 或 ssh:// 开头的 Git 地址")
     return
   }
 
@@ -1105,14 +1161,14 @@ func (s *Server) handleAdminSkillsReposAdd(w http.ResponseWriter, r *http.Reques
   defer gitMutex.Unlock()
 
   if _, err := exec.LookPath("git"); err != nil {
-    writeError(w, http.StatusInternalServerError, "Git 未安装")
+    writeError(c, http.StatusInternalServerError, "Git 未安装")
     return
   }
 
   // 检查重名
   for _, r := range s.cfg.Skills.Repos {
     if r.Name == repoName {
-      writeError(w, http.StatusBadRequest, "仓库名称已存在")
+      writeError(c, http.StatusBadRequest, "仓库名称已存在")
       return
     }
   }
@@ -1120,13 +1176,13 @@ func (s *Server) handleAdminSkillsReposAdd(w http.ResponseWriter, r *http.Reques
   reposDir := skillReposDir()
   targetDir := filepath.Join(reposDir, repoName)
   if _, err := os.Stat(targetDir); err == nil {
-    writeError(w, http.StatusBadRequest, "仓库目录已存在")
+    writeError(c, http.StatusBadRequest, "仓库目录已存在")
     return
   }
 
   os.MkdirAll(reposDir, 0755)
   if _, err := gitCmd(reposDir, "clone", repoURL, repoName); err != nil {
-    writeError(w, http.StatusInternalServerError, "Git clone 失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "Git clone 失败: "+err.Error())
     return
   }
 
@@ -1136,30 +1192,30 @@ func (s *Server) handleAdminSkillsReposAdd(w http.ResponseWriter, r *http.Reques
     LastPull: time.Now().Format("2006-01-02 15:04:05"),
   })
   s.saveSkillsConfig()
-  writeSuccess(w, "仓库已克隆")
+  writeSuccess(c, "仓库已克隆")
 }
 
 // handleAdminSkillsReposPull 拉取仓库更新
-func (s *Server) handleAdminSkillsReposPull(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSkillsReposPull(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  repoName := strings.TrimSpace(r.FormValue("name"))
+  repoName := strings.TrimSpace(c.PostForm("name"))
   if repoName == "" {
-    writeError(w, http.StatusBadRequest, "仓库名称不能为空")
+    writeError(c, http.StatusBadRequest, "仓库名称不能为空")
     return
   }
   if err := util.SafePathSegment(repoName); err != nil {
-    writeError(w, http.StatusBadRequest, "仓库名称不合法")
+    writeError(c, http.StatusBadRequest, "仓库名称不合法")
     return
   }
 
@@ -1168,14 +1224,14 @@ func (s *Server) handleAdminSkillsReposPull(w http.ResponseWriter, r *http.Reque
 
   repoDir := filepath.Join(skillReposDir(), repoName)
   if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
-    writeError(w, http.StatusBadRequest, "不是 Git 仓库")
+    writeError(c, http.StatusBadRequest, "不是 Git 仓库")
     return
   }
 
   gitCmd(repoDir, "reset", "--hard")
   out, err := gitCmd(repoDir, "pull")
   if err != nil {
-    writeError(w, http.StatusInternalServerError, "Git pull 失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "Git pull 失败: "+err.Error())
     return
   }
 
@@ -1188,7 +1244,7 @@ func (s *Server) handleAdminSkillsReposPull(w http.ResponseWriter, r *http.Reque
   s.saveSkillsConfig()
 
   updated := !strings.Contains(out, "Already up to date")
-  writeJSON(w, http.StatusOK, struct {
+  writeJSON(c, http.StatusOK, struct {
     Success bool   `json:"success"`
     Message string `json:"message"`
     Updated bool   `json:"updated"`
@@ -1196,26 +1252,26 @@ func (s *Server) handleAdminSkillsReposPull(w http.ResponseWriter, r *http.Reque
 }
 
 // handleAdminSkillsReposRemove 删除仓库
-func (s *Server) handleAdminSkillsReposRemove(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSkillsReposRemove(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  repoName := strings.TrimSpace(r.FormValue("name"))
+  repoName := strings.TrimSpace(c.PostForm("name"))
   if repoName == "" {
-    writeError(w, http.StatusBadRequest, "仓库名称不能为空")
+    writeError(c, http.StatusBadRequest, "仓库名称不能为空")
     return
   }
   if err := util.SafePathSegment(repoName); err != nil {
-    writeError(w, http.StatusBadRequest, "仓库名称不合法")
+    writeError(c, http.StatusBadRequest, "仓库名称不合法")
     return
   }
 
@@ -1229,36 +1285,36 @@ func (s *Server) handleAdminSkillsReposRemove(w http.ResponseWriter, r *http.Req
   }
   s.cfg.Skills.Repos = filtered
   s.saveSkillsConfig()
-  writeSuccess(w, "仓库已删除")
+  writeSuccess(c, "仓库已删除")
 }
 
 // handleAdminSkillsInstall 从仓库安装技能到 skill/ 目录
-func (s *Server) handleAdminSkillsInstall(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSkillsInstall(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  repoName := strings.TrimSpace(r.FormValue("repo"))
-  skillName := strings.TrimSpace(r.FormValue("skill"))
+  repoName := strings.TrimSpace(c.PostForm("repo"))
+  skillName := strings.TrimSpace(c.PostForm("skill"))
   if repoName == "" {
-    writeError(w, http.StatusBadRequest, "仓库名称不能为空")
+    writeError(c, http.StatusBadRequest, "仓库名称不能为空")
     return
   }
   if err := util.SafePathSegment(repoName); err != nil {
-    writeError(w, http.StatusBadRequest, "仓库名称不合法")
+    writeError(c, http.StatusBadRequest, "仓库名称不合法")
     return
   }
   if skillName != "" {
     if err := util.SafePathSegment(skillName); err != nil {
-      writeError(w, http.StatusBadRequest, "技能名称不合法")
+      writeError(c, http.StatusBadRequest, "技能名称不合法")
       return
     }
   }
@@ -1271,7 +1327,7 @@ func (s *Server) handleAdminSkillsInstall(w http.ResponseWriter, r *http.Request
     // 安装仓库中所有技能
     entries, err := os.ReadDir(repoDir)
     if err != nil {
-      writeError(w, http.StatusInternalServerError, "读取仓库失败")
+      writeError(c, http.StatusInternalServerError, "读取仓库失败")
       return
     }
     count := 0
@@ -1282,12 +1338,12 @@ func (s *Server) handleAdminSkillsInstall(w http.ResponseWriter, r *http.Request
       src := filepath.Join(repoDir, e.Name())
       dst := filepath.Join(skillDir, e.Name())
       if err := util.CopyDir(src, dst); err != nil {
-        writeError(w, http.StatusInternalServerError, fmt.Sprintf("安装 %s 失败: %v", e.Name(), err))
+        writeError(c, http.StatusInternalServerError, fmt.Sprintf("安装 %s 失败: %v", e.Name(), err))
         return
       }
       count++
     }
-    writeJSON(w, http.StatusOK, struct {
+    writeJSON(c, http.StatusOK, struct {
       Success bool   `json:"success"`
       Message string `json:"message"`
       Count   int    `json:"count"`
@@ -1298,47 +1354,47 @@ func (s *Server) handleAdminSkillsInstall(w http.ResponseWriter, r *http.Request
   // 安装单个技能
   src := filepath.Join(repoDir, skillName)
   if _, err := os.Stat(src); err != nil {
-    writeError(w, http.StatusNotFound, "技能在仓库中不存在")
+    writeError(c, http.StatusNotFound, "技能在仓库中不存在")
     return
   }
   dst := filepath.Join(skillDir, skillName)
   if err := util.CopyDir(src, dst); err != nil {
-    writeError(w, http.StatusInternalServerError, "安装失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "安装失败: "+err.Error())
     return
   }
-  writeSuccess(w, "技能已安装")
+  writeSuccess(c, "技能已安装")
 }
 
 // handleAdminSkillsReposList 列出仓库中的技能
-func (s *Server) handleAdminSkillsReposList(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSkillsReposList(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+  if c.Request.Method != "GET" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
 
-  repoName := r.URL.Query().Get("name")
+  repoName := c.Query("name")
   if repoName == "" {
-    writeError(w, http.StatusBadRequest, "仓库名称不能为空")
+    writeError(c, http.StatusBadRequest, "仓库名称不能为空")
     return
   }
   if err := util.SafePathSegment(repoName); err != nil {
-    writeError(w, http.StatusBadRequest, "仓库名称不合法")
+    writeError(c, http.StatusBadRequest, "仓库名称不合法")
     return
   }
 
   repoDir := filepath.Join(skillReposDir(), repoName)
   entries, err := os.ReadDir(repoDir)
   if err != nil {
-    writeError(w, http.StatusNotFound, "仓库不存在")
+    writeError(c, http.StatusNotFound, "仓库不存在")
     return
   }
 
   type SkillEntry struct {
-    Name string `json:"name"`
-    Installed bool `json:"installed"`
+    Name      string `json:"name"`
+    Installed bool   `json:"installed"`
   }
   var skills []SkillEntry
   skillDir := config.SkillsDirPath()
@@ -1349,7 +1405,7 @@ func (s *Server) handleAdminSkillsReposList(w http.ResponseWriter, r *http.Reque
     }
     _, installed := os.Stat(filepath.Join(skillDir, e.Name()))
     skills = append(skills, SkillEntry{
-      Name: e.Name(),
+      Name:      e.Name(),
       Installed: installed == nil,
     })
   }
@@ -1357,7 +1413,7 @@ func (s *Server) handleAdminSkillsReposList(w http.ResponseWriter, r *http.Reque
     skills = []SkillEntry{}
   }
 
-  writeJSON(w, http.StatusOK, struct {
+  writeJSON(c, http.StatusOK, struct {
     Success bool         `json:"success"`
     Skills  []SkillEntry `json:"skills"`
   }{true, skills})
@@ -1367,107 +1423,107 @@ func (s *Server) handleAdminSkillsReposList(w http.ResponseWriter, r *http.Reque
 // 用户组管理
 // ============================================================
 
-func (s *Server) handleAdminGroups(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminGroups(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+  if c.Request.Method != "GET" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
   groups, err := auth.ListGroups()
   if err != nil {
-    writeError(w, http.StatusInternalServerError, err.Error())
+    writeError(c, http.StatusInternalServerError, err.Error())
     return
   }
   if groups == nil {
     groups = []auth.GroupInfo{}
   }
-  writeJSON(w, http.StatusOK, struct {
-    Success bool              `json:"success"`
-    Groups  []auth.GroupInfo  `json:"groups"`
+  writeJSON(c, http.StatusOK, struct {
+    Success bool             `json:"success"`
+    Groups  []auth.GroupInfo `json:"groups"`
   }{true, groups})
 }
 
-func (s *Server) handleAdminGroupCreate(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminGroupCreate(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
   if s.cfg.UnifiedAuthEnabled() {
-    writeError(w, http.StatusForbidden, "统一认证模式下不允许手动创建组，请通过 LDAP 同步")
+    writeError(c, http.StatusForbidden, "统一认证模式下不允许手动创建组，请通过 LDAP 同步")
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  name := strings.TrimSpace(r.FormValue("name"))
-  description := strings.TrimSpace(r.FormValue("description"))
-  parentIDStr := strings.TrimSpace(r.FormValue("parent_id"))
+  name := strings.TrimSpace(c.PostForm("name"))
+  description := strings.TrimSpace(c.PostForm("description"))
+  parentIDStr := strings.TrimSpace(c.PostForm("parent_id"))
   if name == "" {
-    writeError(w, http.StatusBadRequest, "组名不能为空")
+    writeError(c, http.StatusBadRequest, "组名不能为空")
     return
   }
   var parentID *int64
   if parentIDStr != "" {
     pid, err := strconv.ParseInt(parentIDStr, 10, 64)
     if err != nil {
-      writeError(w, http.StatusBadRequest, "无效的父组 ID")
+      writeError(c, http.StatusBadRequest, "无效的父组 ID")
       return
     }
     parentID = &pid
   }
   if err := auth.CreateGroup(name, "local", description, parentID); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  writeSuccess(w, "组 "+name+" 创建成功")
+  writeSuccess(c, "组 "+name+" 创建成功")
 }
 
-func (s *Server) handleAdminGroupDelete(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminGroupDelete(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  name := strings.TrimSpace(r.FormValue("name"))
+  name := strings.TrimSpace(c.PostForm("name"))
   if name == "" {
-    writeError(w, http.StatusBadRequest, "组名不能为空")
+    writeError(c, http.StatusBadRequest, "组名不能为空")
     return
   }
   if err := auth.DeleteGroup(name); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  writeSuccess(w, "组 "+name+" 已删除")
+  writeSuccess(c, "组 "+name+" 已删除")
 }
 
-func (s *Server) handleAdminGroupMembersAdd(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  groupName := strings.TrimSpace(r.FormValue("group_name"))
-  usersStr := strings.TrimSpace(r.FormValue("usernames"))
+  groupName := strings.TrimSpace(c.PostForm("group_name"))
+  usersStr := strings.TrimSpace(c.PostForm("usernames"))
   if groupName == "" || usersStr == "" {
-    writeError(w, http.StatusBadRequest, "组名和用户名不能为空")
+    writeError(c, http.StatusBadRequest, "组名和用户名不能为空")
     return
   }
   usernames := strings.Split(usersStr, ",")
@@ -1479,72 +1535,72 @@ func (s *Server) handleAdminGroupMembersAdd(w http.ResponseWriter, r *http.Reque
     }
   }
   if len(trimmed) == 0 {
-    writeError(w, http.StatusBadRequest, "用户名不能为空")
+    writeError(c, http.StatusBadRequest, "用户名不能为空")
     return
   }
   if err := auth.AddUsersToGroup(groupName, trimmed); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  writeSuccess(w, fmt.Sprintf("已添加 %d 个用户到组 %s", len(trimmed), groupName))
+  writeSuccess(c, fmt.Sprintf("已添加 %d 个用户到组 %s", len(trimmed), groupName))
 }
 
-func (s *Server) handleAdminGroupMembersRemove(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  groupName := strings.TrimSpace(r.FormValue("group_name"))
-  username := strings.TrimSpace(r.FormValue("username"))
+  groupName := strings.TrimSpace(c.PostForm("group_name"))
+  username := strings.TrimSpace(c.PostForm("username"))
   if groupName == "" || username == "" {
-    writeError(w, http.StatusBadRequest, "组名和用户名不能为空")
+    writeError(c, http.StatusBadRequest, "组名和用户名不能为空")
     return
   }
   if err := auth.RemoveUserFromGroup(groupName, username); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  writeSuccess(w, "已从组 "+groupName+" 移除 "+username)
+  writeSuccess(c, "已从组 "+groupName+" 移除 "+username)
 }
 
-func (s *Server) handleAdminGroupSkillsBind(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminGroupSkillsBind(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  groupName := strings.TrimSpace(r.FormValue("group_name"))
-  skillName := strings.TrimSpace(r.FormValue("skill_name"))
+  groupName := strings.TrimSpace(c.PostForm("group_name"))
+  skillName := strings.TrimSpace(c.PostForm("skill_name"))
   if groupName == "" || skillName == "" {
-    writeError(w, http.StatusBadRequest, "组名和技能名不能为空")
+    writeError(c, http.StatusBadRequest, "组名和技能名不能为空")
     return
   }
   if err := util.SafePathSegment(skillName); err != nil {
-    writeError(w, http.StatusBadRequest, "技能名称不合法")
+    writeError(c, http.StatusBadRequest, "技能名称不合法")
     return
   }
   if err := auth.BindSkillToGroup(groupName, skillName); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
 
   // 绑定后立即部署到组内所有用户
   members, err := auth.GetGroupMembersForDeploy(groupName)
   if err != nil {
-    writeError(w, http.StatusInternalServerError, "绑定成功但获取组成员失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "绑定成功但获取组成员失败: "+err.Error())
     return
   }
   skillDir := config.SkillsDirPath()
@@ -1558,63 +1614,63 @@ func (s *Server) handleAdminGroupSkillsBind(w http.ResponseWriter, r *http.Reque
     }
   }
 
-  writeJSON(w, http.StatusOK, struct {
+  writeJSON(c, http.StatusOK, struct {
     Success   bool   `json:"success"`
     Message   string `json:"message"`
     UserCount int    `json:"user_count"`
   }{true, fmt.Sprintf("技能 %s 已绑定到组 %s 并部署到 %d 个用户", skillName, groupName, userCount), userCount})
 }
 
-func (s *Server) handleAdminGroupSkillsUnbind(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminGroupSkillsUnbind(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  groupName := strings.TrimSpace(r.FormValue("group_name"))
-  skillName := strings.TrimSpace(r.FormValue("skill_name"))
+  groupName := strings.TrimSpace(c.PostForm("group_name"))
+  skillName := strings.TrimSpace(c.PostForm("skill_name"))
   if groupName == "" || skillName == "" {
-    writeError(w, http.StatusBadRequest, "组名和技能名不能为空")
+    writeError(c, http.StatusBadRequest, "组名和技能名不能为空")
     return
   }
   if err := util.SafePathSegment(skillName); err != nil {
-    writeError(w, http.StatusBadRequest, "技能名称不合法")
+    writeError(c, http.StatusBadRequest, "技能名称不合法")
     return
   }
   if err := auth.UnbindSkillFromGroup(groupName, skillName); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  writeSuccess(w, "已从组 "+groupName+" 解绑技能 "+skillName)
+  writeSuccess(c, "已从组 "+groupName+" 解绑技能 "+skillName)
 }
 
-func (s *Server) handleAdminGroupMembers(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminGroupMembers(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+  if c.Request.Method != "GET" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
-  groupName := r.URL.Query().Get("name")
+  groupName := c.Query("name")
   if groupName == "" {
-    writeError(w, http.StatusBadRequest, "组名不能为空")
+    writeError(c, http.StatusBadRequest, "组名不能为空")
     return
   }
   members, err := auth.GetGroupMembers(groupName)
   if err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
   skills, err := auth.GetGroupSkills(groupName)
   if err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
   if members == nil {
@@ -1623,34 +1679,34 @@ func (s *Server) handleAdminGroupMembers(w http.ResponseWriter, r *http.Request)
   if skills == nil {
     skills = []string{}
   }
-  writeJSON(w, http.StatusOK, struct {
-    Success  bool     `json:"success"`
-    Members  []string `json:"members"`
-    Skills   []string `json:"skills"`
+  writeJSON(c, http.StatusOK, struct {
+    Success bool     `json:"success"`
+    Members []string `json:"members"`
+    Skills  []string `json:"skills"`
   }{true, members, skills})
 }
 
 // handleAdminAuthSyncGroups 手动触发 LDAP 组同步
-func (s *Server) handleAdminAuthSyncGroups(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
   if !s.cfg.LDAPEnabled() {
-    writeError(w, http.StatusBadRequest, "LDAP 未启用")
+    writeError(c, http.StatusBadRequest, "LDAP 未启用")
     return
   }
 
   groupMap, err := ldap.FetchAllGroupsWithMembers(s.cfg)
   if err != nil {
-    writeError(w, http.StatusInternalServerError, "获取 LDAP 组失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "获取 LDAP 组失败: "+err.Error())
     return
   }
 
@@ -1678,7 +1734,7 @@ func (s *Server) handleAdminAuthSyncGroups(w http.ResponseWriter, r *http.Reques
     }
   }
 
-  writeJSON(w, http.StatusOK, struct {
+  writeJSON(c, http.StatusOK, struct {
     Success     bool   `json:"success"`
     Message     string `json:"message"`
     GroupCount  int    `json:"group_count"`
@@ -1709,11 +1765,11 @@ func (s *Server) saveSkillsConfig() {
   if err != nil {
     return
   }
-  d, err := auth.GetDB()
+  engine, err := auth.GetEngine()
   if err != nil {
     return
   }
-  d.Exec("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('skills', ?, datetime('now','localtime'))", string(skillsJSON))
+  engine.Exec("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('skills', ?, datetime('now','localtime'))", string(skillsJSON))
 }
 
 func formatSize(size int64) string {
@@ -1738,153 +1794,153 @@ func minInt(a, b int) int {
 // ============================================================
 
 // handleAdminSuperadmins 返回超管列表
-func (s *Server) handleAdminSuperadmins(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSuperadmins(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method == "GET" {
+  if c.Request.Method == "GET" {
     list, err := auth.GetSuperadmins()
     if err != nil {
-      writeError(w, http.StatusInternalServerError, err.Error())
+      writeError(c, http.StatusInternalServerError, err.Error())
       return
     }
     if list == nil {
       list = []string{}
     }
-    writeJSON(w, http.StatusOK, struct {
+    writeJSON(c, http.StatusOK, struct {
       Success bool     `json:"success"`
       Admins  []string `json:"admins"`
     }{true, list})
     return
   }
-  writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+  writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
 }
 
 // handleAdminSuperadminCreate 创建超管账户
-func (s *Server) handleAdminSuperadminCreate(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSuperadminCreate(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  username := r.FormValue("username")
+  username := c.PostForm("username")
   if err := user.ValidateUsername(username); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
   if auth.UserExists(username) {
-    writeError(w, http.StatusBadRequest, "用户 "+username+" 已存在")
+    writeError(c, http.StatusBadRequest, "用户 "+username+" 已存在")
     return
   }
 
   password := auth.GenerateRandomPassword(12)
   if err := auth.CreateUser(username, password, "superadmin"); err != nil {
-    writeError(w, http.StatusInternalServerError, "创建超管失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "创建超管失败: "+err.Error())
     return
   }
 
-  writeJSON(w, http.StatusOK, struct {
+  writeJSON(c, http.StatusOK, struct {
     Success  bool   `json:"success"`
     Message  string `json:"message"`
     Username string `json:"username"`
     Password string `json:"password"`
   }{true, "超管创建成功", username, password})
-  logger.Audit("superadmin.create", "username", username, "operator", s.getSessionUser(r))
+  logger.Audit("superadmin.create", "username", username, "operator", s.getSessionUser(c))
 }
 
 // handleAdminSuperadminDelete 删除超管账户（至少保留一个）
-func (s *Server) handleAdminSuperadminDelete(w http.ResponseWriter, r *http.Request) {
-  currentUser := s.requireSuperadmin(w, r)
+func (s *Server) handleAdminSuperadminDelete(c *gin.Context) {
+  currentUser := s.requireSuperadmin(c)
   if currentUser == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  username := r.FormValue("username")
+  username := c.PostForm("username")
   if username == "" {
-    writeError(w, http.StatusBadRequest, "用户名不能为空")
+    writeError(c, http.StatusBadRequest, "用户名不能为空")
     return
   }
   if username == currentUser {
-    writeError(w, http.StatusBadRequest, "不能删除自己")
+    writeError(c, http.StatusBadRequest, "不能删除自己")
     return
   }
   if err := user.ValidateUsername(username); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
   if !auth.IsSuperadmin(username) {
-    writeError(w, http.StatusBadRequest, username+" 不是超管")
+    writeError(c, http.StatusBadRequest, username+" 不是超管")
     return
   }
 
   admins, _ := auth.GetSuperadmins()
   if len(admins) <= 1 {
-    writeError(w, http.StatusBadRequest, "至少保留一个超管账户")
+    writeError(c, http.StatusBadRequest, "至少保留一个超管账户")
     return
   }
 
   if err := auth.DeleteUser(username); err != nil {
-    writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "删除失败: "+err.Error())
     return
   }
 
-  writeSuccess(w, "超管 "+username+" 已删除")
+  writeSuccess(c, "超管 "+username+" 已删除")
   logger.Audit("superadmin.delete", "username", username, "operator", currentUser)
 }
 
 // handleAdminSuperadminReset 重置超管密码
-func (s *Server) handleAdminSuperadminReset(w http.ResponseWriter, r *http.Request) {
-  if s.requireSuperadmin(w, r) == "" {
+func (s *Server) handleAdminSuperadminReset(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  username := r.FormValue("username")
+  username := c.PostForm("username")
   if username == "" {
-    writeError(w, http.StatusBadRequest, "用户名不能为空")
+    writeError(c, http.StatusBadRequest, "用户名不能为空")
     return
   }
   if err := user.ValidateUsername(username); err != nil {
-    writeError(w, http.StatusBadRequest, err.Error())
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
   if !auth.IsSuperadmin(username) {
-    writeError(w, http.StatusBadRequest, username+" 不是超管")
+    writeError(c, http.StatusBadRequest, username+" 不是超管")
     return
   }
 
   password := auth.GenerateRandomPassword(12)
   if err := auth.ChangePassword(username, password); err != nil {
-    writeError(w, http.StatusInternalServerError, "重置密码失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "重置密码失败: "+err.Error())
     return
   }
 
-  writeJSON(w, http.StatusOK, struct {
+  writeJSON(c, http.StatusOK, struct {
     Success  bool   `json:"success"`
     Message  string `json:"message"`
     Password string `json:"password"`
   }{true, "密码已重置", password})
-  logger.Audit("password.reset", "username", username, "operator", s.getSessionUser(r))
+  logger.Audit("password.reset", "username", username, "operator", s.getSessionUser(c))
 }

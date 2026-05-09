@@ -6,19 +6,21 @@ import (
   "net/http"
   "strings"
 
+  "github.com/gin-gonic/gin"
+
   "github.com/picoaide/picoaide/internal/auth"
 )
 
 // validateBearerOrQueryToken 从 Bearer header 或 query param 验证 MCP token
-func validateBearerOrQueryToken(w http.ResponseWriter, r *http.Request) string {
-  token := extractToken(r)
+func validateBearerOrQueryToken(c *gin.Context) string {
+  token := extractToken(c.Request)
   if token == "" {
-    writeError(w, http.StatusUnauthorized, "需要 MCP token")
+    writeError(c, http.StatusUnauthorized, "需要 MCP token")
     return ""
   }
   username, ok := auth.ValidateMCPToken(token)
   if !ok {
-    writeError(w, http.StatusForbidden, "无效的 MCP token")
+    writeError(c, http.StatusForbidden, "无效的 MCP token")
     return ""
   }
   return username

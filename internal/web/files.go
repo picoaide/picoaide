@@ -9,6 +9,8 @@ import (
   "sort"
   "strings"
 
+  "github.com/gin-gonic/gin"
+
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
 )
@@ -102,36 +104,32 @@ func parentDir(relPath string) string {
 }
 
 // handleFiles 文件列表 API
-func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
-  username := s.requireAuth(w, r)
+func (s *Server) handleFiles(c *gin.Context) {
+  username := s.requireRegularUser(c)
   if username == "" {
     return
   }
-  if r.Method != "GET" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
-    return
-  }
 
-  relPath := r.URL.Query().Get("path")
+  relPath := c.Query("path")
 
   root := s.workspaceRoot(username)
   os.MkdirAll(root, 0755)
 
   absPath, err := s.safePath(username, relPath)
   if err != nil {
-    writeError(w, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
 
   info, err := os.Stat(absPath)
   if err != nil || !info.IsDir() {
-    writeError(w, http.StatusNotFound, "目录不存在")
+    writeError(c, http.StatusNotFound, "目录不存在")
     return
   }
 
   entries, err := os.ReadDir(absPath)
   if err != nil {
-    writeError(w, http.StatusInternalServerError, "读取目录失败")
+    writeError(c, http.StatusInternalServerError, "读取目录失败")
     return
   }
 
@@ -171,7 +169,7 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
     })
   }
 
-  writeJSON(w, http.StatusOK, filesResponse{
+  writeJSON(c, http.StatusOK, filesResponse{
     Success:    true,
     Path:       relPath,
     Entries:    fileEntries,
@@ -180,44 +178,40 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleFileUpload 上传文件
-func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
-  username := s.requireAuth(w, r)
+func (s *Server) handleFileUpload(c *gin.Context) {
+  username := s.requireRegularUser(c)
   if username == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
   // 限制请求体大小
-  r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-  if err := r.ParseMultipartForm(maxUploadSize); err != nil {
-    writeError(w, http.StatusBadRequest, "文件过大或格式错误")
+  c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadSize)
+  if err := c.Request.ParseMultipartForm(maxUploadSize); err != nil {
+    writeError(c, http.StatusBadRequest, "文件过大或格式错误")
     return
   }
 
-  relPath := r.FormValue("path")
+  relPath := c.PostForm("path")
 
   targetDir, err := s.safePath(username, relPath)
   if err != nil {
-    writeError(w, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
 
   info, err := os.Stat(targetDir)
   if err != nil || !info.IsDir() {
-    writeError(w, http.StatusBadRequest, "目标目录不存在")
+    writeError(c, http.StatusBadRequest, "目标目录不存在")
     return
   }
 
-  file, header, err := r.FormFile("file")
+  file, header, err := c.Request.FormFile("file")
   if err != nil {
-    writeError(w, http.StatusBadRequest, "读取上传文件失败")
+    writeError(c, http.StatusBadRequest, "读取上传文件失败")
     return
   }
   defer file.Close()
@@ -227,76 +221,72 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 
   dst, err := os.Create(dstPath)
   if err != nil {
-    writeError(w, http.StatusInternalServerError, "创建文件失败")
+    writeError(c, http.StatusInternalServerError, "创建文件失败")
     return
   }
   defer dst.Close()
 
   if _, err := io.Copy(dst, file); err != nil {
-    writeError(w, http.StatusInternalServerError, "写入文件失败")
+    writeError(c, http.StatusInternalServerError, "写入文件失败")
     return
   }
 
-  writeSuccess(w, fmt.Sprintf("文件 %s 上传成功", filename))
+  writeSuccess(c, fmt.Sprintf("文件 %s 上传成功", filename))
 }
 
 // handleFileDownload 下载文件
-func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
-  username := s.requireAuth(w, r)
+func (s *Server) handleFileDownload(c *gin.Context) {
+  username := s.requireRegularUser(c)
   if username == "" {
     return
   }
 
-  relPath := r.URL.Query().Get("path")
+  relPath := c.Query("path")
 
   absPath, err := s.safePath(username, relPath)
   if err != nil {
-    writeError(w, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
 
   info, err := os.Stat(absPath)
   if err != nil || info.IsDir() {
-    writeError(w, http.StatusNotFound, "文件不存在")
+    writeError(c, http.StatusNotFound, "文件不存在")
     return
   }
 
-  w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(absPath)))
-  http.ServeFile(w, r, absPath)
+  c.Writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(absPath)))
+  http.ServeFile(c.Writer, c.Request, absPath)
 }
 
 // handleFileDelete 删除文件或目录
-func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) {
-  username := s.requireAuth(w, r)
+func (s *Server) handleFileDelete(c *gin.Context) {
+  username := s.requireRegularUser(c)
   if username == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  relPath := r.FormValue("path")
+  relPath := c.PostForm("path")
 
   absPath, err := s.safePath(username, relPath)
   if err != nil {
-    writeError(w, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
 
   root := s.workspaceRoot(username)
   if absPath == root {
-    writeError(w, http.StatusBadRequest, "不能删除工作区根目录")
+    writeError(c, http.StatusBadRequest, "不能删除工作区根目录")
     return
   }
 
   info, err := os.Stat(absPath)
   if err != nil {
-    writeError(w, http.StatusNotFound, "文件不存在")
+    writeError(c, http.StatusNotFound, "文件不存在")
     return
   }
 
@@ -307,103 +297,122 @@ func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) {
     err = os.Remove(absPath)
   }
   if err != nil {
-    writeError(w, http.StatusInternalServerError, "删除失败")
+    writeError(c, http.StatusInternalServerError, "删除失败")
     return
   }
 
-  writeSuccess(w, fmt.Sprintf("%s 已删除", name))
+  writeSuccess(c, fmt.Sprintf("%s 已删除", name))
 }
 
 // handleFileMkdir 新建目录
-func (s *Server) handleFileMkdir(w http.ResponseWriter, r *http.Request) {
-  username := s.requireAuth(w, r)
+func (s *Server) handleFileMkdir(c *gin.Context) {
+  username := s.requireRegularUser(c)
   if username == "" {
     return
   }
-  if r.Method != "POST" {
-    writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
 
-  relPath := r.FormValue("path")
-  name := filepath.Base(r.FormValue("name"))
+  relPath := c.PostForm("path")
+  name := filepath.Base(c.PostForm("name"))
 
   if name == "" || name == "." || name == ".." {
-    writeError(w, http.StatusBadRequest, "目录名无效")
+    writeError(c, http.StatusBadRequest, "目录名无效")
     return
   }
 
   parentAbsDir, err := s.safePath(username, relPath)
   if err != nil {
-    writeError(w, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
 
   if err := os.Mkdir(filepath.Join(parentAbsDir, name), 0755); err != nil {
-    writeError(w, http.StatusInternalServerError, "创建目录失败")
+    writeError(c, http.StatusInternalServerError, "创建目录失败")
     return
   }
 
-  writeSuccess(w, fmt.Sprintf("目录 %s 已创建", name))
+  writeSuccess(c, fmt.Sprintf("目录 %s 已创建", name))
 }
 
-// handleFileEdit 编辑文本文件
-func (s *Server) handleFileEdit(w http.ResponseWriter, r *http.Request) {
-  username := s.requireAuth(w, r)
+// handleFileEditGet 读取文本文件内容
+func (s *Server) handleFileEditGet(c *gin.Context) {
+  username := s.requireRegularUser(c)
   if username == "" {
     return
   }
 
-  relPath := r.FormValue("path")
+  relPath := c.Query("path")
   if relPath == "" {
-    relPath = r.URL.Query().Get("path")
-  }
-  if relPath == "" {
-    writeError(w, http.StatusBadRequest, "缺少文件路径")
+    writeError(c, http.StatusBadRequest, "缺少文件路径")
     return
   }
 
   absPath, err := s.safePath(username, relPath)
   if err != nil {
-    writeError(w, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, "无效路径")
     return
   }
 
   // 只允许编辑文本文件
   if !util.IsTextFile(absPath) {
-    writeError(w, http.StatusBadRequest, "不支持的文件类型")
+    writeError(c, http.StatusBadRequest, "不支持的文件类型")
     return
   }
 
-  if r.Method == "GET" {
-    data, err := os.ReadFile(absPath)
-    if err != nil {
-      writeError(w, http.StatusInternalServerError, "读取文件失败")
-      return
-    }
-
-    writeJSON(w, http.StatusOK, editResponse{
-      Success:  true,
-      Filename: filepath.Base(absPath),
-      Content:  string(data),
-      Path:     relPath,
-    })
+  data, err := os.ReadFile(absPath)
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "读取文件失败")
     return
   }
 
-  // POST: 保存文件
-  if !s.checkCSRF(r) {
-    writeError(w, http.StatusForbidden, "无效请求")
-    return
-  }
-  if err := os.WriteFile(absPath, []byte(r.FormValue("content")), 0644); err != nil {
-    writeError(w, http.StatusInternalServerError, "保存文件失败")
+  writeJSON(c, http.StatusOK, editResponse{
+    Success:  true,
+    Filename: filepath.Base(absPath),
+    Content:  string(data),
+    Path:     relPath,
+  })
+}
+
+// handleFileEditSave 保存文本文件内容
+func (s *Server) handleFileEditSave(c *gin.Context) {
+  username := s.requireRegularUser(c)
+  if username == "" {
     return
   }
 
-  writeSuccess(w, fmt.Sprintf("文件 %s 已保存", filepath.Base(absPath)))
+  relPath := c.PostForm("path")
+  if relPath == "" {
+    relPath = c.Query("path")
+  }
+  if relPath == "" {
+    writeError(c, http.StatusBadRequest, "缺少文件路径")
+    return
+  }
+
+  absPath, err := s.safePath(username, relPath)
+  if err != nil {
+    writeError(c, http.StatusBadRequest, "无效路径")
+    return
+  }
+
+  // 只允许编辑文本文件
+  if !util.IsTextFile(absPath) {
+    writeError(c, http.StatusBadRequest, "不支持的文件类型")
+    return
+  }
+
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
+    return
+  }
+
+  if err := os.WriteFile(absPath, []byte(c.PostForm("content")), 0644); err != nil {
+    writeError(c, http.StatusInternalServerError, "保存文件失败")
+    return
+  }
+
+  writeSuccess(c, fmt.Sprintf("文件 %s 已保存", filepath.Base(absPath)))
 }

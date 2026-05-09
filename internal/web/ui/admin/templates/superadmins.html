@@ -1,0 +1,18 @@
+<section class="page-header">
+  <div>
+    <div class="page-kicker">管理角色</div>
+    <h2>超管账户</h2>
+    <p>超管是纯管理角色，只进入管理后台，不创建用户容器。</p>
+  </div>
+  <div class="page-actions">
+    <button class="btn btn-primary btn-sm" id="create-superadmin-btn">新建超管</button>
+    <button class="btn btn-outline btn-sm" id="refresh-superadmins">刷新</button>
+  </div>
+</section>
+
+<table>
+  <thead><tr><th>用户名</th><th>操作</th></tr></thead>
+  <tbody id="sa-tbody"></tbody>
+</table>
+<p id="sa-empty" class="text-muted text-center mt-1 hidden">暂无超管</p>
+<div id="sa-msg" class="msg"></div>

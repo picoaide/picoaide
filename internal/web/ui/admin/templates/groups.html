@@ -1,0 +1,18 @@
+<section class="page-header">
+  <div>
+    <div class="page-kicker">组织策略</div>
+    <h2>用户组</h2>
+    <p>按组织或 LDAP 组统一绑定 Skill、下发配置和管理容器策略。</p>
+  </div>
+  <div class="page-actions">
+    <button class="btn btn-primary btn-sm" id="create-group-btn">新建组</button>
+    <button class="btn btn-outline btn-sm" id="refresh-groups">刷新</button>
+  </div>
+</section>
+
+<table>
+  <thead><tr><th>组名</th><th>来源</th><th>成员数</th><th>绑定技能</th><th>操作</th></tr></thead>
+  <tbody id="groups-tbody"></tbody>
+</table>
+<p id="groups-empty" class="text-muted text-center mt-1 hidden">暂无用户组</p>
+<div id="groups-msg" class="msg"></div>
