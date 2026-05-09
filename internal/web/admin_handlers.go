@@ -29,6 +29,17 @@ import (
 
 var gitMutex sync.Mutex
 
+func cleanPathSegment(value string) (string, error) {
+  cleaned := filepath.Base(strings.TrimSpace(value))
+  if cleaned != strings.TrimSpace(value) {
+    return "", fmt.Errorf("名称不合法")
+  }
+  if err := util.SafePathSegment(cleaned); err != nil {
+    return "", err
+  }
+  return cleaned, nil
+}
+
 func (s *Server) requireSuperadmin(c *gin.Context) string {
   username := s.requireAuth(c)
   if username == "" {
@@ -1302,21 +1313,23 @@ func (s *Server) handleAdminSkillsInstall(c *gin.Context) {
     return
   }
 
-  repoName := strings.TrimSpace(c.PostForm("repo"))
+  repoName, err := cleanPathSegment(c.PostForm("repo"))
   skillName := strings.TrimSpace(c.PostForm("skill"))
   if repoName == "" {
     writeError(c, http.StatusBadRequest, "仓库名称不能为空")
     return
   }
-  if err := util.SafePathSegment(repoName); err != nil {
+  if err != nil {
     writeError(c, http.StatusBadRequest, "仓库名称不合法")
     return
   }
   if skillName != "" {
-    if err := util.SafePathSegment(skillName); err != nil {
+    cleanedSkillName, err := cleanPathSegment(skillName)
+    if err != nil {
       writeError(c, http.StatusBadRequest, "技能名称不合法")
       return
     }
+    skillName = cleanedSkillName
   }
 
   repoDir := filepath.Join(skillReposDir(), repoName)
