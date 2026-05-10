@@ -41,8 +41,6 @@ jobs:
 
       - name: Plan build
         id: plan
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -58,9 +56,13 @@ jobs:
 
           list_image_tags() {
             local image_repo="$1"
-            local package_name="${image_repo#*/}"
-            gh api --paginate "/orgs/${{ github.repository_owner }}/packages/container/${package_name}/versions?per_page=100" \
-              --jq '.[].metadata.container.tags[]?' 2>/dev/null || true
+            local token
+            token=$(curl -fsSL "https://ghcr.io/token?service=ghcr.io&scope=repository:${image_repo}:pull" | jq -r '.token // empty' || true)
+            if [ -z "$token" ]; then
+              return 0
+            fi
+            curl -fsSL -H "Authorization: Bearer ${token}" "https://ghcr.io/v2/${image_repo}/tags/list" \
+              | jq -r '.tags[]?' 2>/dev/null || true
           }
 
           if [ "${{ github.event_name }}" = "push" ]; then
