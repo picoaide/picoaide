@@ -267,62 +267,88 @@ func gitCloneCmdWithCredential(dir string, cred config.SkillRepoCredential, repo
 	if err := validateSkillRepoRef(ref); err != nil {
 		return "", err
 	}
-	args := []string{"clone"}
-	if ref != "" {
-		args = append(args, "--branch", ref, "--single-branch")
-	}
-	args = append(args, repoURL, dest)
-	return gitCmdWithCredential(dir, cred, args...)
+	return gitCmdWithCredential(dir, cred, gitCloneScript, "PICOAIDE_GIT_URL="+repoURL, "PICOAIDE_GIT_DEST="+dest, "PICOAIDE_GIT_REF="+ref)
 }
 
 func gitFetchTagsCmdWithCredential(dir string, cred config.SkillRepoCredential) (string, error) {
-	return gitCmdWithCredential(dir, cred, "fetch", "--tags", "origin")
+	return gitCmdWithCredential(dir, cred, gitFetchTagsScript)
 }
 
 func gitFetchRefCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
 	if err := validateSkillRepoRef(ref); err != nil {
 		return "", err
 	}
-	return gitCmdWithCredential(dir, cred, "fetch", "origin", ref)
+	return gitCmdWithCredential(dir, cred, gitFetchRefScript, "PICOAIDE_GIT_REF="+ref)
 }
 
 func gitCheckoutTagCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
 	if err := validateSkillRepoRef(ref); err != nil {
 		return "", err
 	}
-	return gitCmdWithCredential(dir, cred, "checkout", "-f", ref)
+	return gitCmdWithCredential(dir, cred, gitCheckoutTagScript, "PICOAIDE_GIT_REF="+ref)
 }
 
 func gitCheckoutBranchCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
 	if err := validateSkillRepoRef(ref); err != nil {
 		return "", err
 	}
-	return gitCmdWithCredential(dir, cred, "checkout", "-B", ref, "origin/"+ref)
+	return gitCmdWithCredential(dir, cred, gitCheckoutBranchScript, "PICOAIDE_GIT_REF="+ref)
 }
 
 func gitResetHardCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
 	if err := validateSkillRepoRef(ref); err != nil {
 		return "", err
 	}
-	return gitCmdWithCredential(dir, cred, "reset", "--hard", ref)
+	return gitCmdWithCredential(dir, cred, gitResetHardScript, "PICOAIDE_GIT_REF="+ref)
 }
 
 func gitResetOriginBranchCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
 	if err := validateSkillRepoRef(ref); err != nil {
 		return "", err
 	}
-	return gitCmdWithCredential(dir, cred, "reset", "--hard", "origin/"+ref)
+	return gitCmdWithCredential(dir, cred, gitResetOriginBranchScript, "PICOAIDE_GIT_REF="+ref)
 }
 
 func gitPullCmdWithCredential(dir string, cred config.SkillRepoCredential) (string, error) {
-	return gitCmdWithCredential(dir, cred, "pull", "--ff-only")
+	return gitCmdWithCredential(dir, cred, gitPullScript)
 }
 
-func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, args ...string) (string, error) {
+const (
+	gitCloneScript = `#!/bin/sh
+if [ -n "${PICOAIDE_GIT_REF:-}" ]; then
+	exec git clone --branch "$PICOAIDE_GIT_REF" --single-branch -- "$PICOAIDE_GIT_URL" "$PICOAIDE_GIT_DEST"
+fi
+exec git clone -- "$PICOAIDE_GIT_URL" "$PICOAIDE_GIT_DEST"
+`
+	gitFetchTagsScript = `#!/bin/sh
+exec git fetch --tags origin
+`
+	gitFetchRefScript = `#!/bin/sh
+exec git fetch origin "$PICOAIDE_GIT_REF"
+`
+	gitCheckoutTagScript = `#!/bin/sh
+exec git checkout -f "$PICOAIDE_GIT_REF"
+`
+	gitCheckoutBranchScript = `#!/bin/sh
+exec git checkout -B "$PICOAIDE_GIT_REF" "origin/$PICOAIDE_GIT_REF"
+`
+	gitResetHardScript = `#!/bin/sh
+exec git reset --hard "$PICOAIDE_GIT_REF"
+`
+	gitResetOriginBranchScript = `#!/bin/sh
+exec git reset --hard "origin/$PICOAIDE_GIT_REF"
+`
+	gitPullScript = `#!/bin/sh
+exec git pull --ff-only
+`
+)
+
+func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, gitScript string, extraEnv ...string) (string, error) {
 	env := os.Environ()
 	env = append(env, "GIT_TERMINAL_PROMPT=0")
+	env = append(env, extraEnv...)
 
-	var cleanup func()
+	cleanups := []func(){}
 	switch cred.Mode {
 	case "ssh":
 		keyFile, err := os.CreateTemp("", "picoaide-git-key-*")
@@ -368,10 +394,10 @@ func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, args ...s
 		}
 		env = append(env, "GIT_SSH_COMMAND="+sshWrapper.Name())
 		env = append(env, "PICOAIDE_GIT_SSH_KEY="+keyFile.Name())
-		cleanup = func() {
+		cleanups = append(cleanups, func() {
 			_ = os.Remove(keyFile.Name())
 			_ = os.Remove(sshWrapper.Name())
-		}
+		})
 	default:
 		script, err := os.CreateTemp("", "picoaide-git-askpass-*")
 		if err != nil {
@@ -395,18 +421,45 @@ func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, args ...s
 		env = append(env, "GIT_ASKPASS="+script.Name())
 		env = append(env, "PICOAIDE_GIT_USERNAME="+cred.Username)
 		env = append(env, "PICOAIDE_GIT_PASSWORD="+cred.Secret)
-		cleanup = func() { _ = os.Remove(script.Name()) }
+		cleanups = append(cleanups, func() { _ = os.Remove(script.Name()) })
 	}
-	if cleanup != nil {
-		defer cleanup()
+	gitWrapper, err := os.CreateTemp("", "picoaide-git-op-*")
+	if err != nil {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+		return "", err
 	}
-	return gitCmdWithEnv(dir, env, args...)
-}
-
-func gitCmdWithEnv(dir string, env []string, args ...string) (string, error) {
-	// All callers construct fixed git subcommands and validate user-controlled refs and paths before reaching this sink.
-	// codeql[go/command-injection]
-	cmd := exec.Command("git", args...)
+	if _, err := gitWrapper.WriteString(gitScript); err != nil {
+		gitWrapper.Close()
+		os.Remove(gitWrapper.Name())
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+		return "", err
+	}
+	if err := gitWrapper.Chmod(0700); err != nil {
+		gitWrapper.Close()
+		os.Remove(gitWrapper.Name())
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+		return "", err
+	}
+	if err := gitWrapper.Close(); err != nil {
+		os.Remove(gitWrapper.Name())
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+		return "", err
+	}
+	cleanups = append(cleanups, func() { _ = os.Remove(gitWrapper.Name()) })
+	defer func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}()
+	cmd := exec.Command(gitWrapper.Name())
 	cmd.Dir = dir
 	cmd.Env = env
 	var stdout, stderr strings.Builder
