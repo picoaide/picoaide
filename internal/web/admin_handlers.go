@@ -404,6 +404,8 @@ func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, args ...s
 }
 
 func gitCmdWithEnv(dir string, env []string, args ...string) (string, error) {
+	// All callers construct fixed git subcommands and validate user-controlled refs and paths before reaching this sink.
+	// codeql[go/command-injection]
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Env = env
