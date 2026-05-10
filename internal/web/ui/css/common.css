@@ -510,7 +510,7 @@ tbody tr:hover { background: #f8fbff; }
 .tag button:hover { color: var(--danger); }
 
 /* ===== Brand / Navigation ===== */
-.brand-mark { width: 28px; height: 28px; border-radius: 7px; display: inline-grid; place-items: center; background: #0f172a; color: #fff; font-weight: 800; font-size: .82rem; flex: 0 0 auto; }
+.brand-mark { width: 30px; height: 30px; display: inline-block; object-fit: contain; border-radius: 8px; flex: 0 0 auto; box-shadow: 0 8px 18px rgba(15,23,42,.12); }
 .navbar { display: flex; align-items: center; justify-content: space-between; padding: .82rem 1.5rem; background: rgba(255,255,255,.92); border-bottom: 1px solid var(--border); box-shadow: var(--shadow-sm); backdrop-filter: blur(10px); }
 .navbar h1 { display: flex; align-items: center; gap: .65rem; font-size: 1.05rem; color: var(--text); margin: 0; }
 .navbar-right { display: flex; align-items: center; gap: .85rem; font-size: .88rem; color: var(--text-secondary); }
@@ -545,7 +545,7 @@ tbody tr:hover { background: #f8fbff; }
 .login-shell { min-height: 100vh; display: grid; grid-template-columns: 1fr minmax(420px, 520px); background: #f5f7fb; }
 .login-panel { display: flex; flex-direction: column; justify-content: center; padding: 4rem 4.5rem; background: var(--surface); border-left: 1px solid var(--border); box-shadow: -18px 0 48px rgba(15,23,42,.08); }
 .login-brand { display: flex; align-items: center; gap: .78rem; margin-bottom: 3rem; }
-.login-logo { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center; background: #0f172a; color: #fff; font-weight: 800; font-size: 1.1rem; box-shadow: 0 10px 24px rgba(15,23,42,.16); }
+.login-logo { width: 42px; height: 42px; border-radius: 10px; display: block; object-fit: contain; box-shadow: 0 10px 24px rgba(15,23,42,.16); }
 .login-product { font-weight: 800; font-size: 1.1rem; letter-spacing: 0; color: var(--text); }
 .login-subtitle { font-size: .82rem; color: var(--text-muted); }
 .login-heading { margin-bottom: 1.55rem; }

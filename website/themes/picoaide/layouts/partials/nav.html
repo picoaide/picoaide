@@ -1,7 +1,7 @@
 <nav class="nav" id="nav">
   <div class="nav-container">
     <a class="nav-brand" href="{{ "/" | relURL }}">
-      <img class="nav-brand-mark" src="{{ "/images/logo.svg" | relURL }}" alt="">
+      <img class="nav-brand-mark" src="{{ "/images/logo.svg" | relURL }}" alt="{{ .Site.Title }}">
       <span class="nav-brand-copy">
         <strong>{{ .Site.Title }}</strong>
         {{ with .Site.Params.navTagline }}<small>{{ . }}</small>{{ end }}
