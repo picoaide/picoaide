@@ -30,22 +30,11 @@
         </div>
 
         <div class="console-grid">
-          <div class="metric-card metric-card--wide">
+          <div class="metric-card metric-card--wide metric-card--boundary">
             <span class="metric-label">{{ $home.signals.boundary.label }}</span>
             <strong>{{ $home.signals.boundary.value }}</strong>
             <p>{{ $home.signals.boundary.description }}</p>
           </div>
-          <div class="metric-grid">
-            {{ range $home.metrics }}
-            <div class="metric-card">
-              <span class="metric-label">{{ .label }}</span>
-              <strong>{{ .value }}</strong>
-            </div>
-            {{ end }}
-          </div>
-        </div>
-
-        <div class="console-stack">
           <div class="console-panel">
             <div class="console-panel-title">{{ $home.signals.flow.title }}</div>
             <div class="console-flow">
@@ -55,14 +44,15 @@
               {{ end }}
             </div>
           </div>
-          <div class="console-panel console-panel--soft">
-            <div class="console-panel-title">{{ $home.signals.today.title }}</div>
-            <ul class="console-list">
-              {{ range $home.signals.today.items }}
-              <li><span class="status-dot status-dot--blue"></span><span>{{ . }}</span></li>
-              {{ end }}
-            </ul>
+        </div>
+
+        <div class="metric-grid">
+          {{ range $home.metrics }}
+          <div class="metric-card">
+            <span class="metric-label">{{ .label }}</span>
+            <strong>{{ .value }}</strong>
           </div>
+          {{ end }}
         </div>
       </div>
     </div>
