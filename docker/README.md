@@ -12,59 +12,35 @@
 | **多架构支持** | 同时支持 `linux/amd64` 和 `linux/arm64`，x86 服务器和 ARM 设备通用 |
 | **数据持久化** | 配置文件和工作目录通过 volume 挂载，容器重建不丢失数据 |
 | **自动更新** | 每日自动检测 PicoClaw 新版本并构建新镜像，始终保持最新 |
-| **安全访问** | SSH 仅允许密钥登录，禁用密码认证 |
 | **国内加速** | 预配置清华镜像源（apt、npm、pip），国内环境下载速度快 |
 | **多 Shell 支持** | 内置 bash、zsh、fish，配合 fzf 提升操作效率 |
 
 ## 快速开始
 
-### 1. 创建目录并下载配置
+### 1. 运行容器
 
 ```bash
-mkdir picoaide-deploy && cd picoaide-deploy
-mkdir -p root data
-
-# 下载 docker-compose 文件
-curl -O https://raw.githubusercontent.com/picoaide/picoaide/main/docker/docker-compose.yaml
-```
-
-### 2. 配置 SSH 公钥（可选）
-
-```bash
-echo "你的SSH公钥内容" > root/.ssh/authorized_keys
-```
-
-### 3. 启动容器
-
-```bash
-docker compose up -d
+docker run -d \
+  --name picoaide-deploy \
+  -v picoaide-root:/root \
+  ghcr.io/picoaide/picoaide:v0.2.6
 ```
 
 容器启动后会自动运行 `picoclaw gateway`，通过 Gateway 模式对外提供服务。
 
-### 4. 进入容器
+### 2. 进入容器
 
 ```bash
 # 通过 Docker exec
 docker exec -it picoaide-deploy zsh
-
-# 或通过 SSH（需要先配置公钥）
-ssh -p 2222 root@<地址>
 ```
 
 ## 配置说明
 
-### 目录结构
+挂载到 `/root` 的卷会保存 PicoClaw 配置文件：
 
-```
-picoaide-deploy/
-├── docker-compose.yaml
-├── root/                    # 挂载到容器 /root（持久化用户数据）
-│   ├── .ssh/
-│   │   └── authorized_keys  # SSH 公钥
-│   └── .picoclaw/
-│       └── config.json      # PicoClaw 配置文件
-└── data/                    # 挂载到容器 /data（持久化工作数据）
+```text
+/root/.picoclaw/config.json
 ```
 
 ### PicoClaw 配置
@@ -102,8 +78,9 @@ picoaide-deploy/
 拉取指定版本镜像即可更新：
 
 ```bash
-# 编辑 docker-compose.yaml 中的版本号后
-docker compose pull && docker compose up -d
+docker pull ghcr.io/picoaide/picoaide:v0.2.6
+docker rm -f picoaide-deploy
+docker run -d --name picoaide-deploy -v picoaide-root:/root ghcr.io/picoaide/picoaide:v0.2.6
 ```
 
 镜像每天自动检测 PicoClaw 新版本并构建，有新版本才会触发更新。
