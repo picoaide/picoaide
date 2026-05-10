@@ -116,6 +116,39 @@ func TestContainerBaseURLDefault(t *testing.T) {
 	}
 }
 
+func TestContainerBaseURLDefaultsToInternalHTTPWithTLS443(t *testing.T) {
+	cfg := &config.GlobalConfig{
+		Web: config.WebConfig{
+			Listen: ":443",
+			TLS:    config.TLSConfig{Enabled: true},
+		},
+	}
+	if got := containerBaseURL(cfg); got != "http://100.64.0.1:80" {
+		t.Fatalf("containerBaseURL = %q, want internal HTTP bridge URL", got)
+	}
+}
+
+func TestContainerBaseURLNormalizesWildcardHost(t *testing.T) {
+	cfg := &config.GlobalConfig{
+		Web: config.WebConfig{Listen: "0.0.0.0:80"},
+	}
+	if got := containerBaseURL(cfg); got != "http://100.64.0.1:80" {
+		t.Fatalf("containerBaseURL = %q, want bridge URL", got)
+	}
+}
+
+func TestContainerBaseURLUsesHTTPSWithTLSNon443(t *testing.T) {
+	cfg := &config.GlobalConfig{
+		Web: config.WebConfig{
+			Listen: ":8443",
+			TLS:    config.TLSConfig{Enabled: true},
+		},
+	}
+	if got := containerBaseURL(cfg); got != "https://100.64.0.1:8443" {
+		t.Fatalf("containerBaseURL = %q, want HTTPS listener URL", got)
+	}
+}
+
 func TestContainerBaseURLOverride(t *testing.T) {
 	cfg := &config.GlobalConfig{
 		Web: config.WebConfig{

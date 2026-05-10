@@ -5,7 +5,7 @@ weight: 6
 draft: false
 ---
 
-PicoAide 的配置存储在 SQLite 数据库中，通过管理面板或 API 进行修改。旧版本的 `config.yaml` 文件会在首次运行时自动迁移到数据库。
+PicoAide 的配置存储在 SQLite 数据库中，通过管理面板或 API 进行修改。
 
 ## 配置方式
 
@@ -30,14 +30,6 @@ curl -X POST http://localhost/api/config \
   -H "Content-Type: application/json" \
   -b "picoaide-session=your-session-cookie" \
   -d '{"picoclaw": {"agents": {"defaults": {"model_name": "claude-4.7"}}}}'
-```
-
-### 从旧版配置迁移
-
-如果存在旧版 `config.yaml` 文件，首次运行时系统会自动检测并迁移：
-
-```
-检测到 config.yaml，正在迁移到数据库...
 ```
 
 ## 配置结构

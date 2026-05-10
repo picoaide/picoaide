@@ -39,6 +39,36 @@ func TestSessionTokenRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDockerNetworkRequest(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/health", nil)
+	req.RemoteAddr = "100.64.0.2:34567"
+	if !isDockerNetworkRequest(req) {
+		t.Fatal("100.64.0.2 should be treated as Docker network")
+	}
+}
+
+func TestExternalNetworkRequest(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/health", nil)
+	req.RemoteAddr = "203.0.113.10:34567"
+	if isDockerNetworkRequest(req) {
+		t.Fatal("external IP should not be treated as Docker network")
+	}
+}
+
+func TestHTTPSRedirectTarget(t *testing.T) {
+	req := httptest.NewRequest("GET", "http://example.com/path?q=1", nil)
+	if got := httpsRedirectTarget(req); got != "https://example.com/path?q=1" {
+		t.Fatalf("httpsRedirectTarget = %q", got)
+	}
+}
+
+func TestHTTPSRedirectTargetDropsDefaultHTTPPort(t *testing.T) {
+	req := httptest.NewRequest("GET", "http://example.com:80/path?q=1", nil)
+	if got := httpsRedirectTarget(req); got != "https://example.com/path?q=1" {
+		t.Fatalf("httpsRedirectTarget = %q", got)
+	}
+}
+
 func TestSessionTokenTampered(t *testing.T) {
 	s := newTestServer(t)
 

@@ -348,9 +348,14 @@ func containerBaseURL(cfg *config.GlobalConfig) string {
 			port = parts[1]
 		}
 	}
+	if host == "0.0.0.0" || host == "::" || host == "[::]" {
+		host = "100.64.0.1"
+	}
 
 	scheme := "http"
-	if cfg.Web.TLS.Enabled {
+	if cfg.Web.TLS.Enabled && port == "443" {
+		port = "80"
+	} else if cfg.Web.TLS.Enabled {
 		scheme = "https"
 	}
 

@@ -54,7 +54,7 @@
     <div class="field"><label>证书文件 (PEM)</label><input type="text" data-path="web.tls.cert_file" placeholder="/path/to/cert.pem"></div>
     <div class="field"><label>私钥文件 (PEM)</label><input type="text" data-path="web.tls.key_file" placeholder="/path/to/key.pem"></div>
   </div>
-  <p class="text-sm text-muted">容器访问地址用于下发 MCP SSE 地址，留空时默认使用 http://100.64.0.1:80。启用 HTTPS 后需重启服务生效。</p>
+  <p class="text-sm text-muted">容器访问地址用于下发 MCP SSE 地址，留空时默认使用内部地址。HTTPS 监听 :443 时，外部 HTTP 会跳转 HTTPS，Docker 内网仍使用 http://100.64.0.1:80。启用 HTTPS 后需重启服务生效。</p>
 </div>
 
 <div class="card">

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -304,6 +305,34 @@ func (s *Server) setSessionCookie(c *gin.Context, value string, maxAge int) {
 	http.SetCookie(c.Writer, cookie)
 }
 
+func isDockerNetworkRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	_, subnet, err := net.ParseCIDR(dockerpkg.NetworkSubnet)
+	if err != nil {
+		return false
+	}
+	return subnet.Contains(ip)
+}
+
+func httpsRedirectTarget(r *http.Request) string {
+	host := r.Host
+	if h, p, err := net.SplitHostPort(r.Host); err == nil && p == "80" {
+		host = h
+	}
+	target := "https://" + host + r.URL.Path
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	return target
+}
+
 // Serve 创建并启动 Web 管理面板服务器
 func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 	if listenAddr == "" {
@@ -385,6 +414,7 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 	r := gin.New()
 	r.Use(s.secureHeaders())
 	s.RegisterRoutes(r)
+	appHandler := logger.AccessMiddleware(r)
 
 	// 信号通道：监听 SIGTERM 和 SIGINT
 	sigCh := make(chan os.Signal, 1)
@@ -403,24 +433,24 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 		if strings.HasSuffix(listenAddr, ":443") {
 			redirectMux := http.NewServeMux()
 			redirectMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				target := "https://" + r.Host + r.URL.Path
-				if r.URL.RawQuery != "" {
-					target += "?" + r.URL.RawQuery
+				if isDockerNetworkRequest(r) {
+					appHandler.ServeHTTP(w, r)
+					return
 				}
-				http.Redirect(w, r, target, http.StatusMovedPermanently)
+				http.Redirect(w, r, httpsRedirectTarget(r), http.StatusMovedPermanently)
 			})
 			redirectServer = &http.Server{Addr: ":80", Handler: redirectMux}
 			go func() {
-				slog.Info("HTTP→HTTPS 重定向已启动", "listen", ":80")
+				slog.Info("HTTP 入口已启动", "listen", ":80", "internal", dockerpkg.NetworkSubnet, "external", "redirect-to-https")
 				if err := redirectServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-					slog.Error("重定向服务错误", "error", err)
+					slog.Error("HTTP 入口服务错误", "error", err)
 				}
 			}()
 		}
 
 		srv := &http.Server{
 			Addr:    listenAddr,
-			Handler: logger.AccessMiddleware(r),
+			Handler: appHandler,
 		}
 		go func() {
 			slog.Info("管理面板启动", "url", "https://"+listenAddr)
@@ -436,7 +466,7 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 
 	srv := &http.Server{
 		Addr:    listenAddr,
-		Handler: logger.AccessMiddleware(r),
+		Handler: appHandler,
 	}
 	go func() {
 		slog.Info("管理面板启动", "url", "http://"+listenAddr)

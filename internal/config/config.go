@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/picoaide/picoaide/internal/auth"
-	"gopkg.in/yaml.v3"
 )
 
 // ============================================================
@@ -26,92 +25,8 @@ const AppName = "picoaide"
 
 var Version = "dev"
 
-const configFileName = "config.yaml"
 const SessionSecret = "picoaide-session-key-change-me"
 const SessionMaxAge = 86400 // 24 hours
-
-const DefaultConfig = `# PicoAide 管理工具配置文件
-# 请根据实际情况修改以下配置
-
-ldap:
-  host: "ldap://ldap.example.com:389"
-  bind_dn: "cn=admin,dc=example,dc=com"
-  bind_password: "your-password-here"
-  base_dn: "ou=users,dc=example,dc=com"
-  filter: "(objectClass=inetOrgPerson)"
-  username_attribute: "uid"
-
-image:
-  name: "ghcr.io/picoaide/picoaide"
-  timezone: "Asia/Shanghai"
-  registry: "github"
-
-users_root: "./users"
-archive_root: "./archive"
-
-web:
-  listen: ":80"
-  container_base_url: ""
-  password: "change-me-to-a-random-secret"
-  log_retention: "6m"
-  tls:
-    enabled: false
-    cert_file: ""
-    key_file: ""
-
-picoclaw:
-  agents:
-    defaults:
-      model_name: "gpt-5.4"
-      max_tokens: 32768
-      max_tool_iterations: 50
-  model_list:
-    - model_name: "gpt-5.4"
-      model: "openai/gpt-5.4"
-      api_base: "https://api.openai.com/v1"
-      request_timeout: 6000
-  channel_list:
-    dingtalk:
-      enabled: false
-      type: "dingtalk"
-    feishu:
-      enabled: false
-      type: "feishu"
-  tools:
-    web:
-      duckduckgo:
-        enabled: true
-    mcp:
-      enabled: true
-      max_inline_text_chars: 8192
-      servers:
-        browser:
-          enabled: false
-  gateway:
-    host: "0.0.0.0"
-    port: 18790
-
-security:
-  model_list:
-    gpt-5.4:0:
-      api_keys:
-        - "sk-openai-replace-me"
-
-skills:
-  repos: []
-`
-
-// 白名单文件名，与 config.yaml 同目录
-const whitelistFileName = "whitelist.yaml"
-
-const defaultWhitelist = `# PicoAide 用户白名单
-# users 列表为空时，所有 LDAP 用户均可使用
-# 示例：
-# users:
-#   - zhangsan
-#   - lisi
-users: []
-`
 
 // ============================================================
 // 配置结构体
@@ -285,88 +200,6 @@ func SkillsDirPath() string {
 	return filepath.Join(wd, "skill")
 }
 
-// ============================================================
-// 配置加载和自动检测
-// ============================================================
-
-func getExeDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return "."
-	}
-	return filepath.Dir(exe)
-}
-
-func ConfigPath() string {
-	if _, err := os.Stat(configFileName); err == nil {
-		return configFileName
-	}
-	exeDir := getExeDir()
-	p := filepath.Join(exeDir, configFileName)
-	if _, err := os.Stat(p); err == nil {
-		return p
-	}
-	return configFileName
-}
-
-func EnsureConfig() (string, bool) {
-	configPath := ConfigPath()
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		os.MkdirAll(filepath.Dir(configPath), 0755)
-		err := os.WriteFile(configPath, []byte(DefaultConfig), 0644)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "错误: 无法创建默认配置文件 %s: %v\n", configPath, err)
-			os.Exit(1)
-		}
-		fmt.Printf("已生成默认配置文件: %s\n", configPath)
-
-		// 同时创建白名单文件
-		if err := EnsureWhitelistFile(); err != nil {
-			fmt.Fprintf(os.Stderr, "警告: 创建白名单文件失败: %v\n", err)
-		}
-
-		fmt.Println("请修改配置文件后重新运行此工具。")
-		return configPath, false
-	}
-	return configPath, true
-}
-
-func Load(path string) (*GlobalConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("读取配置文件失败: %w", err)
-	}
-
-	var cfg GlobalConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("解析配置文件失败: %w", err)
-	}
-
-	return &cfg, nil
-}
-
-func Save(cfg *GlobalConfig, path string) error {
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("序列化配置失败: %w", err)
-	}
-	return os.WriteFile(path, data, 0644)
-}
-
-// ============================================================
-// 白名单文件管理（从 user 包迁移，打破循环依赖）
-// ============================================================
-
-// WhitelistFile 白名单文件结构
-type WhitelistFile struct {
-	Users []string `yaml:"users"`
-}
-
-// WhitelistPath 返回白名单文件路径（与 config.yaml 同目录）
-func WhitelistPath() string {
-	return filepath.Join(filepath.Dir(ConfigPath()), whitelistFileName)
-}
-
 func RuleCacheDir() string {
 	if dir := strings.TrimSpace(os.Getenv("PICOAIDE_RULE_CACHE_DIR")); dir != "" {
 		return dir
@@ -374,7 +207,11 @@ func RuleCacheDir() string {
 	if hcfg, err := LoadHome(); err == nil && hcfg != nil && hcfg.RuleCacheDir != "" {
 		return hcfg.RuleCacheDir
 	}
-	return filepath.Join(filepath.Dir(ConfigPath()), "rules")
+	wd, err := os.Getwd()
+	if err != nil || wd == "" {
+		return "./rules"
+	}
+	return filepath.Join(wd, "rules")
 }
 
 func PicoClawAdapterRemoteBaseURL() string {
@@ -388,16 +225,6 @@ func PicoClawAdapterRemoteBaseURL() string {
 		return strings.TrimRight(value, "/")
 	}
 	return "https://raw.githubusercontent.com/picoaide/picoaide/main/rules/picoclaw"
-}
-
-// EnsureWhitelistFile 首次 init 时创建白名单文件（带注释模板）
-func EnsureWhitelistFile() error {
-	path := WhitelistPath()
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
-	os.MkdirAll(filepath.Dir(path), 0755)
-	return os.WriteFile(path, []byte(defaultWhitelist), 0644)
 }
 
 // ============================================================
@@ -656,25 +483,6 @@ func InstallService(cfg *GlobalConfig) error {
 	return nil
 }
 
-// LoadRaw 读取 config.yaml 并转换为 JSON（供 API 使用）
-func LoadRaw() ([]byte, error) {
-	data, err := os.ReadFile(ConfigPath())
-	if err != nil {
-		return nil, fmt.Errorf("读取配置文件失败: %w", err)
-	}
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("解析配置文件失败: %w", err)
-	}
-	return json.MarshalIndent(raw, "", "  ")
-}
-
-// SaveRaw 将 YAML 字节写入 config.yaml
-func SaveRaw(data []byte) error {
-	os.MkdirAll(filepath.Dir(ConfigPath()), 0755)
-	return os.WriteFile(ConfigPath(), data, 0644)
-}
-
 // ============================================================
 // 数据库配置管理
 // ============================================================
@@ -773,14 +581,7 @@ func LoadFromDB() (*GlobalConfig, error) {
 	return cfg, nil
 }
 
-// SaveToDB 将全局配置保存到数据库
-func SaveToDB(cfg *GlobalConfig, changedBy string) error {
-	engine, err := auth.GetEngine()
-	if err != nil {
-		return fmt.Errorf("获取数据库引擎失败: %w", err)
-	}
-
-	// 构建键值映射
+func configToKV(cfg *GlobalConfig) (map[string]string, error) {
 	kv := make(map[string]string)
 	kv["ldap.host"] = cfg.LDAP.Host
 	kv["ldap.bind_dn"] = cfg.LDAP.BindDN
@@ -818,14 +619,14 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
 	if cfg.PicoClaw != nil {
 		b, err := json.Marshal(cfg.PicoClaw)
 		if err != nil {
-			return fmt.Errorf("序列化 picoclaw 配置失败: %w", err)
+			return nil, fmt.Errorf("序列化 picoclaw 配置失败: %w", err)
 		}
 		kv["picoclaw"] = string(b)
 	}
 	if cfg.Security != nil {
 		b, err := json.Marshal(cfg.Security)
 		if err != nil {
-			return fmt.Errorf("序列化 security 配置失败: %w", err)
+			return nil, fmt.Errorf("序列化 security 配置失败: %w", err)
 		}
 		kv["security"] = string(b)
 	}
@@ -833,9 +634,23 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
 	{
 		b, err := json.Marshal(cfg.Skills)
 		if err != nil {
-			return fmt.Errorf("序列化 skills 配置失败: %w", err)
+			return nil, fmt.Errorf("序列化 skills 配置失败: %w", err)
 		}
 		kv["skills"] = string(b)
+	}
+	return kv, nil
+}
+
+// SaveToDB 将全局配置保存到数据库
+func SaveToDB(cfg *GlobalConfig, changedBy string) error {
+	engine, err := auth.GetEngine()
+	if err != nil {
+		return fmt.Errorf("获取数据库引擎失败: %w", err)
+	}
+
+	kv, err := configToKV(cfg)
+	if err != nil {
+		return err
 	}
 
 	// 事务写入
@@ -958,15 +773,89 @@ func SaveRawToDB(data map[string]interface{}, changedBy string) error {
 	return session.Commit()
 }
 
+func DefaultGlobalConfig() *GlobalConfig {
+	return &GlobalConfig{
+		LDAP: LDAPConfig{
+			Host:              "ldap://ldap.example.com:389",
+			BindDN:            "cn=admin,dc=example,dc=com",
+			BindPassword:      "your-password-here",
+			BaseDN:            "ou=users,dc=example,dc=com",
+			Filter:            "(objectClass=inetOrgPerson)",
+			UsernameAttribute: "uid",
+		},
+		Image: ImageConfig{
+			Name:     "ghcr.io/picoaide/picoaide",
+			Timezone: "Asia/Shanghai",
+			Registry: "github",
+		},
+		UsersRoot:   "./users",
+		ArchiveRoot: "./archive",
+		Web: WebConfig{
+			Listen:       ":80",
+			Password:     "change-me-to-a-random-secret",
+			LogRetention: "6m",
+		},
+		PicoClaw: map[string]interface{}{
+			"agents": map[string]interface{}{
+				"defaults": map[string]interface{}{
+					"model_name":          "gpt-5.4",
+					"max_tokens":          32768,
+					"max_tool_iterations": 50,
+				},
+			},
+			"model_list": []interface{}{
+				map[string]interface{}{
+					"model_name":      "gpt-5.4",
+					"model":           "openai/gpt-5.4",
+					"api_base":        "https://api.openai.com/v1",
+					"request_timeout": 6000,
+				},
+			},
+			"channel_list": map[string]interface{}{
+				"dingtalk": map[string]interface{}{
+					"enabled": false,
+					"type":    "dingtalk",
+				},
+				"feishu": map[string]interface{}{
+					"enabled": false,
+					"type":    "feishu",
+				},
+			},
+			"tools": map[string]interface{}{
+				"web": map[string]interface{}{
+					"duckduckgo": map[string]interface{}{
+						"enabled": true,
+					},
+				},
+				"mcp": map[string]interface{}{
+					"enabled":               true,
+					"max_inline_text_chars": 8192,
+					"servers": map[string]interface{}{
+						"browser": map[string]interface{}{
+							"enabled": false,
+						},
+					},
+				},
+			},
+			"gateway": map[string]interface{}{
+				"host": "0.0.0.0",
+				"port": 18790,
+			},
+		},
+		Security: map[string]interface{}{
+			"model_list": map[string]interface{}{
+				"gpt-5.4:0": map[string]interface{}{
+					"api_keys": []interface{}{"sk-openai-replace-me"},
+				},
+			},
+		},
+		Skills: SkillsConfig{Repos: []SkillRepo{}},
+	}
+}
+
 // InitDBDefaults 将默认配置写入数据库（不覆盖已有值）
 func InitDBDefaults() error {
-	// 解析默认配置 YAML 为 map
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal([]byte(DefaultConfig), &raw); err != nil {
-		return fmt.Errorf("解析默认配置失败: %w", err)
-	}
-
-	flat := flattenConfig(raw)
+	cfg := DefaultGlobalConfig()
 
 	engine, err := auth.GetEngine()
 	if err != nil {
@@ -980,8 +869,11 @@ func InitDBDefaults() error {
 		return fmt.Errorf("开启事务失败: %w", err)
 	}
 
-	for key, value := range flat {
-		// INSERT OR IGNORE：键已存在时不覆盖
+	kv, err := configToKV(cfg)
+	if err != nil {
+		return err
+	}
+	for key, value := range kv {
 		if _, err := session.Exec(
 			"INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
 			key, value,
@@ -991,73 +883,6 @@ func InitDBDefaults() error {
 	}
 
 	return session.Commit()
-}
-
-// MigrateFromYAML 从 config.yaml 和 whitelist.yaml 迁移配置到数据库
-func MigrateFromYAML(yamlPath string) error {
-	// 读取并解析 YAML 配置文件
-	data, err := os.ReadFile(yamlPath)
-	if err != nil {
-		return fmt.Errorf("读取配置文件失败: %w", err)
-	}
-
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("解析配置文件失败: %w", err)
-	}
-
-	flat := flattenConfig(raw)
-
-	engine, err := auth.GetEngine()
-	if err != nil {
-		return fmt.Errorf("获取数据库引擎失败: %w", err)
-	}
-
-	session := engine.NewSession()
-	defer session.Close()
-
-	if err := session.Begin(); err != nil {
-		return fmt.Errorf("开启事务失败: %w", err)
-	}
-
-	// 写入配置项
-	for key, value := range flat {
-		if _, err := session.Exec(
-			"INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
-			key, value,
-		); err != nil {
-			return fmt.Errorf("写入配置失败: %w", err)
-		}
-	}
-
-	// 迁移白名单
-	whitelistPath := filepath.Join(filepath.Dir(yamlPath), whitelistFileName)
-	if _, err := os.Stat(whitelistPath); err == nil {
-		wlData, err := os.ReadFile(whitelistPath)
-		if err == nil {
-			var wl WhitelistFile
-			if err := yaml.Unmarshal(wlData, &wl); err == nil {
-				for _, username := range wl.Users {
-					if _, err := session.Exec(
-						"INSERT OR IGNORE INTO whitelist (username, added_by) VALUES (?, 'migration')",
-						username,
-					); err != nil {
-						fmt.Fprintf(os.Stderr, "警告: 迁移白名单用户 %s 失败: %v\n", username, err)
-					}
-				}
-				if len(wl.Users) > 0 {
-					fmt.Printf("已迁移 %d 个白名单用户\n", len(wl.Users))
-				}
-			}
-		}
-	}
-
-	if err := session.Commit(); err != nil {
-		return fmt.Errorf("提交迁移事务失败: %w", err)
-	}
-
-	fmt.Printf("已从 %s 迁移 %d 个配置项到数据库\n", yamlPath, len(flat))
-	return nil
 }
 
 // flattenConfig 将嵌套配置展平为点分隔的键值映射
