@@ -1,0 +1,96 @@
+hero:
+  kicker: 企业级 AI PaaS 工作平台
+  title: 让每位员工拥有自己的 AI 操作助手
+  description: AI 的力量应当被释放，但数据的边界必须被守护。PicoAide 让 AI 进入企业，而不是让数据离开企业。
+  subtitle: 私有化部署 · 权限继承 · 数据不外流
+  actions:
+    - label: 快速开始
+      href: /docs/quick-start/
+      style: primary
+    - label: 查看文档
+      href: /docs/
+      style: secondary
+    - label: GitHub
+      href: https://github.com/picoaide/picoaide
+      style: ghost
+      external: true
+badges:
+  - 私有化部署
+  - 权限继承
+  - 容器隔离
+  - MCP 中继
+metrics:
+  - label: 认证
+    value: Local / LDAP
+  - label: MCP
+    value: Browser / Computer
+  - label: 配置
+    value: 分层合并
+  - label: 部署
+    value: 按用户 / 按组
+signals:
+  title: PicoAide Control Plane
+  summary: 统一管理用户、技能、容器和连接通道
+  status: 服务在线
+  boundary:
+    label: 系统边界
+    value: 内网部署 / 独立容器 / 组织权限继承
+    description: AI 只在授权上下文中工作，数据保持在企业边界内。
+  flow:
+    title: 执行路径
+    steps:
+      - AI 容器
+      - MCP SSE
+      - 服务端中继
+      - 浏览器 / 桌面执行端
+  today:
+    title: 今日状态
+    items:
+      - 用户容器按组分发技能
+      - 浏览器授权连接可随时开启或断开
+      - 桌面白名单限制文件访问范围
+features:
+  kicker: 能力总览
+  title: 围绕企业内网协作的核心能力
+  summary: PicoAide 把认证、容器、浏览器、桌面、文件和技能统一到一个控制平面里，减少碎片化工具栈。
+  items:
+    - title: 容器化隔离
+      description: 每位用户拥有独立 PicoClaw 容器，基于 `picoaide-net` 网络隔离，容器之间默认不可直连。
+    - title: 认证继承
+      description: 支持本地认证与 LDAP 认证。浏览器和桌面插件复用用户身份，不需要为 AI 重新设计权限体系。
+    - title: MCP 中继
+      description: SSE 与 WebSocket 组成双层中继，浏览器和桌面都通过标准 MCP 工具暴露能力。
+    - title: 技能分发
+      description: 技能仓库支持 Git 导入、按组部署、按用户部署和上传安装，适合企业内部分层治理。
+docs:
+  kicker: 文档入口
+  title: 按照真实使用顺序组织
+  summary: 先看安装与架构，再看配置、客户端、技能和 API。文档直接对应当前代码实现，不堆叠空泛概念。
+  items:
+    - title: 快速开始
+      description: 安装包、初始化向导、systemd 服务、插件接入和基础验证。
+      href: /docs/quick-start/
+      kicker: Start here
+    - title: 架构概览
+      description: 服务端、容器、MCP 中继、浏览器扩展、桌面客户端之间的关系。
+      href: /docs/architecture/
+      kicker: System design
+    - title: 配置参考
+      description: 认证、技能仓库、PicoClaw 适配包、目录结构和安全配置。
+      href: /docs/configuration/
+      kicker: Ops
+    - title: 接口参考
+      description: 认证、文件、MCP、用户、技能、镜像、分组和白名单接口。
+      href: /docs/api/
+      kicker: API
+release:
+  kicker: 开源发布
+  title: 适合企业内部署的 AI 工作底座
+  summary: Go 服务端、Docker 容器隔离、SQLite 配置存储和 Hugo 官网组成一个轻量但完整的企业级项目。
+  primary:
+    label: 查看发布说明
+    href: /blog/release-v1.0.0/
+  secondary:
+    label: 浏览源码
+    href: https://github.com/picoaide/picoaide
+    external: true

@@ -1,30 +1,31 @@
 {{ define "content" }}
-<div class="container">
-  <article class="single-page">
-    <header class="single-header">
-      <h1 class="single-title">{{ .Title }}</h1>
-      {{ if .Date }}
-      <div class="single-meta">
-        <time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006年01月02日" }}</time>
-        {{ with .Params.author }}<span class="single-meta-sep">&middot;</span><span>{{ . }}</span>{{ end }}
-        {{ with .Params.tags }}<span class="single-meta-sep">&middot;</span><span>{{ delimit . ", " }}</span>{{ end }}
+<div class="page-shell">
+  <div class="container">
+    <article class="single-page">
+      <header class="page-hero page-hero--compact">
+        <div class="eyebrow">{{ .Section | title }}</div>
+        <h1>{{ .Title }}</h1>
+        <div class="post-card-meta">
+          {{ if .Date }}<time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006-01-02" }}</time>{{ end }}
+          {{ with .Params.author }}<span>{{ . }}</span>{{ end }}
+          {{ with .Params.tags }}<span>{{ delimit . ", " }}</span>{{ end }}
+        </div>
+      </header>
+
+      <div class="richtext single-content">
+        {{ .Content }}
       </div>
+
+      {{ if .Params.tags }}
+      <footer class="single-footer">
+        <div class="single-tags">
+          {{ range .Params.tags }}
+            <span class="badge">{{ . }}</span>
+          {{ end }}
+        </div>
+      </footer>
       {{ end }}
-    </header>
-
-    <div class="single-content">
-      {{ .Content }}
-    </div>
-
-    {{ if .Params.tags }}
-    <footer class="single-footer">
-      <div class="single-tags">
-        {{ range .Params.tags }}
-          <span class="single-tag">{{ . }}</span>
-        {{ end }}
-      </div>
-    </footer>
-    {{ end }}
-  </article>
+    </article>
+  </div>
 </div>
 {{ end }}

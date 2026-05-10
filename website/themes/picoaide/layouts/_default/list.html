@@ -1,39 +1,33 @@
 {{ define "content" }}
-<div class="container">
-  <div class="list-page">
-    <header class="list-header">
-      <h1 class="list-title">{{ .Title }}</h1>
-      {{ with .Description }}
-        <p class="list-description">{{ . }}</p>
-      {{ end }}
-    </header>
+<div class="page-shell">
+  <div class="container">
+    <section class="page-hero">
+      <div class="eyebrow">{{ .Section | title }}</div>
+      <h1>{{ .Title }}</h1>
+      {{ with .Description }}<p class="page-lead">{{ . }}</p>{{ end }}
+    </section>
 
     {{ if .Content }}
-    <div class="list-intro">
+    <section class="page-intro richtext">
       {{ .Content }}
-    </div>
+    </section>
     {{ end }}
 
     {{ if .Pages }}
-    <div class="list-grid">
+    <section class="post-grid">
       {{ range .Pages }}
-      <article class="list-card">
-        <div class="list-card-body">
-          <h2 class="list-card-title">
-            <a href="{{ .RelPermalink }}">{{ .Title }}</a>
-          </h2>
-          {{ with .Description }}
-            <p class="list-card-desc">{{ . }}</p>
-          {{ else }}
-            <p class="list-card-desc">{{ .Summary | truncate 120 }}</p>
-          {{ end }}
-        </div>
-        <div class="list-card-meta">
-          <time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006年01月02日" }}</time>
+      <article class="post-card">
+        <div class="post-card-body">
+          <div class="post-card-meta">
+            {{ with .Params.tags }}<span class="badge">{{ index . 0 }}</span>{{ end }}
+            {{ if .Date }}<time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006-01-02" }}</time>{{ end }}
+          </div>
+          <h2 class="post-card-title"><a href="{{ .RelPermalink }}">{{ .Title }}</a></h2>
+          <p class="post-card-desc">{{ with .Description }}{{ . }}{{ else }}{{ .Summary | plainify | truncate 160 }}{{ end }}</p>
         </div>
       </article>
       {{ end }}
-    </div>
+    </section>
     {{ end }}
 
     {{ template "_internal/pagination.html" . }}

@@ -1,0 +1,24 @@
+docs_nav:
+  other: "文档导航"
+version_prefix:
+  other: "v"
+mobile_nav:
+  other: "导航"
+toggle_docs_nav:
+  other: "切换文档导航"
+edit_on_github:
+  other: "在 GitHub 上编辑此页"
+previous_page:
+  other: "上一页"
+next_page:
+  other: "下一页"
+doc_card:
+  other: "文档"
+not_found_title:
+  other: "页面未找到"
+not_found_description:
+  other: "这个地址不存在，或已经迁移到新的文档结构。"
+back_home:
+  other: "返回首页"
+view_docs:
+  other: "查看文档"
