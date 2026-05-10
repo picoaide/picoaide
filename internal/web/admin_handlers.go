@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,8 @@ import (
 )
 
 var gitMutex sync.Mutex
+
+var safeSkillRepoRefRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 
 type skillRepoCredentialInput struct {
 	Name     string `json:"name"`
@@ -74,6 +77,19 @@ func normalizeSkillRepoRef(ref, refType string) (string, string) {
 	return ref, refType
 }
 
+func validateSkillRepoRef(ref string) error {
+	if ref == "" {
+		return nil
+	}
+	if len(ref) > 255 || strings.HasPrefix(ref, "-") || strings.Contains(ref, "..") || strings.Contains(ref, "//") {
+		return fmt.Errorf("Git ref 不合法")
+	}
+	if !safeSkillRepoRefRe.MatchString(ref) || strings.HasSuffix(ref, "/") || strings.HasSuffix(ref, ".") {
+		return fmt.Errorf("Git ref 不合法")
+	}
+	return nil
+}
+
 func inferSkillRepoCredentialMode(repoURL string) string {
 	lower := strings.ToLower(strings.TrimSpace(repoURL))
 	if strings.HasPrefix(lower, "git@") || strings.HasPrefix(lower, "ssh://") {
@@ -112,6 +128,9 @@ func skillRepoFromInput(input skillRepoInput) (config.SkillRepo, error) {
 		return config.SkillRepo{}, fmt.Errorf("仓库地址必须是 http://、https://、git@ 或 ssh:// 开头的 Git 地址")
 	}
 	ref, refType := normalizeSkillRepoRef(input.Ref, input.RefType)
+	if err := validateSkillRepoRef(ref); err != nil {
+		return config.SkillRepo{}, err
+	}
 	var creds []config.SkillRepoCredential
 	for i, raw := range input.Credentials {
 		cred := normalizeSkillRepoCredentialInput(raw, fmt.Sprintf("%s-%d", name, i+1))
@@ -177,12 +196,7 @@ func cloneGitRepoWithCredentials(reposDir, repoName, repoURL string, repo config
 				return "", err
 			}
 		}
-		args := []string{"clone"}
-		if repo.Ref != "" {
-			args = append(args, "--branch", repo.Ref, "--single-branch")
-		}
-		args = append(args, repoURL, tempDest)
-		out, err := gitCmdWithCredential(reposDir, cred, args...)
+		out, err := gitCloneCmdWithCredential(reposDir, cred, repoURL, tempDest, repo.Ref)
 		if err == nil {
 			if tempDest != destBase {
 				if err := os.RemoveAll(destBase); err != nil {
@@ -210,46 +224,98 @@ func pullGitRepoWithCredentials(repoDir string, repo config.SkillRepo) (string, 
 
 	var lastErr error
 	for _, cred := range attempts {
-		var args []string
 		if repo.RefType == "tag" && repo.Ref != "" {
-			args = []string{"fetch", "--tags", "origin"}
-			if _, err := gitCmdWithCredential(repoDir, cred, args...); err != nil {
+			if _, err := gitFetchTagsCmdWithCredential(repoDir, cred); err != nil {
 				lastErr = err
 				continue
 			}
-			if _, err := gitCmdWithCredential(repoDir, cred, "checkout", "-f", repo.Ref); err != nil {
+			if _, err := gitCheckoutTagCmdWithCredential(repoDir, cred, repo.Ref); err != nil {
 				lastErr = err
 				continue
 			}
-			if _, err := gitCmdWithCredential(repoDir, cred, "reset", "--hard", repo.Ref); err != nil {
+			if _, err := gitResetHardCmdWithCredential(repoDir, cred, repo.Ref); err != nil {
 				lastErr = err
 				continue
 			}
 			return "tag refreshed", nil
 		}
 		if repo.Ref != "" {
-			if _, err := gitCmdWithCredential(repoDir, cred, "fetch", "origin", repo.Ref); err != nil {
+			if _, err := gitFetchRefCmdWithCredential(repoDir, cred, repo.Ref); err != nil {
 				lastErr = err
 				continue
 			}
-			if _, err := gitCmdWithCredential(repoDir, cred, "checkout", "-B", repo.Ref, "origin/"+repo.Ref); err != nil {
+			if _, err := gitCheckoutBranchCmdWithCredential(repoDir, cred, repo.Ref); err != nil {
 				lastErr = err
 				continue
 			}
-			if _, err := gitCmdWithCredential(repoDir, cred, "reset", "--hard", "origin/"+repo.Ref); err != nil {
+			if _, err := gitResetOriginBranchCmdWithCredential(repoDir, cred, repo.Ref); err != nil {
 				lastErr = err
 				continue
 			}
 			return "branch refreshed", nil
 		}
-		args = []string{"pull", "--ff-only"}
-		out, err := gitCmdWithCredential(repoDir, cred, args...)
+		out, err := gitPullCmdWithCredential(repoDir, cred)
 		if err == nil {
 			return out, nil
 		}
 		lastErr = err
 	}
 	return "", lastErr
+}
+
+func gitCloneCmdWithCredential(dir string, cred config.SkillRepoCredential, repoURL, dest, ref string) (string, error) {
+	if err := validateSkillRepoRef(ref); err != nil {
+		return "", err
+	}
+	args := []string{"clone"}
+	if ref != "" {
+		args = append(args, "--branch", ref, "--single-branch")
+	}
+	args = append(args, repoURL, dest)
+	return gitCmdWithCredential(dir, cred, args...)
+}
+
+func gitFetchTagsCmdWithCredential(dir string, cred config.SkillRepoCredential) (string, error) {
+	return gitCmdWithCredential(dir, cred, "fetch", "--tags", "origin")
+}
+
+func gitFetchRefCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
+	if err := validateSkillRepoRef(ref); err != nil {
+		return "", err
+	}
+	return gitCmdWithCredential(dir, cred, "fetch", "origin", ref)
+}
+
+func gitCheckoutTagCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
+	if err := validateSkillRepoRef(ref); err != nil {
+		return "", err
+	}
+	return gitCmdWithCredential(dir, cred, "checkout", "-f", ref)
+}
+
+func gitCheckoutBranchCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
+	if err := validateSkillRepoRef(ref); err != nil {
+		return "", err
+	}
+	return gitCmdWithCredential(dir, cred, "checkout", "-B", ref, "origin/"+ref)
+}
+
+func gitResetHardCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
+	if err := validateSkillRepoRef(ref); err != nil {
+		return "", err
+	}
+	return gitCmdWithCredential(dir, cred, "reset", "--hard", ref)
+}
+
+func gitResetOriginBranchCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
+	if err := validateSkillRepoRef(ref); err != nil {
+		return "", err
+	}
+	return gitCmdWithCredential(dir, cred, "reset", "--hard", "origin/"+ref)
+}
+
+func gitPullCmdWithCredential(dir string, cred config.SkillRepoCredential) (string, error) {
+	return gitCmdWithCredential(dir, cred, "pull", "--ff-only")
 }
 
 func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, args ...string) (string, error) {

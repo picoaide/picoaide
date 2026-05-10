@@ -65,12 +65,19 @@ type PicoClawFieldValue struct {
 }
 
 func ListPicoClawUserChannels(cfg *config.GlobalConfig, username string, configVersion int) ([]PicoClawChannelInfo, error) {
+	if err := ValidateUsername(username); err != nil {
+		return nil, err
+	}
 	pkg, err := NewPicoClawAdapterPackage(config.RuleCacheDir())
 	if err != nil {
 		return nil, err
 	}
-	picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
-	configMap, err := readJSONMap(filepath.Join(picoclawDir, "config.json"))
+	root, err := openPicoClawConfigRoot(cfg, username, false)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	configMap, err := readPicoClawJSONMap(root)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +88,7 @@ func ListPicoClawUserChannels(cfg *config.GlobalConfig, username string, configV
 	if !ok {
 		return nil, fmt.Errorf("adapter 缺少 config v%d UI schema", configVersion)
 	}
-	securityMap, err := readYAMLMap(filepath.Join(picoclawDir, ".security.yml"))
+	securityMap, err := readPicoClawYAMLMap(root)
 	if err != nil {
 		return nil, err
 	}
@@ -116,12 +123,19 @@ func ListPicoClawUserChannels(cfg *config.GlobalConfig, username string, configV
 }
 
 func GetPicoClawConfigFields(cfg *config.GlobalConfig, username string, configVersion int, sectionKey string) ([]PicoClawFieldValue, error) {
+	if err := ValidateUsername(username); err != nil {
+		return nil, err
+	}
 	pkg, err := NewPicoClawAdapterPackage(config.RuleCacheDir())
 	if err != nil {
 		return nil, err
 	}
-	picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
-	configMap, err := readJSONMap(filepath.Join(picoclawDir, "config.json"))
+	root, err := openPicoClawConfigRoot(cfg, username, false)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	configMap, err := readPicoClawJSONMap(root)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +152,7 @@ func GetPicoClawConfigFields(cfg *config.GlobalConfig, username string, configVe
 			return nil, fmt.Errorf("渠道 %s 不支持当前 Picoclaw 版本", sectionKey)
 		}
 	}
-	securityMap, err := readYAMLMap(filepath.Join(picoclawDir, ".security.yml"))
+	securityMap, err := readPicoClawYAMLMap(root)
 	if err != nil {
 		return nil, err
 	}
@@ -178,13 +192,12 @@ func SavePicoClawConfigSectionFields(cfg *config.GlobalConfig, username string, 
 			return fmt.Errorf("渠道 %s 未被管理员允许启用", sectionKey)
 		}
 	}
-	picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
-	if err := os.MkdirAll(picoclawDir, 0755); err != nil {
+	root, err := openPicoClawConfigRoot(cfg, username, true)
+	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(picoclawDir, "config.json")
-	securityPath := filepath.Join(picoclawDir, ".security.yml")
-	configMap, err := readJSONMap(configPath)
+	defer root.Close()
+	configMap, err := readPicoClawJSONMap(root)
 	if err != nil {
 		return err
 	}
@@ -212,7 +225,7 @@ func SavePicoClawConfigSectionFields(cfg *config.GlobalConfig, username string, 
 	for _, field := range findPicoClawUIFields(ui, sectionKey) {
 		fields[field.Key] = field
 	}
-	securityMap, err := readYAMLMap(securityPath)
+	securityMap, err := readPicoClawYAMLMap(root)
 	if err != nil {
 		return err
 	}
@@ -240,14 +253,14 @@ func SavePicoClawConfigSectionFields(cfg *config.GlobalConfig, username string, 
 	if err != nil {
 		return fmt.Errorf("序列化 config.json 失败: %w", err)
 	}
-	if err := os.WriteFile(configPath, configJSON, 0644); err != nil {
+	if err := root.WriteFile("config.json", configJSON, 0644); err != nil {
 		return fmt.Errorf("写入 config.json 失败: %w", err)
 	}
 	securityYAML, err := yaml.Marshal(securityMap)
 	if err != nil {
 		return fmt.Errorf("序列化 .security.yml 失败: %w", err)
 	}
-	if err := os.WriteFile(securityPath, securityYAML, 0600); err != nil {
+	if err := root.WriteFile(".security.yml", securityYAML, 0600); err != nil {
 		return fmt.Errorf("写入 .security.yml 失败: %w", err)
 	}
 	if sectionKey != "" {
@@ -540,8 +553,21 @@ func normalizePicoClawFieldStorage(storage string) string {
 	}
 }
 
-func readJSONMap(path string) (map[string]interface{}, error) {
-	data, err := os.ReadFile(path)
+func openPicoClawConfigRoot(cfg *config.GlobalConfig, username string, create bool) (*os.Root, error) {
+	if err := ValidateUsername(username); err != nil {
+		return nil, err
+	}
+	picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
+	if create {
+		if err := os.MkdirAll(picoclawDir, 0755); err != nil {
+			return nil, err
+		}
+	}
+	return os.OpenRoot(picoclawDir)
+}
+
+func readPicoClawJSONMap(root *os.Root) (map[string]interface{}, error) {
+	data, err := root.ReadFile("config.json")
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]interface{}{}, nil
@@ -553,7 +579,7 @@ func readJSONMap(path string) (map[string]interface{}, error) {
 	}
 	var out map[string]interface{}
 	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("%s 格式错误: %w", filepath.Base(path), err)
+		return nil, fmt.Errorf("config.json 格式错误: %w", err)
 	}
 	if out == nil {
 		out = map[string]interface{}{}
@@ -561,8 +587,8 @@ func readJSONMap(path string) (map[string]interface{}, error) {
 	return out, nil
 }
 
-func readYAMLMap(path string) (map[string]interface{}, error) {
-	data, err := os.ReadFile(path)
+func readPicoClawYAMLMap(root *os.Root) (map[string]interface{}, error) {
+	data, err := root.ReadFile(".security.yml")
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]interface{}{}, nil
@@ -574,7 +600,7 @@ func readYAMLMap(path string) (map[string]interface{}, error) {
 	}
 	var out map[string]interface{}
 	if err := yaml.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("%s 格式错误: %w", filepath.Base(path), err)
+		return nil, fmt.Errorf(".security.yml 格式错误: %w", err)
 	}
 	if out == nil {
 		out = map[string]interface{}{}
