@@ -253,11 +253,17 @@ func (s *PicoClawMigrationService) Refresh() error {
 }
 
 func (s *PicoClawMigrationService) EnsureUpgradeable(fromTag, toTag string) error {
-	if s == nil || compareVersionStrings(fromTag, toTag) >= 0 {
+	if s == nil {
 		return nil
 	}
 	if err := s.rules.EnsureSupportedByPicoAide(); err != nil {
 		return err
+	}
+	if missing := s.rules.UnsupportedEndpointVersions(fromTag, toTag); len(missing) > 0 {
+		return fmt.Errorf("Picoclaw 版本未在当前适配包中声明（%s），默认只支持已适配版本间升级/降级。请更新配置适配包或发送 issue 催促管理员适配：%s", strings.Join(missing, ", "), PicoAideIssueURL)
+	}
+	if compareVersionStrings(fromTag, toTag) >= 0 {
+		return nil
 	}
 	missing := s.rules.MissingVersions(fromTag, toTag)
 	if len(missing) == 0 {
@@ -438,6 +444,22 @@ func (r PicoClawMigrationRuleSet) MissingVersions(fromTag, toTag string) []strin
 	}
 	if _, ok := ruleMap[target]; !ok {
 		missing = append(missing, target)
+	}
+	return uniqueStrings(missing)
+}
+
+func (r PicoClawMigrationRuleSet) UnsupportedEndpointVersions(fromTag, toTag string) []string {
+	ruleMap := r.versionMap()
+	var missing []string
+	for _, tag := range []string{fromTag, toTag} {
+		normalized := normalizeVersion(tag)
+		if normalized == "" {
+			missing = append(missing, tag)
+			continue
+		}
+		if _, ok := ruleMap[normalized]; !ok {
+			missing = append(missing, normalized)
+		}
 	}
 	return uniqueStrings(missing)
 }

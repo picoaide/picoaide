@@ -30,7 +30,10 @@ export async function init(ctx) {
     }
     box.className = 'channel-policy-grid';
     box.innerHTML = channels.map(function(ch) {
-      var enabled = !!deepGet(rawConfig, 'picoclaw.channel_list.' + ch.key + '.enabled');
+      var enabled = !!(
+        deepGet(rawConfig, 'picoclaw.channel_list.' + ch.key + '.enabled') ||
+        deepGet(rawConfig, 'picoclaw.channels.' + ch.key + '.enabled')
+      );
       return '<label class="channel-policy-card' + (enabled ? ' is-enabled' : '') + '">' +
         '<input type="checkbox" data-channel="' + esc(ch.key) + '"' + (enabled ? ' checked' : '') + '>' +
         '<span class="channel-policy-main">' +
@@ -51,16 +54,22 @@ export async function init(ctx) {
   async function savePolicy() {
     if (!rawConfig.picoclaw) rawConfig.picoclaw = {};
     if (!rawConfig.picoclaw.channel_list) rawConfig.picoclaw.channel_list = {};
+    if (!rawConfig.picoclaw.channels) rawConfig.picoclaw.channels = {};
     var known = {};
     channels.forEach(function(ch) { known[ch.key] = true; });
     $('#picoclaw-channel-policy').querySelectorAll('[data-channel]').forEach(function(input) {
       var key = input.dataset.channel;
       if (!rawConfig.picoclaw.channel_list[key]) rawConfig.picoclaw.channel_list[key] = {};
+      if (!rawConfig.picoclaw.channels[key]) rawConfig.picoclaw.channels[key] = {};
       rawConfig.picoclaw.channel_list[key].enabled = input.checked;
       rawConfig.picoclaw.channel_list[key].type = key;
+      rawConfig.picoclaw.channels[key].enabled = input.checked;
     });
     Object.keys(rawConfig.picoclaw.channel_list).forEach(function(key) {
       if (!known[key]) delete rawConfig.picoclaw.channel_list[key];
+    });
+    Object.keys(rawConfig.picoclaw.channels).forEach(function(key) {
+      if (!known[key]) delete rawConfig.picoclaw.channels[key];
     });
     showMsg('#picoclaw-msg', '保存中...', true);
     try {

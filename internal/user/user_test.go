@@ -198,7 +198,7 @@ func TestApplyConfigToJSONGeneratesMissingMCPToken(t *testing.T) {
 		UsersRoot: filepath.Join(tmpDir, "users"),
 		Image: config.ImageConfig{
 			Name: "picoaide/picoaide",
-			Tag:  "v0.2.10",
+			Tag:  "v0.2.8",
 		},
 		Web: config.WebConfig{
 			Listen:           ":80",
@@ -210,7 +210,7 @@ func TestApplyConfigToJSONGeneratesMissingMCPToken(t *testing.T) {
 	if err := os.MkdirAll(picoclawDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := auth.UpsertContainer(&auth.ContainerRecord{Username: "alice", Image: "picoaide/picoaide:v0.2.10", Status: "stopped", IP: "100.64.0.2"}); err != nil {
+	if err := auth.UpsertContainer(&auth.ContainerRecord{Username: "alice", Image: "picoaide/picoaide:v0.2.8", Status: "stopped", IP: "100.64.0.2"}); err != nil {
 		t.Fatalf("UpsertContainer: %v", err)
 	}
 
@@ -346,6 +346,112 @@ func TestPicoClawConfigFieldsUseAdapterPaths(t *testing.T) {
 	}
 	if got["client_id"] != "adapter-client" || got["client_secret"] != "adapter-secret" {
 		t.Fatalf("fields = %+v", got)
+	}
+}
+
+func TestApplyConfigToJSONProjectsGlobalConfigForTargetTags(t *testing.T) {
+	tmpDir := testInitAuthDB(t)
+	cfg := &config.GlobalConfig{
+		UsersRoot: filepath.Join(tmpDir, "users"),
+		Image:     config.ImageConfig{Name: "picoaide/picoaide", Tag: "v0.2.8"},
+		Web:       config.WebConfig{Listen: ":80"},
+		PicoClaw: map[string]interface{}{
+			"agents": map[string]interface{}{
+				"defaults": map[string]interface{}{
+					"model_name": "gpt-new",
+					"model":      "gpt-old",
+				},
+			},
+			"model_list": []interface{}{
+				map[string]interface{}{"model_name": "gpt-new", "model": "openai/gpt-4.1"},
+			},
+			"channel_list": map[string]interface{}{
+				"dingtalk": map[string]interface{}{
+					"enabled":              true,
+					"type":                 "dingtalk",
+					"allow_from":           []interface{}{"alice"},
+					"reasoning_channel_id": "reason",
+					"settings": map[string]interface{}{
+						"client_id": "v3-client",
+					},
+				},
+				"whatsapp_native": map[string]interface{}{
+					"enabled": true,
+					"type":    "whatsapp_native",
+				},
+			},
+			"channels": map[string]interface{}{
+				"dingtalk": map[string]interface{}{
+					"enabled":    true,
+					"client_id":  "legacy-client",
+					"allow_from": []interface{}{"legacy"},
+				},
+			},
+		},
+	}
+
+	cases := []struct {
+		tag               string
+		wantVersion       float64
+		wantRoot          string
+		wantDefaultPath   string
+		wantClientID      string
+		wantNativePresent bool
+	}{
+		{tag: "v0.2.4", wantVersion: 1, wantRoot: "channels", wantDefaultPath: "agents.defaults.model", wantClientID: "v3-client", wantNativePresent: false},
+		{tag: "v0.2.6", wantVersion: 2, wantRoot: "channels", wantDefaultPath: "agents.defaults.model_name", wantClientID: "v3-client", wantNativePresent: false},
+		{tag: "v0.2.8", wantVersion: 3, wantRoot: "channel_list", wantDefaultPath: "agents.defaults.model_name", wantClientID: "v3-client", wantNativePresent: true},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.tag, func(t *testing.T) {
+			username := strings.ReplaceAll(tt.tag, ".", "-")
+			if err := auth.UpsertContainer(&auth.ContainerRecord{Username: username, Image: "picoaide/picoaide:" + tt.tag, Status: "stopped", IP: "100.64.0.2"}); err != nil {
+				t.Fatalf("UpsertContainer: %v", err)
+			}
+			picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
+			if err := os.MkdirAll(picoclawDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := ApplyConfigToJSONForTag(cfg, picoclawDir, username, tt.tag); err != nil {
+				t.Fatalf("ApplyConfigToJSONForTag() error = %v", err)
+			}
+			var saved map[string]interface{}
+			data, err := os.ReadFile(filepath.Join(picoclawDir, "config.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &saved); err != nil {
+				t.Fatal(err)
+			}
+			if saved["version"] != tt.wantVersion {
+				t.Fatalf("version = %v, want %v; config=%s", saved["version"], tt.wantVersion, data)
+			}
+			if _, ok := saved[tt.wantRoot].(map[string]interface{}); !ok {
+				t.Fatalf("missing %s in config: %s", tt.wantRoot, data)
+			}
+			otherRoot := "channels"
+			if tt.wantRoot == "channels" {
+				otherRoot = "channel_list"
+			}
+			if _, ok := saved[otherRoot]; ok {
+				t.Fatalf("unexpected %s in config: %s", otherRoot, data)
+			}
+			if got, _ := deepGet(saved, tt.wantDefaultPath); got != "gpt-new" {
+				t.Fatalf("%s = %v, want gpt-new", tt.wantDefaultPath, got)
+			}
+			if tt.wantRoot == "channel_list" {
+				if got, _ := deepGet(saved, "channel_list.dingtalk.settings.client_id"); got != tt.wantClientID {
+					t.Fatalf("v3 client_id = %v, want %s", got, tt.wantClientID)
+				}
+			} else if got, _ := deepGet(saved, "channels.dingtalk.client_id"); got != tt.wantClientID {
+				t.Fatalf("legacy client_id = %v, want %s", got, tt.wantClientID)
+			}
+			_, nativePresent := deepGet(saved, tt.wantRoot+".whatsapp_native")
+			if nativePresent != tt.wantNativePresent {
+				t.Fatalf("whatsapp_native present = %v, want %v", nativePresent, tt.wantNativePresent)
+			}
+		})
 	}
 }
 

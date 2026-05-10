@@ -112,7 +112,8 @@ export async function init(ctx) {
 
     var defaultSelect = $('#default-model-select');
     if (defaultSelect) {
-      var currentDefault = deepGet(rawConfig, 'picoclaw.agents.defaults.model_name') || '';
+      var currentDefault = deepGet(rawConfig, 'picoclaw.agents.defaults.model_name') ||
+        deepGet(rawConfig, 'picoclaw.agents.defaults.model') || '';
       defaultSelect.innerHTML = '<option value="">-- 选择默认模型 --</option>';
       models.forEach(function(m) {
         var opt = document.createElement('option');
@@ -350,6 +351,9 @@ export async function init(ctx) {
     });
     $$('select[data-path]').forEach(function(sel) {
       deepSet(rawConfig, sel.dataset.path, sel.value);
+      if (sel.dataset.path === 'picoclaw.agents.defaults.model_name') {
+        deepSet(rawConfig, 'picoclaw.agents.defaults.model', sel.value);
+      }
     });
   }
 }
