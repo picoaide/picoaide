@@ -18,7 +18,9 @@
   --shadow-sm: 0 8px 24px rgba(17, 32, 56, 0.06);
   --radius: 12px;
   --radius-sm: 8px;
-  --container: 1200px;
+  --container: 100%;
+  --content-gutter: clamp(1rem, 3vw, 3rem);
+  --reading-width: 920px;
 }
 
 *,
@@ -28,12 +30,17 @@
 }
 
 html {
+  width: 100%;
+  min-height: 100%;
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
 }
 
 body {
   margin: 0;
+  width: 100%;
+  min-height: 100vh;
   font-family: Inter, "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 16px;
   line-height: 1.65;
@@ -41,6 +48,7 @@ body {
   background: linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
 a {
@@ -69,7 +77,8 @@ button {
 }
 
 .container {
-  width: min(var(--container), calc(100% - 2rem));
+  width: 100%;
+  padding-inline: var(--content-gutter);
   margin: 0 auto;
 }
 
@@ -88,8 +97,9 @@ button {
 }
 
 .nav-container {
-  width: min(var(--container), calc(100% - 2rem));
+  width: 100%;
   height: 100%;
+  padding-inline: var(--content-gutter);
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -106,13 +116,14 @@ button {
 }
 
 .nav-brand-mark {
-  width: 40px;
-  height: 40px;
+  width: 178px;
+  height: 36px;
+  object-fit: contain;
   flex: 0 0 auto;
 }
 
 .nav-brand-copy {
-  display: flex;
+  display: none;
   flex-direction: column;
   line-height: 1.1;
 }
@@ -256,14 +267,18 @@ button {
 }
 
 .hero-band {
-  padding: 2rem 0 4rem;
+  min-height: calc(100vh - 72px);
+  display: flex;
+  align-items: stretch;
+  padding: 1rem 0 3rem;
 }
 
 .hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr);
-  gap: 1.5rem;
+  grid-template-columns: minmax(0, 1.08fr) minmax(380px, 0.92fr);
+  gap: clamp(1rem, 2vw, 2rem);
   align-items: stretch;
+  flex: 1;
 }
 
 .hero-copy,
@@ -281,11 +296,11 @@ button {
 
 .hero-copy {
   border-radius: calc(var(--radius) + 4px);
-  padding: 2.25rem;
+  padding: clamp(1.4rem, 3vw, 3rem);
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-height: 560px;
+  min-height: min(720px, calc(100vh - 120px));
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.98)),
     radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 38%);
@@ -316,7 +331,7 @@ button {
 .single-page h1,
 .empty-state h1 {
   margin: 0.9rem 0 0;
-  font-size: 3rem;
+  font-size: clamp(2.25rem, 4vw, 4.65rem);
   line-height: 1.08;
   letter-spacing: 0;
   color: var(--text);
@@ -327,8 +342,8 @@ button {
 .page-lead {
   margin: 1rem 0 0;
   color: var(--text-soft);
-  font-size: 1.08rem;
-  max-width: 58ch;
+  font-size: clamp(1.02rem, 1.2vw, 1.24rem);
+  max-width: 62ch;
 }
 
 .hero-sublead {
@@ -370,7 +385,7 @@ button {
 
 .hero-console {
   border-radius: calc(var(--radius) + 4px);
-  padding: 1.4rem;
+  padding: clamp(1rem, 1.8vw, 1.8rem);
   display: grid;
   gap: 1rem;
   background:
@@ -627,11 +642,11 @@ button {
 
 .docs-shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 300px minmax(0, 1fr);
   gap: 1.5rem;
-  width: min(var(--container), calc(100% - 2rem));
+  width: 100%;
+  padding: 1.5rem var(--content-gutter) 4rem;
   margin: 0 auto;
-  padding: 1.5rem 0 4rem;
 }
 
 .docs-sidebar {
@@ -689,7 +704,7 @@ button {
 }
 
 .docs-container {
-  max-width: 920px;
+  max-width: none;
 }
 
 .docs-hero,
@@ -804,7 +819,7 @@ button {
 
 .docs-layout-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 220px;
+  grid-template-columns: minmax(0, var(--reading-width)) 260px;
   gap: 1.25rem;
   align-items: start;
 }
@@ -944,6 +959,7 @@ button {
   background: var(--panel);
   box-shadow: var(--shadow-sm);
   padding: 1.4rem;
+  max-width: var(--reading-width);
 }
 
 .single-content {
@@ -997,8 +1013,16 @@ button {
 }
 
 .footer-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
   font-size: 1rem;
   font-weight: 750;
+}
+
+.footer-logo img {
+  width: 30px;
+  height: 30px;
 }
 
 .footer-tagline {
@@ -1084,6 +1108,11 @@ thead th {
 
   .nav {
     height: 68px;
+  }
+
+  .nav-brand-mark {
+    width: 148px;
+    height: 32px;
   }
 
   .nav-toggle {

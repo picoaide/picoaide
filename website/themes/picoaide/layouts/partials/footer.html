@@ -2,7 +2,10 @@
   <div class="footer-container container">
     <div class="footer-grid">
       <div class="footer-brand">
-        <span class="footer-logo">{{ .Site.Title }}</span>
+        <span class="footer-logo">
+          <img src="{{ "/images/logo-mark.svg" | relURL }}" alt="">
+          <span>{{ .Site.Title }}</span>
+        </span>
         <p class="footer-tagline">{{ .Site.Params.description }}</p>
       </div>
 
