@@ -207,6 +207,11 @@ func SavePicoClawAdapterZip(cacheDir string, data []byte) (*PicoClawAdapterPacka
 		return nil, err
 	}
 	defer os.RemoveAll(tmpRoot)
+	tmpRootHandle, err := os.OpenRoot(tmpRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer tmpRootHandle.Close()
 
 	seen := map[string]bool{}
 	for _, file := range reader.File {
@@ -245,11 +250,11 @@ func SavePicoClawAdapterZip(cacheDir string, data []byte) (*PicoClawAdapterPacka
 		if closeErr != nil {
 			return nil, fmt.Errorf("关闭 adapter zip 文件 %s 失败: %w", clean, closeErr)
 		}
-		target := filepath.Join(tmpRoot, filepath.FromSlash(clean))
-		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		target := filepath.FromSlash(clean)
+		if err := tmpRootHandle.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(target, content, 0644); err != nil {
+		if err := tmpRootHandle.WriteFile(target, content, 0644); err != nil {
 			return nil, err
 		}
 	}

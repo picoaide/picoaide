@@ -628,6 +628,9 @@ func picoclawConfigVersionAtLeast(cfg map[string]interface{}, minVersion int) bo
 // SyncCookies 将域名对应的 Cookie 字符串写入用户的 .security.yml
 // 格式：cookies: { domain.com: "name1=val1; name2=val2" }
 func SyncCookies(cfg *config.GlobalConfig, username, domain, cookieStr string) error {
+	if err := ValidateUsername(username); err != nil {
+		return err
+	}
 	picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
 	if err := os.MkdirAll(picoclawDir, 0755); err != nil {
 		return fmt.Errorf("创建目录失败: %w", err)
@@ -686,6 +689,9 @@ func ApplySecurityToYAML(cfg *config.GlobalConfig, picoclawDir string) error {
 
 // GetDingTalkConfig 获取用户的钉钉配置（clientID 和 clientSecret）
 func GetDingTalkConfig(cfg *config.GlobalConfig, username string) (clientID, clientSecret string) {
+	if err := ValidateUsername(username); err != nil {
+		return "", ""
+	}
 	if values, err := GetPicoClawConfigFields(cfg, username, 0, "dingtalk"); err == nil && len(values) > 0 {
 		for _, value := range values {
 			switch value.Field.Key {
@@ -730,6 +736,9 @@ func GetDingTalkConfig(cfg *config.GlobalConfig, username string) (clientID, cli
 
 // SaveDingTalkConfig 保存用户的钉钉配置
 func SaveDingTalkConfig(cfg *config.GlobalConfig, username, clientID, clientSecret string) error {
+	if err := ValidateUsername(username); err != nil {
+		return err
+	}
 	if err := SavePicoClawConfigFields(cfg, username, 0, map[string]interface{}{
 		"enabled":       true,
 		"client_id":     clientID,

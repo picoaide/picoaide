@@ -277,8 +277,35 @@ func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, args ...s
 			os.Remove(keyFile.Name())
 			return "", err
 		}
-		env = append(env, "GIT_SSH_COMMAND=ssh -i "+keyFile.Name()+" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no")
-		cleanup = func() { _ = os.Remove(keyFile.Name()) }
+		sshWrapper, err := os.CreateTemp("", "picoaide-git-ssh-*")
+		if err != nil {
+			os.Remove(keyFile.Name())
+			return "", err
+		}
+		wrapperContent := "#!/bin/sh\nexec ssh -i \"$PICOAIDE_GIT_SSH_KEY\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no \"$@\"\n"
+		if _, err := sshWrapper.WriteString(wrapperContent); err != nil {
+			sshWrapper.Close()
+			os.Remove(sshWrapper.Name())
+			os.Remove(keyFile.Name())
+			return "", err
+		}
+		if err := sshWrapper.Chmod(0700); err != nil {
+			sshWrapper.Close()
+			os.Remove(sshWrapper.Name())
+			os.Remove(keyFile.Name())
+			return "", err
+		}
+		if err := sshWrapper.Close(); err != nil {
+			os.Remove(sshWrapper.Name())
+			os.Remove(keyFile.Name())
+			return "", err
+		}
+		env = append(env, "GIT_SSH_COMMAND="+sshWrapper.Name())
+		env = append(env, "PICOAIDE_GIT_SSH_KEY="+keyFile.Name())
+		cleanup = func() {
+			_ = os.Remove(keyFile.Name())
+			_ = os.Remove(sshWrapper.Name())
+		}
 	default:
 		script, err := os.CreateTemp("", "picoaide-git-askpass-*")
 		if err != nil {
@@ -384,6 +411,11 @@ func copySkillZipContents(reader *zip.Reader, skillName string) error {
 		return err
 	}
 	defer os.RemoveAll(tempDir)
+	tempRoot, err := os.OpenRoot(tempDir)
+	if err != nil {
+		return err
+	}
+	defer tempRoot.Close()
 
 	prefix := commonZipRootDir(reader.File)
 	for _, file := range reader.File {
@@ -401,24 +433,20 @@ func copySkillZipContents(reader *zip.Reader, skillName string) error {
 		if cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(os.PathSeparator)) || filepath.IsAbs(cleanName) {
 			return fmt.Errorf("zip 包包含不安全路径: %s", file.Name)
 		}
-		targetPath := filepath.Join(tempDir, cleanName)
-		if !strings.HasPrefix(targetPath, tempDir+string(os.PathSeparator)) && targetPath != tempDir {
-			return fmt.Errorf("zip 包包含不安全路径: %s", file.Name)
-		}
 		if file.FileInfo().IsDir() {
-			if err := os.MkdirAll(targetPath, file.Mode()); err != nil {
+			if err := tempRoot.MkdirAll(cleanName, file.Mode()); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		if err := tempRoot.MkdirAll(filepath.Dir(cleanName), 0755); err != nil {
 			return err
 		}
 		src, err := file.Open()
 		if err != nil {
 			return err
 		}
-		dst, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, file.Mode())
+		dst, err := tempRoot.OpenFile(cleanName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, file.Mode())
 		if err != nil {
 			src.Close()
 			return err

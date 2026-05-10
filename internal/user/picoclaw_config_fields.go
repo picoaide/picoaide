@@ -169,6 +169,9 @@ func SavePicoClawConfigFields(cfg *config.GlobalConfig, username string, configV
 }
 
 func SavePicoClawConfigSectionFields(cfg *config.GlobalConfig, username string, configVersion int, sectionKey string, values map[string]interface{}) error {
+	if err := ValidateUsername(username); err != nil {
+		return err
+	}
 	if sectionKey != "" {
 		allowed := allowedPicoClawChannelsFromConfig(cfg)
 		if !allowed[sectionKey] {
