@@ -31,12 +31,27 @@
       </div>
 
       <div id="tab-channels" class="panel active">
-        <div class="card">
-          <div class="card-header">通讯渠道</div>
-          <div id="channel-list" class="btn-group mb-1"></div>
-          <div id="channel-fields"></div>
-          <div id="channel-msg" class="msg"></div>
-          <button class="btn btn-primary" id="channel-save-btn">保存并重启容器</button>
+        <div class="surface-panel split-panel">
+          <aside class="split-sidebar">
+            <div class="toolbar" style="margin-bottom:.6rem">
+              <div>
+                <div class="toolbar-title">通讯渠道</div>
+                <div class="toolbar-subtitle">选择一个渠道后维护配置</div>
+              </div>
+            </div>
+            <div id="channel-list" class="nav-list"></div>
+          </aside>
+          <section class="split-main">
+            <div class="toolbar">
+              <div>
+                <div class="toolbar-title" id="channel-title">渠道配置</div>
+                <div class="toolbar-subtitle" id="channel-subtitle">保存后会重启你的容器</div>
+              </div>
+              <button class="btn btn-primary" id="channel-save-btn">保存并重启容器</button>
+            </div>
+            <div id="channel-fields"></div>
+            <div id="channel-msg" class="msg"></div>
+          </section>
         </div>
       </div>
 
@@ -44,9 +59,15 @@
         <div class="card">
           <div class="card-header">文件管理</div>
           <nav id="breadcrumb" class="text-sm mb-1"></nav>
-          <div class="btn-group mb-1">
+          <div class="toolbar">
             <button class="btn btn-sm btn-outline" id="mkdir-btn">新建目录</button>
-            <label class="btn btn-sm btn-outline" style="cursor:pointer">上传文件<input type="file" id="upload-input" class="hidden"></label>
+            <div class="inline-file" style="flex:1;max-width:560px">
+              <div class="file-summary" id="upload-file-name">未选择文件</div>
+              <div class="btn-group">
+                <label class="btn btn-sm btn-outline" style="cursor:pointer">选择文件<input type="file" id="upload-input" class="hidden"></label>
+                <button class="btn btn-sm btn-primary" id="upload-btn" disabled>上传到当前目录</button>
+              </div>
+            </div>
           </div>
           <div id="file-list"></div>
           <div id="file-msg" class="msg"></div>

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -67,6 +69,40 @@ func TestHTTPSRedirectTargetDropsDefaultHTTPPort(t *testing.T) {
 	req := httptest.NewRequest("GET", "http://example.com:80/path?q=1", nil)
 	if got := httpsRedirectTarget(req); got != "https://example.com/path?q=1" {
 		t.Fatalf("httpsRedirectTarget = %q", got)
+	}
+}
+
+func TestSortTagsForDisplay(t *testing.T) {
+	tags := []string{"v0.2.7", "v0.2.8", "dev", "v0.2.5", "v0.2.6", "latest"}
+	sortTagsForDisplay(tags)
+	want := []string{"v0.2.8", "v0.2.7", "v0.2.6", "v0.2.5", "dev", "latest"}
+	if !reflect.DeepEqual(tags, want) {
+		t.Fatalf("tags = %#v, want %#v", tags, want)
+	}
+}
+
+func TestCompareImageForDisplay(t *testing.T) {
+	images := []struct {
+		tags    []string
+		created int64
+	}{
+		{[]string{"ghcr.io/picoaide/picoaide:v0.2.6"}, 30},
+		{[]string{"ghcr.io/picoaide/picoaide:dev"}, 100},
+		{[]string{"ghcr.io/picoaide/picoaide:v0.2.8"}, 10},
+		{[]string{"ghcr.io/picoaide/picoaide:v0.2.7"}, 20},
+	}
+	sort.SliceStable(images, func(i, j int) bool {
+		return compareImageForDisplay(images[i].tags, images[i].created, images[j].tags, images[j].created) < 0
+	})
+	got := []string{
+		tagNameOnly(images[0].tags[0]),
+		tagNameOnly(images[1].tags[0]),
+		tagNameOnly(images[2].tags[0]),
+		tagNameOnly(images[3].tags[0]),
+	}
+	want := []string{"v0.2.8", "v0.2.7", "v0.2.6", "dev"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("image order = %#v, want %#v", got, want)
 	}
 }
 

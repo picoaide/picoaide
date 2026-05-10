@@ -20,7 +20,7 @@ export async function init(ctx) {
     tbody.innerHTML = '';
     for (const name of admins) {
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td><strong>' + esc(name) + '</strong></td><td><div class="btn-group">' +
+      tr.innerHTML = '<td><strong>' + esc(name) + '</strong></td><td class="actions-cell"><div class="btn-group">' +
         '<button class="btn btn-sm btn-outline" data-reset="' + esc(name) + '">重置密码</button>' +
         '<button class="btn btn-sm btn-danger" data-del="' + esc(name) + '">删除</button>' +
         '</div></td>';

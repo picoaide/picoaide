@@ -8,10 +8,12 @@
 
 <h3>本地镜像</h3>
 <div id="images-local-msg" class="msg"></div>
-<table>
-  <thead><tr><th>镜像标签</th><th>Image ID</th><th>大小</th><th>创建时间</th><th>依赖用户</th><th>操作</th></tr></thead>
-  <tbody id="images-local"></tbody>
-</table>
+<div class="table-wrap">
+  <table class="wide-table">
+    <thead><tr><th>镜像标签</th><th>Image ID</th><th>大小</th><th>创建时间</th><th>依赖用户</th><th class="actions-cell">操作</th></tr></thead>
+    <tbody id="images-local"></tbody>
+  </table>
+</div>
 <p id="images-local-empty" class="text-muted text-center mt-1 hidden">暂无本地镜像</p>
 
 <div class="row mb-1 mt-2" style="align-items:center">
@@ -19,10 +21,12 @@
   <button class="btn btn-outline btn-sm" id="images-refresh-registry">刷新</button>
 </div>
 <div id="images-registry-msg" class="msg"></div>
-<table>
-  <thead><tr><th>标签</th><th>状态</th><th>操作</th></tr></thead>
-  <tbody id="images-registry"></tbody>
-</table>
+<div class="table-wrap">
+  <table class="compact-table">
+    <thead><tr><th>标签</th><th>状态</th><th class="actions-cell">操作</th></tr></thead>
+    <tbody id="images-registry"></tbody>
+  </table>
+</div>
 <p id="images-registry-empty" class="text-muted text-center mt-1 hidden">暂无远程标签</p>
 
 <div id="image-pull-modal" class="modal-overlay hidden">
@@ -76,17 +80,20 @@
     <div class="modal-body">
       <p>升级到：<strong id="upgrade-target" style="font-family:monospace"></strong></p>
 
-      <div class="row" style="gap:8px;margin-bottom:10px;align-items:center">
-        <label style="font-weight:bold;white-space:nowrap">添加分组：</label>
-        <select id="upgrade-group-select" style="flex:1;padding:6px 8px;border-radius:4px;border:1px solid #ccc;background:#fff;color:#333"></select>
-        <button class="btn btn-sm btn-primary" id="upgrade-add-group">添加</button>
-        <button class="btn btn-sm btn-primary" id="upgrade-all-btn">全员升级</button>
+      <div class="step-card mb-1">
+        <div class="step-title">1. 选择升级范围</div>
+        <div class="row mt-1" style="gap:8px;align-items:center">
+          <select id="upgrade-group-select" style="flex:1"></select>
+          <button class="btn btn-sm btn-outline" id="upgrade-add-group">添加分组</button>
+          <button class="btn btn-sm btn-outline" id="upgrade-all-btn">选择全部候选用户</button>
+        </div>
+        <div id="upgrade-selected-groups" class="mt-1" style="display:flex;flex-wrap:wrap;gap:4px;min-height:24px"></div>
       </div>
-      <div id="upgrade-selected-groups" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px;min-height:24px"></div>
 
-      <div style="margin-bottom:6px">
+      <div class="step-card" style="margin-bottom:6px">
+        <div class="step-title">2. 核对用户</div>
         <div class="row" style="align-items:center;gap:8px;margin-bottom:6px">
-          <input type="text" id="upgrade-search" placeholder="搜索用户名..." style="flex:1;padding:6px 10px;border-radius:4px;border:1px solid #ccc;background:#fff;color:#333;font-size:13px">
+          <input type="text" id="upgrade-search" placeholder="搜索用户名..." style="flex:1">
           <small id="upgrade-count" style="white-space:nowrap;color:#aaa"></small>
           <button class="btn btn-sm btn-outline" id="upgrade-select-all">全选</button>
           <button class="btn btn-sm btn-outline" id="upgrade-deselect-all">清空</button>

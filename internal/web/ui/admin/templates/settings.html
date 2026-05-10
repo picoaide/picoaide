@@ -16,20 +16,41 @@
     </select>
   </div>
   <div class="field"><label>时区</label><input type="text" data-path="image.timezone" placeholder="Asia/Shanghai"></div>
-  <div class="card-footer">
-    <div>
-      <strong>Picoclaw 配置适配</strong>
-      <p class="text-sm text-muted">镜像升级和配置下发只读取本地适配包。离线环境可上传包含 index、hash、schemas、ui 和 migrations 的 zip 包。</p>
+  <div class="form-section">
+    <div class="toolbar">
+      <div>
+        <div class="toolbar-title">Picoclaw 配置适配</div>
+        <div class="toolbar-subtitle">镜像升级和配置下发只读取本地适配包</div>
+      </div>
     </div>
-    <div class="btn-group">
-      <button class="btn btn-outline btn-sm" id="refresh-migration-rules-btn">远端更新</button>
-      <button class="btn btn-outline btn-sm" id="upload-migration-rules-btn">导入适配包</button>
+    <div class="step-grid">
+      <div class="step-card">
+        <div class="step-card-header">
+          <div>
+            <div class="step-title">在线更新</div>
+            <div class="step-copy">从远端更新本地适配包，适合服务器可访问更新源的环境。</div>
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" id="refresh-migration-rules-btn">远端更新</button>
+      </div>
+      <div class="step-card">
+        <div class="step-card-header">
+          <div>
+            <div class="step-title">离线导入</div>
+            <div class="step-copy">选择包含 index、hash、schemas、ui 和 migrations 的 zip 包后再导入。</div>
+          </div>
+        </div>
+        <div class="inline-file">
+          <div class="file-summary" id="migration-rules-file-name">未选择适配包</div>
+          <div class="btn-group">
+            <label class="btn btn-sm btn-outline" style="cursor:pointer">选择 zip<input type="file" id="migration-rules-file" accept="application/zip,.zip" class="hidden"></label>
+            <button class="btn btn-primary btn-sm" id="upload-migration-rules-btn" disabled>导入适配包</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <div id="migration-rules-info" class="text-sm text-muted mt-1">配置适配信息加载中...</div>
-  <div class="row">
-    <input type="file" id="migration-rules-file" accept="application/zip,.zip">
-  </div>
 </div>
 
 <div class="card">
@@ -43,7 +64,6 @@
 <div class="card">
   <div class="card-header">Web 服务</div>
   <div class="field"><label>监听地址</label><input type="text" data-path="web.listen" placeholder=":80"></div>
-  <div class="field"><label>容器访问地址</label><input type="text" data-path="web.container_base_url" placeholder="http://100.64.0.1:80"></div>
   <div class="field"><label>启用 HTTPS</label>
     <select data-path="web.tls.enabled">
       <option value="false">关闭</option>
@@ -54,7 +74,7 @@
     <div class="field"><label>证书文件 (PEM)</label><input type="text" data-path="web.tls.cert_file" placeholder="/path/to/cert.pem"></div>
     <div class="field"><label>私钥文件 (PEM)</label><input type="text" data-path="web.tls.key_file" placeholder="/path/to/key.pem"></div>
   </div>
-  <p class="text-sm text-muted">容器访问地址用于下发 MCP SSE 地址，留空时默认使用内部地址。HTTPS 监听 :443 时，外部 HTTP 会跳转 HTTPS，Docker 内网仍使用 http://100.64.0.1:80。启用 HTTPS 后需重启服务生效。</p>
+  <p class="text-sm text-muted">容器访问地址由系统按监听地址和 Docker 内网默认值自动生成，不允许手动配置。HTTPS 监听 :443 时，Docker 内网仍使用 http://100.64.0.1:80。启用 HTTPS 后需重启服务生效。</p>
 </div>
 
 <div class="card">

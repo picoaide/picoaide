@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -655,6 +656,9 @@ func (s *Server) handleAdminImages(c *gin.Context) {
 			Users:      users,
 		})
 	}
+	sort.SliceStable(list, func(i, j int) bool {
+		return compareImageForDisplay(list[i].RepoTags, list[i].Created, list[j].RepoTags, list[j].Created) < 0
+	})
 	if list == nil {
 		list = []ImageInfo{}
 	}
@@ -1185,11 +1189,100 @@ func (s *Server) handleAdminImageRegistry(c *gin.Context) {
 	if tags == nil {
 		tags = []string{}
 	}
+	sortTagsForDisplay(tags)
 
 	writeJSON(c, http.StatusOK, struct {
 		Success bool     `json:"success"`
 		Tags    []string `json:"tags"`
 	}{true, tags})
+}
+
+func compareImageForDisplay(aTags []string, aCreated int64, bTags []string, bCreated int64) int {
+	tagCmp := compareTagsForDisplay(primaryDisplayTag(aTags), primaryDisplayTag(bTags))
+	if tagCmp != 0 {
+		return tagCmp
+	}
+	if aCreated != bCreated {
+		if aCreated > bCreated {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(strings.Join(aTags, ","), strings.Join(bTags, ","))
+}
+
+func primaryDisplayTag(repoTags []string) string {
+	if len(repoTags) == 0 {
+		return ""
+	}
+	best := repoTags[0]
+	for _, tag := range repoTags[1:] {
+		if compareTagsForDisplay(tagNameOnly(tag), tagNameOnly(best)) < 0 {
+			best = tag
+		}
+	}
+	return tagNameOnly(best)
+}
+
+func tagNameOnly(ref string) string {
+	idx := strings.LastIndex(ref, ":")
+	if idx < 0 || idx == len(ref)-1 {
+		return ref
+	}
+	slashIdx := strings.LastIndex(ref, "/")
+	if slashIdx > idx {
+		return ref
+	}
+	return ref[idx+1:]
+}
+
+func sortTagsForDisplay(tags []string) {
+	sort.SliceStable(tags, func(i, j int) bool {
+		return compareTagsForDisplay(tags[i], tags[j]) < 0
+	})
+}
+
+func compareTagsForDisplay(a, b string) int {
+	av, aOK := parseVersionTag(a)
+	bv, bOK := parseVersionTag(b)
+	if aOK && bOK {
+		for i := 0; i < len(av); i++ {
+			if av[i] != bv[i] {
+				if av[i] > bv[i] {
+					return -1
+				}
+				return 1
+			}
+		}
+		return strings.Compare(a, b)
+	}
+	if aOK {
+		return -1
+	}
+	if bOK {
+		return 1
+	}
+	return strings.Compare(a, b)
+}
+
+func parseVersionTag(tag string) ([3]int, bool) {
+	var out [3]int
+	tag = strings.TrimSpace(strings.TrimPrefix(tagNameOnly(tag), "v"))
+	parts := strings.Split(tag, ".")
+	if len(parts) != 3 {
+		return out, false
+	}
+	for i, part := range parts {
+		if part == "" {
+			return out, false
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return out, false
+		}
+		out[i] = n
+	}
+	return out, true
 }
 
 // handleAdminLocalTags 列出本地镜像的所有标签
@@ -1211,6 +1304,7 @@ func (s *Server) handleAdminLocalTags(c *gin.Context) {
 	if tags == nil {
 		tags = []string{}
 	}
+	sortTagsForDisplay(tags)
 
 	writeJSON(c, http.StatusOK, struct {
 		Success bool     `json:"success"`

@@ -333,10 +333,6 @@ func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config
 }
 
 func containerBaseURL(cfg *config.GlobalConfig) string {
-	if cfg.Web.ContainerBaseURL != "" {
-		return strings.TrimRight(cfg.Web.ContainerBaseURL, "/")
-	}
-
 	listenAddr := cfg.Web.Listen
 	host := "100.64.0.1"
 	port := "80"

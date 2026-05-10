@@ -149,19 +149,19 @@ func TestContainerBaseURLUsesHTTPSWithTLSNon443(t *testing.T) {
 	}
 }
 
-func TestContainerBaseURLOverride(t *testing.T) {
+func TestContainerBaseURLIgnoresConfiguredOverride(t *testing.T) {
 	cfg := &config.GlobalConfig{
 		Web: config.WebConfig{
 			Listen:           ":80",
 			ContainerBaseURL: "http://172.17.0.1:8080/",
 		},
 	}
-	if got := containerBaseURL(cfg); got != "http://172.17.0.1:8080" {
-		t.Fatalf("containerBaseURL override = %q", got)
+	if got := containerBaseURL(cfg); got != "http://100.64.0.1:80" {
+		t.Fatalf("containerBaseURL = %q, want computed default", got)
 	}
 }
 
-func TestInjectMCPConfigUsesContainerBaseURL(t *testing.T) {
+func TestInjectMCPConfigUsesComputedContainerBaseURL(t *testing.T) {
 	cfg := &config.GlobalConfig{
 		Web: config.WebConfig{
 			Listen:           ":80",
@@ -181,13 +181,13 @@ func TestInjectMCPConfigUsesContainerBaseURL(t *testing.T) {
 	if browser["type"] != "sse" {
 		t.Fatalf("browser MCP type = %q, want sse", browser["type"])
 	}
-	if browser["url"] != "http://172.17.0.1:8080/api/mcp/sse/browser?token=alice:token" {
+	if browser["url"] != "http://100.64.0.1:80/api/mcp/sse/browser?token=alice:token" {
 		t.Fatalf("browser MCP url = %q", browser["url"])
 	}
 	if computer["type"] != "sse" {
 		t.Fatalf("computer MCP type = %q, want sse", computer["type"])
 	}
-	if computer["url"] != "http://172.17.0.1:8080/api/mcp/sse/computer?token=alice:token" {
+	if computer["url"] != "http://100.64.0.1:80/api/mcp/sse/computer?token=alice:token" {
 		t.Fatalf("computer MCP url = %q", computer["url"])
 	}
 }
@@ -236,7 +236,7 @@ func TestApplyConfigToJSONGeneratesMissingMCPToken(t *testing.T) {
 	}
 	servers := got["tools"].(map[string]interface{})["mcp"].(map[string]interface{})["servers"].(map[string]interface{})
 	browser := servers["browser"].(map[string]interface{})
-	if browser["url"] != "http://172.17.0.1:8080/api/mcp/sse/browser?token="+token {
+	if browser["url"] != "http://100.64.0.1:80/api/mcp/sse/browser?token="+token {
 		t.Fatalf("browser MCP url = %q", browser["url"])
 	}
 }

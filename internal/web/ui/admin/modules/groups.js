@@ -48,7 +48,7 @@ export async function init(ctx) {
         const srcBadge = g.source === 'ldap' ? '<span class="badge badge-ok">LDAP</span>' : '<span class="badge badge-muted">本地</span>';
         const subCount = (byParent[g.id] || []).length;
         const subInfo = subCount > 0 ? ' <small class="text-muted">(' + subCount + ' 个子组)</small>' : '';
-        tr.innerHTML = '<td><strong>' + indent + esc(g.name) + '</strong>' + subInfo + '</td><td>' + srcBadge + '</td><td>' + g.member_count + '</td><td>' + g.skill_count + '</td><td><div class="btn-group"><button class="btn btn-sm btn-outline" data-group-detail="' + esc(g.name) + '">详情</button><button class="btn btn-sm btn-outline" data-group-apply="' + esc(g.name) + '">下发配置</button><button class="btn btn-sm btn-danger" data-group-del="' + esc(g.name) + '">删除</button></div></td>';
+        tr.innerHTML = '<td><strong>' + indent + esc(g.name) + '</strong>' + subInfo + '</td><td>' + srcBadge + '</td><td>' + g.member_count + '</td><td>' + g.skill_count + '</td><td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline" data-group-detail="' + esc(g.name) + '">详情</button><button class="btn btn-sm btn-outline" data-group-apply="' + esc(g.name) + '">下发配置</button><button class="btn btn-sm btn-danger" data-group-del="' + esc(g.name) + '">删除</button></div></td>';
         tbody.appendChild(tr);
         renderTree(g.id, depth + 1);
       }
@@ -141,23 +141,36 @@ export async function init(ctx) {
       '<div class="modal" style="max-width:600px">' +
         '<div class="modal-header">组: ' + esc(groupName) + '<button id="modal-close">&times;</button></div>' +
         '<div class="modal-body">' +
-          '<h4>成员</h4>' +
-          '<div id="gd-members" class="mb-1"></div>' +
-          '<div class="row mb-1">' +
-            '<input type="text" id="gd-add-member" placeholder="用户名，多个用逗号分隔" style="flex:1">' +
-            '<button class="btn btn-sm btn-primary" id="gd-add-btn">添加</button>' +
+          '<div class="segmented mb-1">' +
+            '<button class="segment active" data-group-panel="members" type="button">成员</button>' +
+            '<button class="segment" data-group-panel="skills" type="button">绑定技能</button>' +
           '</div>' +
-          '<h4>绑定技能</h4>' +
-          '<div id="gd-skills" class="mb-1"></div>' +
-          '<div class="row mb-1">' +
-            '<select id="gd-skill-select" style="flex:1"></select>' +
-            '<button class="btn btn-sm btn-primary" id="gd-bind-btn">绑定并部署</button>' +
+          '<div data-group-panel-body="members">' +
+            '<div id="gd-members" class="mb-1"></div>' +
+            '<div class="row mb-1">' +
+              '<input type="text" id="gd-add-member" placeholder="用户名，多个用逗号分隔" style="flex:1">' +
+              '<button class="btn btn-sm btn-primary" id="gd-add-btn">添加成员</button>' +
+            '</div>' +
+          '</div>' +
+          '<div data-group-panel-body="skills" class="hidden">' +
+            '<div id="gd-skills" class="mb-1"></div>' +
+            '<div class="row mb-1">' +
+              '<select id="gd-skill-select" style="flex:1"></select>' +
+              '<button class="btn btn-sm btn-primary" id="gd-bind-btn">绑定并部署</button>' +
+            '</div>' +
           '</div>' +
         '</div>' +
       '</div>';
     ctx.$('#content-area').appendChild(overlay);
     overlay.querySelector('#modal-close').addEventListener('click', () => overlay.remove());
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelectorAll('[data-group-panel]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const name = btn.dataset.groupPanel;
+        overlay.querySelectorAll('[data-group-panel]').forEach(item => item.classList.toggle('active', item === btn));
+        overlay.querySelectorAll('[data-group-panel-body]').forEach(item => item.classList.toggle('hidden', item.dataset.groupPanelBody !== name));
+      });
+    });
 
     const detail = await Api.get('/api/admin/groups/members?name=' + encodeURIComponent(groupName));
     const members = (detail.success ? detail.members : []) || [];
