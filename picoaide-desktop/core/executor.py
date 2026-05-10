@@ -35,9 +35,9 @@ def check_whitelist(path, whitelist_dirs):
   """检查路径是否在白名单内"""
   if not whitelist_dirs:
     return False
-  abs_path = os.path.abspath(path)
+  abs_path = os.path.realpath(path)
   for d in whitelist_dirs:
-    allowed = os.path.abspath(d)
+    allowed = os.path.realpath(d)
     if abs_path == allowed or abs_path.startswith(allowed + os.sep):
       return True
   return False

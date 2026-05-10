@@ -640,7 +640,9 @@ func SyncCookies(cfg *config.GlobalConfig, username, domain, cookieStr string) e
 
 	secMap := make(map[string]interface{})
 	if data, err := os.ReadFile(securityPath); err == nil {
-		yaml.Unmarshal(data, &secMap)
+		if err := yaml.Unmarshal(data, &secMap); err != nil {
+			return fmt.Errorf(".security.yml 格式错误，拒绝覆盖: %w", err)
+		}
 	}
 
 	cookiesMap, _ := secMap["cookies"].(map[string]interface{})

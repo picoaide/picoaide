@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -37,6 +38,49 @@ type Server struct {
 	csrfKey         string
 	dockerAvailable bool
 	loginLimiter    *rateLimiter
+}
+
+const sessionSecretSettingKey = "internal.session_secret"
+
+func randomHex(bytesLen int) (string, error) {
+	b := make([]byte, bytesLen)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func ensureSessionSecret(cfg *config.GlobalConfig) (string, error) {
+	if cfg.Web.Password != "" {
+		return cfg.Web.Password, nil
+	}
+
+	engine, err := auth.GetEngine()
+	if err != nil {
+		return "", err
+	}
+	var setting auth.Setting
+	has, err := engine.Where("key = ?", sessionSecretSettingKey).Get(&setting)
+	if err != nil {
+		return "", err
+	}
+	if has && setting.Value != "" {
+		return setting.Value, nil
+	}
+
+	secret, err := randomHex(32)
+	if err != nil {
+		return "", fmt.Errorf("生成 session 密钥失败: %w", err)
+	}
+	if _, err := engine.Exec(
+		"INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
+		sessionSecretSettingKey,
+		secret,
+	); err != nil {
+		return "", fmt.Errorf("保存 session 密钥失败: %w", err)
+	}
+	slog.Info("已生成持久化 session 密钥")
+	return secret, nil
 }
 
 // startLDAPSyncScheduler 定时同步 LDAP 组
@@ -157,7 +201,7 @@ const maxBodyBytes = 1 << 20
 func (s *Server) secureHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
-		if strings.HasPrefix(origin, "chrome-extension://") || strings.HasPrefix(origin, "moz-extension://") {
+		if s.allowedExtensionOrigin(origin) {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Credentials", "true")
 			c.Header("Access-Control-Allow-Headers", "Content-Type")
@@ -181,6 +225,27 @@ func (s *Server) secureHeaders() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func (s *Server) allowedExtensionOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	if !strings.HasPrefix(origin, "chrome-extension://") && !strings.HasPrefix(origin, "moz-extension://") {
+		return false
+	}
+	allowed := strings.TrimSpace(os.Getenv("PICOAIDE_ALLOWED_EXTENSION_ORIGINS"))
+	if allowed == "" {
+		// Backward-compatible default: allow extension origins, but only extension
+		// code that can fetch a CSRF token can complete mutating requests.
+		return true
+	}
+	for _, item := range strings.Split(allowed, ",") {
+		if strings.TrimSpace(item) == origin {
+			return true
+		}
+	}
+	return false
 }
 
 // RegisterRoutes 将所有 API 路由注册到 Gin 引擎
@@ -342,14 +407,6 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 		listenAddr = ":80"
 	}
 
-	secret := cfg.Web.Password
-	if secret == "" {
-		secret = config.SessionSecret
-		slog.Warn("未配置 web.password，使用默认 session 密钥，请尽快修改")
-	}
-
-	csrfKey := secret + "-csrf"
-
 	// 确保工作目录存在
 	wd, _ := os.Getwd()
 	if wd != "" {
@@ -369,6 +426,12 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 			return fmt.Errorf("初始化用户数据库失败: %w", err)
 		}
 	}
+
+	secret, err := ensureSessionSecret(cfg)
+	if err != nil {
+		return err
+	}
+	csrfKey := secret + "-csrf"
 
 	// 初始化 Docker 客户端
 	dockerOK := false

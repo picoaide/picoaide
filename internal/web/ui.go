@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/picoaide/picoaide/internal/auth"
 )
 
 //go:embed ui/*
@@ -30,6 +32,36 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
 		}
 		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 	}
+	requireUIUser := func(c *gin.Context) (string, bool) {
+		username := s.getSessionUser(c)
+		if username == "" {
+			c.Redirect(http.StatusFound, "/login")
+			return "", false
+		}
+		return username, true
+	}
+	requireManageUser := func(c *gin.Context) bool {
+		username, ok := requireUIUser(c)
+		if !ok {
+			return false
+		}
+		if auth.IsSuperadmin(username) {
+			c.Redirect(http.StatusFound, "/admin/dashboard")
+			return false
+		}
+		return true
+	}
+	requireAdminUser := func(c *gin.Context) bool {
+		username, ok := requireUIUser(c)
+		if !ok {
+			return false
+		}
+		if !auth.IsSuperadmin(username) {
+			c.Redirect(http.StatusFound, "/manage")
+			return false
+		}
+		return true
+	}
 
 	r.GET("/", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/login")
@@ -38,6 +70,9 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
 		serveHTML(c, "login.html")
 	})
 	r.GET("/manage", func(c *gin.Context) {
+		if !requireManageUser(c) {
+			return
+		}
 		serveHTML(c, "manage.html")
 	})
 	r.GET("/manage/", func(c *gin.Context) {
@@ -53,6 +88,9 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
 	for _, section := range adminSections {
 		sectionPath := "/admin/" + section
 		r.GET(sectionPath, func(c *gin.Context) {
+			if !requireAdminUser(c) {
+				return
+			}
 			serveHTML(c, "admin/index.html")
 		})
 	}

@@ -230,6 +230,10 @@ func (s *Server) handleCookies(c *gin.Context) {
 	if username == "" {
 		return
 	}
+	if !s.checkCSRF(c) {
+		writeError(c, http.StatusForbidden, "无效请求")
+		return
+	}
 
 	domain := strings.TrimSpace(c.PostForm("domain"))
 	cookieStr := strings.TrimSpace(c.PostForm("cookies"))
