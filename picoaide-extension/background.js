@@ -489,6 +489,11 @@ async function handleWait(params) {
       return new Promise((resolve, reject) => {
         const el = document.querySelector(selector);
         if (el) { resolve({ found: true }); return; }
+        const root = document.body || document.documentElement;
+        if (!root) {
+          reject(new Error('页面尚未准备好'));
+          return;
+        }
         const observer = new MutationObserver(() => {
           if (document.querySelector(selector)) {
             observer.disconnect();
@@ -496,7 +501,7 @@ async function handleWait(params) {
             resolve({ found: true });
           }
         });
-        observer.observe(document.body, { childList: true, subtree: true });
+        observer.observe(root, { childList: true, subtree: true });
         const timer = setTimeout(() => {
           observer.disconnect();
           reject(new Error('等待超时: ' + selector));

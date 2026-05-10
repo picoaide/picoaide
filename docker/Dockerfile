@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=zh_CN.UTF-8
 ENV TZ=Asia/Shanghai
 
-# 安装基础依赖、SSH和常用开发工具
+# 安装基础依赖和常用开发工具
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
@@ -27,8 +27,6 @@ RUN apt-get update && apt-get install -y \
     strace \
     jq \
     ca-certificates \
-    openssh-server \
-    openssh-client \
     build-essential \
     git \
     rsync \
@@ -45,19 +43,6 @@ RUN apt-get update && apt-get install -y \
     sed -i '/zh_CN.UTF-8/s/^# //g' /etc/locale.gen && \
     locale-gen zh_CN.UTF-8 && \
     ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-
-# 配置SSH - 只允许密钥登录，禁用密码，启用SFTP
-RUN mkdir -p /var/run/sshd && \
-    sed -i 's/#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && \
-    sed -i 's/#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
-    sed -i 's/#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
-    sed -i 's/#*UsePAM.*/UsePAM no/' /etc/ssh/sshd_config && \
-    sed -i 's/#*AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config && \
-    sed -i 's/#*GatewayPorts.*/GatewayPorts yes/' /etc/ssh/sshd_config && \
-    sed -i 's/^Subsystem sftp.*/Subsystem sftp internal-sftp/' /etc/ssh/sshd_config
-
-# 创建SSH目录和authorized_keys文件（为空，用户需要手动添加公钥）
-RUN mkdir -p /root/.ssh && touch /root/.ssh/authorized_keys && chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys
 
 # 安装uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -108,7 +93,7 @@ RUN ARCH=$(uname -m) && \
     picoclaw version && \
     picoclaw onboard
 
-# Browser MCP server 由 PicoAide Go 服务端直接提供，通过 SSE 连接
+# MCP server 由 PicoAide Go 服务端直接提供，通过 SSE 连接
 
 # 安装 bocha-search-mcp
 RUN git clone https://github.com/BochaAI/bocha-search-mcp.git /mcp/bocha-search-mcp
@@ -130,8 +115,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # 创建root目录备份（必须在所有文件复制之后）
 RUN mkdir -p /root.original && \
-    cp -a /root/. /root.original/ && \
-    rm -rf /root/.ssh/authorized_keys
+    cp -a /root/. /root.original/
 
-# 启动SSH服务
+# 启动主服务
 CMD ["/usr/local/bin/entrypoint.sh"]

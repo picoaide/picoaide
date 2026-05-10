@@ -6,25 +6,28 @@ on:
       - main
       - master
       - dev
-  workflow_dispatch:
-    inputs:
-      force_build:
-        description: '强制构建（跳过版本检查）'
-        required: false
-        default: 'false'
   schedule:
     # 每天 UTC 03:00 执行（北京时间 11:00）
     - cron: '0 3 * * *'
 
 jobs:
-  check-version:
+  prepare:
     permissions:
       contents: read
+      packages: read
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
-      should_build: ${{ steps.check_build.outputs.should_build }}
+      image_repo: ${{ steps.plan.outputs.image_repo }}
+      should_build: ${{ steps.plan.outputs.should_build }}
+      full_rebuild: ${{ steps.plan.outputs.full_rebuild }}
+      versions_json: ${{ steps.plan.outputs.versions_json }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: Get latest picoclaw version
         id: get_version
         run: |
@@ -36,30 +39,73 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Latest picoclaw version: $VERSION"
 
-      - name: Check if build is needed
-        id: check_build
-        if: github.event_name == 'schedule'
+      - name: Plan build
+        id: plan
         run: |
-          LATEST="${{ steps.get_version.outputs.version }}"
-          TAGS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://ghcr.io/v2/picoaide/picoaide/tags/list" 2>/dev/null || echo "")
+          set -euo pipefail
 
-          if echo "$TAGS" | jq -e --arg tag "$LATEST" '.tags | index($tag)' >/dev/null 2>&1; then
-            echo "Image with tag $LATEST already exists, skipping build"
-            echo "should_build=false" >> $GITHUB_OUTPUT
-          else
-            echo "New version $LATEST detected, build needed"
-            echo "should_build=true" >> $GITHUB_OUTPUT
+          VERSION="${{ steps.get_version.outputs.version }}"
+          SHORT_BRANCH="${{ github.ref_name }}"
+          FULL_REBUILD=false
+          SHOULD_BUILD=true
+          IMAGE_REPO="picoaide/picoaide"
+
+          if [ "$SHORT_BRANCH" = "dev" ]; then
+            IMAGE_REPO="picoaide/picoaide-dev"
           fi
 
-      - name: Force build for push/dispatch
-        if: github.event_name != 'schedule'
-        run: echo "should_build=true" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" = "push" ]; then
+            BASE="${{ github.event.before }}"
+            if [ -n "$BASE" ] && [ "$BASE" != "0000000000000000000000000000000000000000" ]; then
+              CHANGED_FILES=$(git diff --name-only "$BASE" "${{ github.sha }}" || true)
+            else
+              CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r "${{ github.sha }}" || true)
+            fi
+
+            if echo "$CHANGED_FILES" | grep -q '^docker/'; then
+              FULL_REBUILD=true
+            fi
+          fi
+
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            TAGS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://ghcr.io/v2/${IMAGE_REPO}/tags/list" 2>/dev/null || echo "")
+
+            if echo "$TAGS" | jq -e --arg tag "$VERSION" '.tags | index($tag)' >/dev/null 2>&1; then
+              echo "Image with tag $VERSION already exists, skipping build"
+              SHOULD_BUILD=false
+            else
+              echo "New version $VERSION detected, build needed"
+              SHOULD_BUILD=true
+            fi
+          fi
+
+          if [ "$FULL_REBUILD" = "true" ]; then
+            TAGS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://ghcr.io/v2/${IMAGE_REPO}/tags/list" 2>/dev/null || echo "")
+            VERSION_LIST=$(echo "$TAGS" | jq -r '.tags[]? | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))' | sort -V)
+            if [ -z "${VERSION_LIST:-}" ]; then
+              VERSION_LIST="$VERSION"
+            fi
+            VERSIONS_JSON=$(printf '%s\n' "$VERSION_LIST" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          else
+            VERSIONS_JSON=$(printf '%s\n' "$VERSION" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          fi
+
+          echo "image_repo=$IMAGE_REPO" >> $GITHUB_OUTPUT
+          echo "full_rebuild=$FULL_REBUILD" >> $GITHUB_OUTPUT
+          echo "versions_json=$VERSIONS_JSON" >> $GITHUB_OUTPUT
+          echo "should_build=$SHOULD_BUILD" >> $GITHUB_OUTPUT
 
   build:
-    needs: check-version
-    if: needs.check-version.outputs.should_build != 'false'
+    needs: prepare
+    if: needs.prepare.outputs.should_build != 'false'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        version: ${{ fromJson(needs.prepare.outputs.versions_json) }}
 
     permissions:
       contents: read
@@ -83,7 +129,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Tencent Container Registry
-        if: vars.TENCENT_REGISTRY_ENABLED == 'true'
         uses: docker/login-action@v4.1.0
         with:
           registry: hkccr.ccs.tencentyun.com
@@ -93,20 +138,22 @@ jobs:
       - name: Generate image tags
         id: tags
         run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
+          VERSION="${{ matrix.version }}"
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE_REPO="${{ needs.prepare.outputs.image_repo }}"
 
-          if [ "${{ github.ref_name }}" = "main" ] || [ "${{ github.ref_name }}" = "master" ]; then
-            IMAGE="picoaide/picoaide"
-            TAG="${VERSION}"
+          if [ "${{ needs.prepare.outputs.full_rebuild }}" = "true" ]; then
+            TAGS="ghcr.io/${IMAGE_REPO}:${VERSION},hkccr.ccs.tencentyun.com/${IMAGE_REPO}:${VERSION}"
           else
-            IMAGE="picoaide/picoaide-dev"
-            TAG="dev-${SHORT_SHA}"
-          fi
+            if [ "${{ github.ref_name }}" = "main" ] || [ "${{ github.ref_name }}" = "master" ]; then
+              IMAGE="picoaide/picoaide"
+              TAG="${VERSION}"
+            else
+              IMAGE="picoaide/picoaide-dev"
+              TAG="dev-${SHORT_SHA}"
+            fi
 
-          TAGS="ghcr.io/${IMAGE}:${TAG},ghcr.io/${IMAGE}:dev"
-          if [ "${{ vars.TENCENT_REGISTRY_ENABLED }}" = "true" ]; then
-            TAGS="${TAGS},hkccr.ccs.tencentyun.com/${IMAGE}:${TAG},hkccr.ccs.tencentyun.com/${IMAGE}:dev"
+            TAGS="ghcr.io/${IMAGE}:${TAG},ghcr.io/${IMAGE}:dev,hkccr.ccs.tencentyun.com/${IMAGE}:${TAG},hkccr.ccs.tencentyun.com/${IMAGE}:dev"
           fi
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "Building: ${TAGS}"
@@ -120,6 +167,6 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
-            PICOCLAW_VERSION=${{ needs.check-version.outputs.version }}
+            PICOCLAW_VERSION=${{ matrix.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

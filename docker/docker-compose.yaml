@@ -1,9 +1,0 @@
-services:
-  picoaide-deploy:
-    image: ghcr.io/picoaide/picoaide:v0.2.6
-    container_name: picoaide-deploy
-    volumes:
-      - ./root:/root
-    ports:
-      - "2222:22"
-    restart: unless-stopped
