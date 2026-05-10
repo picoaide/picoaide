@@ -41,6 +41,8 @@ jobs:
 
       - name: Plan build
         id: plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -53,6 +55,13 @@ jobs:
           if [ "$SHORT_BRANCH" = "dev" ]; then
             IMAGE_REPO="picoaide/picoaide-dev"
           fi
+
+          list_image_tags() {
+            local image_repo="$1"
+            local package_name="${image_repo#*/}"
+            gh api --paginate "/orgs/${{ github.repository_owner }}/packages/container/${package_name}/versions?per_page=100" \
+              --jq '.[].metadata.container.tags[]?' 2>/dev/null || true
+          }
 
           if [ "${{ github.event_name }}" = "push" ]; then
             BASE="${{ github.event.before }}"
@@ -68,10 +77,9 @@ jobs:
           fi
 
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            TAGS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              "https://ghcr.io/v2/${IMAGE_REPO}/tags/list" 2>/dev/null || echo "")
+            TAGS=$(list_image_tags "$IMAGE_REPO")
 
-            if echo "$TAGS" | jq -e --arg tag "$VERSION" '.tags | index($tag)' >/dev/null 2>&1; then
+            if echo "$TAGS" | grep -Fxq "$VERSION"; then
               echo "Image with tag $VERSION already exists, skipping build"
               SHOULD_BUILD=false
             else
@@ -81,9 +89,7 @@ jobs:
           fi
 
           if [ "$FULL_REBUILD" = "true" ]; then
-            TAGS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              "https://ghcr.io/v2/${IMAGE_REPO}/tags/list" 2>/dev/null || echo "")
-            VERSION_LIST=$(echo "$TAGS" | jq -r '.tags[]? | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))' | sort -V)
+            VERSION_LIST=$(list_image_tags "$IMAGE_REPO" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | uniq || true)
             if [ -z "${VERSION_LIST:-}" ]; then
               VERSION_LIST="$VERSION"
             fi
