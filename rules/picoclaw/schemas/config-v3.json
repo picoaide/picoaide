@@ -1,0 +1,37 @@
+{
+  "config_version": 3,
+  "channels_path": "channel_list",
+  "channel_settings_path": "channel_list.*.settings",
+  "models_path": "model_list",
+  "default_model_path": "agents.defaults.model_name",
+  "security": {
+    "channels_path": "channel_list",
+    "channel_settings_path": "channel_list.*.settings",
+    "models_path": "model_list"
+  },
+  "singleton_channels": [
+    "pico",
+    "pico_client"
+  ],
+  "channel_types": [
+    "pico",
+    "pico_client",
+    "telegram",
+    "discord",
+    "feishu",
+    "weixin",
+    "wecom",
+    "dingtalk",
+    "slack",
+    "matrix",
+    "line",
+    "onebot",
+    "qq",
+    "irc",
+    "vk",
+    "maixcam",
+    "whatsapp",
+    "whatsapp_native",
+    "teams_webhook"
+  ]
+}

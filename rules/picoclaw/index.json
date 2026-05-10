@@ -1,0 +1,148 @@
+{
+  "adapter_schema_version": 1,
+  "adapter_version": "2026.05.10",
+  "latest_supported_config_version": 3,
+  "picoclaw_versions": [
+    {
+      "version": "0.2.4",
+      "config_version": 1,
+      "channel_types": [
+        "telegram",
+        "discord",
+        "feishu",
+        "weixin",
+        "wecom",
+        "dingtalk",
+        "slack",
+        "matrix",
+        "line",
+        "onebot",
+        "qq",
+        "irc",
+        "maixcam",
+        "whatsapp",
+        "pico",
+        "pico_client"
+      ]
+    },
+    {
+      "version": "0.2.5",
+      "config_version": 2,
+      "channel_types": [
+        "telegram",
+        "discord",
+        "feishu",
+        "weixin",
+        "wecom",
+        "dingtalk",
+        "slack",
+        "matrix",
+        "line",
+        "onebot",
+        "qq",
+        "irc",
+        "maixcam",
+        "whatsapp",
+        "pico",
+        "pico_client",
+        "vk"
+      ]
+    },
+    {
+      "version": "0.2.6",
+      "config_version": 2,
+      "channel_types": [
+        "telegram",
+        "discord",
+        "feishu",
+        "weixin",
+        "wecom",
+        "dingtalk",
+        "slack",
+        "matrix",
+        "line",
+        "onebot",
+        "qq",
+        "irc",
+        "maixcam",
+        "whatsapp",
+        "pico",
+        "pico_client",
+        "vk",
+        "teams_webhook"
+      ]
+    },
+    {
+      "version": "0.2.7",
+      "config_version": 3,
+      "channel_types": [
+        "pico",
+        "pico_client",
+        "telegram",
+        "discord",
+        "feishu",
+        "weixin",
+        "wecom",
+        "dingtalk",
+        "slack",
+        "matrix",
+        "line",
+        "onebot",
+        "qq",
+        "irc",
+        "vk",
+        "maixcam",
+        "whatsapp",
+        "whatsapp_native",
+        "teams_webhook"
+      ]
+    },
+    {
+      "version": "0.2.8",
+      "config_version": 3,
+      "channel_types": [
+        "pico",
+        "pico_client",
+        "telegram",
+        "discord",
+        "feishu",
+        "weixin",
+        "wecom",
+        "dingtalk",
+        "slack",
+        "matrix",
+        "line",
+        "onebot",
+        "qq",
+        "irc",
+        "vk",
+        "maixcam",
+        "whatsapp",
+        "whatsapp_native",
+        "teams_webhook"
+      ]
+    }
+  ],
+  "config_schemas": {
+    "1": "schemas/config-v1.json",
+    "2": "schemas/config-v2.json",
+    "3": "schemas/config-v3.json"
+  },
+  "ui_schemas": {
+    "1": "ui/ui-v1.json",
+    "2": "ui/ui-v2.json",
+    "3": "ui/ui-v3.json"
+  },
+  "migrations": [
+    {
+      "from_config": 1,
+      "to_config": 2,
+      "path": "migrations/v1-to-v2.json"
+    },
+    {
+      "from_config": 2,
+      "to_config": 3,
+      "path": "migrations/v2-to-v3.json"
+    }
+  ]
+}

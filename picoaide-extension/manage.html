@@ -6,26 +6,9 @@
   <link rel="stylesheet" href="css/common.css">
 </head>
 <body>
-  <main id="login-page" class="login">
-    <div class="login-card">
-      <h2>PicoAide</h2>
-      <p>配置管理</p>
-      <div class="field">
-        <label>服务器地址</label>
-        <input type="text" id="login-server" placeholder="http://192.168.1.100:80">
-      </div>
-      <div class="row">
-        <div class="field"><label>用户名</label><input type="text" id="login-user"></div>
-        <div class="field"><label>密码</label><input type="password" id="login-pass"></div>
-      </div>
-      <div id="login-msg" class="msg"></div>
-      <button class="btn btn-primary" id="login-btn" style="width:100%">登录</button>
-    </div>
-  </main>
-
-  <div id="manage-page" class="hidden">
+  <div id="manage-page">
     <nav class="navbar">
-      <h1>PicoAide 配置管理</h1>
+      <h1><span class="brand-mark">P</span>PicoAide 配置管理</h1>
       <div class="navbar-right">
         <span id="user-display"></span>
         <button class="btn btn-sm btn-outline" id="logout-btn">退出</button>
@@ -33,21 +16,27 @@
     </nav>
 
     <main class="container">
+      <section class="page-header">
+        <div>
+          <div class="page-kicker">个人工作区</div>
+          <h2>配置管理</h2>
+          <p>管理你的 AI 运行配置、授权文件和本地账号密码。超管仅进入管理后台，不参与普通用户配置。</p>
+        </div>
+      </section>
+
       <div class="tabs">
-        <button class="tab active" data-tab="dingtalk">钉钉配置</button>
+        <button class="tab active" data-tab="channels">通讯渠道</button>
         <button class="tab" data-tab="files">文件管理</button>
         <button class="tab" data-tab="password" id="tab-password-btn">修改密码</button>
       </div>
 
-      <div id="tab-dingtalk" class="panel active">
+      <div id="tab-channels" class="panel active">
         <div class="card">
-          <div class="card-header">钉钉机器人配置</div>
-          <div class="grid-2">
-            <div class="field"><label>Client ID</label><input type="text" id="dt-client-id" placeholder="dingxxx"></div>
-            <div class="field"><label>Client Secret</label><input type="password" id="dt-client-secret" placeholder="secret"></div>
-          </div>
-          <div id="dt-msg" class="msg"></div>
-          <button class="btn btn-primary" id="dt-save-btn">保存并重启容器</button>
+          <div class="card-header">通讯渠道</div>
+          <div id="channel-list" class="btn-group mb-1"></div>
+          <div id="channel-fields"></div>
+          <div id="channel-msg" class="msg"></div>
+          <button class="btn btn-primary" id="channel-save-btn">保存并重启容器</button>
         </div>
       </div>
 

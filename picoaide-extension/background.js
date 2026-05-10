@@ -66,6 +66,23 @@ function isNonDebuggableUrl(url) {
   return !!url && NON_DEBUGGABLE_SCHEMES.some(s => url.startsWith(s));
 }
 
+function waitForTabComplete(tabId, timeoutMs = CONFIG.connectTimeout) {
+  return new Promise(resolve => {
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve({ success: true });
+    }, timeoutMs);
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve({ success: true });
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
 // 在标签页中执行 content script
 async function executeContentScript(tabId, func, ...args) {
   const results = await chrome.scripting.executeScript({
@@ -164,6 +181,14 @@ const TOOL_HANDLERS = {
   browser_tab_new: handleTabNew,
   browser_tab_close: handleTabClose,
   browser_go_back: handleGoBack,
+  browser_go_forward: handleGoForward,
+  browser_reload: handleReload,
+  browser_current_tab: handleCurrentTab,
+  browser_tab_select: handleTabSelect,
+  browser_scroll: handleScroll,
+  browser_key_press: handleKeyPress,
+  browser_get_attribute: handleGetAttribute,
+  browser_get_links: handleGetLinks,
   browser_wait: handleWait,
 };
 
@@ -190,21 +215,7 @@ async function handleToolCommand(msg) {
 async function handleNavigate(params) {
   if (!currentTabId) throw new Error('没有活动的标签页');
   await chrome.tabs.update(currentTabId, { url: params.url });
-  // 等待页面加载完成
-  return new Promise(resolve => {
-    const timeout = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve({ success: true });
-    }, CONFIG.connectTimeout);
-    const listener = (tabId, changeInfo) => {
-      if (tabId === currentTabId && changeInfo.status === 'complete') {
-        clearTimeout(timeout);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve({ success: true });
-      }
-    };
-    chrome.tabs.onUpdated.addListener(listener);
-  });
+  return await waitForTabComplete(currentTabId);
 }
 
 async function handleScreenshot() {
@@ -293,7 +304,13 @@ async function handleTabsList() {
   const tabs = await chrome.tabs.query({});
   return {
     tabs: tabs.map(t => ({
-      id: t.id, url: t.url, title: t.title, active: t.active
+      id: t.id,
+      url: t.url,
+      title: t.title,
+      active: t.active,
+      current: t.id === currentTabId,
+      windowId: t.windowId,
+      index: t.index,
     }))
   };
 }
@@ -315,6 +332,152 @@ async function handleGoBack() {
   if (!currentTabId) throw new Error('没有活动的标签页');
   return await executeContentScript(currentTabId,
     () => { history.back(); return { success: true }; }
+  );
+}
+
+async function handleGoForward() {
+  if (!currentTabId) throw new Error('没有活动的标签页');
+  return await executeContentScript(currentTabId,
+    () => { history.forward(); return { success: true }; }
+  );
+}
+
+async function handleReload(params) {
+  if (!currentTabId) throw new Error('没有活动的标签页');
+  await chrome.tabs.reload(currentTabId, { bypassCache: !!params.bypassCache });
+  return await waitForTabComplete(currentTabId);
+}
+
+async function handleCurrentTab() {
+  if (!currentTabId) throw new Error('没有活动的标签页');
+  const tab = await chrome.tabs.get(currentTabId);
+  return {
+    tab: {
+      id: tab.id,
+      url: tab.url,
+      title: tab.title,
+      active: tab.active,
+      windowId: tab.windowId,
+      index: tab.index,
+      status: tab.status,
+    }
+  };
+}
+
+async function handleTabSelect(params) {
+  const tabId = Number(params.tabId);
+  if (!Number.isInteger(tabId)) throw new Error('tabId 必须是整数');
+  const tab = await chrome.tabs.get(tabId);
+  await chrome.tabs.update(tabId, { active: true });
+  if (tab.windowId !== undefined && chrome.windows?.update) {
+    try { await chrome.windows.update(tab.windowId, { focused: true }); } catch {}
+  }
+  setCurrentTabId(tabId);
+  addTabToGroup(tabId).catch(() => {});
+  updateTabBadge(tabId).catch(() => {});
+  return { success: true, tabId };
+}
+
+async function handleScroll(params) {
+  if (!currentTabId) throw new Error('没有活动的标签页');
+  return await executeContentScript(currentTabId,
+    (selector, x, y) => {
+      const dx = Number(x) || 0;
+      const dy = Number(y) || 0;
+      if (selector) {
+        const el = document.querySelector(selector);
+        if (!el) throw new Error('找不到元素: ' + selector);
+        el.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+        return { success: true, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop };
+      }
+      window.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+      return { success: true, scrollX: window.scrollX, scrollY: window.scrollY };
+    },
+    params.selector || '', params.x || 0, params.y || 0
+  );
+}
+
+async function handleKeyPress(params) {
+  if (!currentTabId) throw new Error('没有活动的标签页');
+  if (!params.key) throw new Error('key 不能为空');
+  return await executeContentScript(currentTabId,
+    (selector, key, modifiers) => {
+      const target = selector ? document.querySelector(selector) : (document.activeElement || document.body);
+      if (!target) throw new Error(selector ? '找不到元素: ' + selector : '找不到可接收按键的元素');
+      if (target.focus) target.focus();
+
+      const eventInit = {
+        key,
+        code: key.length === 1 ? 'Key' + key.toUpperCase() : key,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        ...modifiers,
+      };
+      const down = new KeyboardEvent('keydown', eventInit);
+      const press = new KeyboardEvent('keypress', eventInit);
+      const up = new KeyboardEvent('keyup', eventInit);
+      target.dispatchEvent(down);
+      target.dispatchEvent(press);
+      target.dispatchEvent(up);
+
+      if (key === 'Enter') {
+        if (target.tagName === 'FORM') target.requestSubmit?.();
+        else target.closest?.('form')?.requestSubmit?.();
+      }
+      return { success: true };
+    },
+    params.selector || '', params.key, {
+      ctrlKey: !!params.ctrlKey,
+      shiftKey: !!params.shiftKey,
+      altKey: !!params.altKey,
+      metaKey: !!params.metaKey,
+    }
+  );
+}
+
+async function handleGetAttribute(params) {
+  if (!currentTabId) throw new Error('没有活动的标签页');
+  return await executeContentScript(currentTabId,
+    (selector, name) => {
+      const el = document.querySelector(selector);
+      if (!el) throw new Error('找不到元素: ' + selector);
+      const attrValue = el.getAttribute(name);
+      const propValue = el[name];
+      const propType = typeof propValue;
+      const serializablePropValue = propValue == null || ['string', 'number', 'boolean'].includes(propType)
+        ? propValue
+        : String(propValue);
+      return {
+        name,
+        value: attrValue !== null ? attrValue : serializablePropValue,
+        attributeValue: attrValue,
+        propertyValue: serializablePropValue,
+        propertyType: propType,
+      };
+    },
+    params.selector, params.name
+  );
+}
+
+async function handleGetLinks(params) {
+  if (!currentTabId) throw new Error('没有活动的标签页');
+  const limit = params.limit || 100;
+  return await executeContentScript(currentTabId,
+    (selector, maxLinks) => {
+      const root = selector ? document.querySelector(selector) : document;
+      if (!root) throw new Error('找不到元素: ' + selector);
+      const links = Array.from(root.querySelectorAll('a[href]'))
+        .slice(0, Math.max(0, Number(maxLinks) || 100))
+        .map(a => ({
+          text: (a.innerText || a.textContent || '').trim(),
+          href: a.href,
+          title: a.title || '',
+          target: a.target || '',
+        }));
+      return { links };
+    },
+    params.selector || '', limit
   );
 }
 

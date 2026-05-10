@@ -1,4 +1,10 @@
-<h2>技能库</h2>
+<section class="page-header">
+  <div>
+    <div class="page-kicker">企业统一管理 Skill</div>
+    <h2>技能库</h2>
+    <p>统一安装、部署和回收企业 Skill，通过用户组将标准能力包交付给目标人群。</p>
+  </div>
+</section>
 
 <h3>已安装技能</h3>
 <table>
@@ -22,11 +28,54 @@
 
 <hr>
 
-<h3>技能仓库</h3>
-<div id="repos-list"></div>
-<div class="row mt-1">
-  <input type="text" id="repo-name" placeholder="仓库名称">
-  <input type="text" id="repo-url" placeholder="Git 地址" class="flex-2">
-  <button class="btn btn-primary" id="repo-add-btn">添加仓库</button>
+<h3>添加技能</h3>
+<div class="card">
+  <div class="card-header">导入技能</div>
+  <div class="grid-2">
+    <div class="field"><label>技能名称</label><input type="text" id="skill-name" placeholder="my-skill"></div>
+    <div class="field"><label>导入方式</label>
+      <select id="skill-source">
+        <option value="zip">压缩包</option>
+        <option value="git">Git 地址</option>
+      </select>
+    </div>
+  </div>
+  <div id="skill-source-zip">
+    <div class="field"><label>Zip 文件</label><input type="file" id="skill-upload-file" accept=".zip,application/zip"></div>
+    <p class="text-sm text-muted">压缩包可以包含一个顶层目录，上传后会安装为上方填写的技能名称。重复导入同名技能会覆盖旧内容。</p>
+  </div>
+  <div id="skill-source-git" class="hidden">
+    <div class="field"><label>Git 地址</label><input type="text" id="repo-url" placeholder="https://github.com/org/repo.git"></div>
+    <div class="grid-2">
+      <div class="field"><label>分支 / Tag</label><div class="row">
+        <select id="repo-ref-type" style="min-width:120px">
+          <option value="branch">分支</option>
+          <option value="tag">Tag</option>
+        </select>
+        <input type="text" id="repo-ref" placeholder="main / v1.2.3" style="flex:1">
+      </div></div>
+      <div class="field"><label>凭据</label>
+        <label class="toggle-switch toggle-switch-field">
+          <input type="checkbox" id="repo-use-credentials">
+          <span class="toggle-switch-control" aria-hidden="true"></span>
+          <span class="toggle-switch-label">添加凭据</span>
+        </label>
+      </div>
+    </div>
+    <div id="repo-new-credentials" class="hidden">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:.5rem">
+        <strong>凭据</strong>
+        <button class="btn btn-sm btn-outline" id="repo-new-add-cred">+ 添加凭据</button>
+      </div>
+      <div id="repo-new-cred-list"></div>
+    </div>
+    <p class="text-sm text-muted">不添加凭据时按公开仓库克隆。凭据方式会根据 Git 地址自动判断：git@/ssh:// 使用 SSH 私钥，http:// 或 https:// 使用用户名和 Token/密码。</p>
+  </div>
+  <div class="card-footer">
+    <button class="btn btn-primary" id="skill-add-btn">导入技能</button>
+  </div>
 </div>
 <div id="repo-msg" class="msg"></div>
+
+<h3>Git 技能更新</h3>
+<div id="repos-list"></div>

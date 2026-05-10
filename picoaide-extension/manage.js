@@ -5,54 +5,30 @@ var $$ = function(s) { return document.querySelectorAll(s); };
 
 var currentPath = '';
 var currentUser = '';
-
-function showLogin() {
-  $('#login-page').classList.remove('hidden');
-  $('#manage-page').classList.add('hidden');
-  currentUser = '';
-}
+var currentChannel = '';
+var channelListLoaded = false;
 
 function showManage(username) {
-  $('#login-page').classList.add('hidden');
-  $('#manage-page').classList.remove('hidden');
   $('#user-display').textContent = username;
   currentUser = username;
-  loadDingTalk();
+  loadChannels();
   checkAuthMode();
-  switchTab('dingtalk');
+  switchTab('channels');
 }
 
-// 登录
-$('#login-btn').addEventListener('click', async function() {
-  var msg = $('#login-msg');
-  msg.textContent = '';
-  msg.className = 'msg';
-  var url = $('#login-server').value.trim().replace(/\/+$/, '');
-  if (!url) { showMsg(msg, '请输入服务器地址', false); return; }
-
-  await chrome.storage.local.set({ serverUrl: url });
-
-  try {
-    var res = await apiJSON('POST', '/api/login', {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formBody({ username: $('#login-user').value.trim(), password: $('#login-pass').value }),
-    });
-    if (res.success) {
-      currentUser = res.username;
-      $('#login-pass').value = '';
-      showManage(res.username);
-    } else {
-      showMsg(msg, res.error || '登录失败', false);
-    }
-  } catch (e) {
-    showMsg(msg, e.message, false);
+async function redirectIfSuperadmin() {
+  var info = await apiJSON('GET', '/api/user/info');
+  if (info.success && info.role === 'superadmin') {
+    window.location.href = '/admin/';
+    return true;
   }
-});
+  return false;
+}
 
 $('#logout-btn').addEventListener('click', async function() {
   try { await api('POST', '/api/logout'); } catch {}
   currentUser = '';
-  showLogin();
+  window.location.href = '/login';
 });
 
 // 认证模式检查
@@ -96,18 +72,20 @@ $('#change-password-btn')?.addEventListener('click', async function() {
 // 自动登录
 async function tryAutoLogin() {
   var base = await getServerUrl();
-  $('#login-server').value = base;
-  if (!base) { showLogin(); return; }
+  if (!base) { window.location.href = '/login'; return; }
 
   try {
-    var data = await apiJSON('GET', '/api/dingtalk');
-    if (data.success) { currentUser = currentUser || 'user'; showManage(currentUser); return; }
+    var info = await apiJSON('GET', '/api/user/info');
+    if (info.success) {
+      if (info.role === 'superadmin') {
+        window.location.href = '/admin/';
+        return;
+      }
+      showManage(info.username || 'user');
+      return;
+    }
   } catch {}
-  try {
-    var data = await apiJSON('GET', '/api/csrf');
-    if (data.success) { showManage(currentUser || 'user'); return; }
-  } catch {}
-  showLogin();
+  window.location.href = '/login';
 }
 
 // Tab 切换
@@ -115,35 +93,153 @@ function switchTab(name) {
   $$('.tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === name); });
   $$('.panel').forEach(function(p) { p.classList.toggle('active', p.id === 'tab-' + name); });
   if (name === 'files') loadFiles('');
+  if (name === 'channels') loadChannels();
 }
 
 $$('.tab').forEach(function(btn) {
   btn.addEventListener('click', function() { switchTab(btn.dataset.tab); });
 });
 
-// 钉钉
-async function loadDingTalk() {
+// 通讯渠道
+async function loadChannels() {
   try {
-    var data = await apiJSON('GET', '/api/dingtalk');
-    if (data.success) {
-      $('#dt-client-id').value = data.client_id || '';
-      $('#dt-client-secret').value = data.client_secret || '';
+    var data = await apiJSON('GET', '/api/picoclaw/channels');
+    if (!data.success) {
+      showMsg('#channel-msg', data.error || '加载失败', false);
+      return;
     }
-  } catch {}
+    renderChannelList(data.channels || []);
+    channelListLoaded = true;
+    if (currentChannel) loadChannelFields();
+  } catch (e) {
+    showMsg('#channel-msg', e.message, false);
+  }
 }
 
-$('#dt-save-btn').addEventListener('click', async function() {
-  var msg = $('#dt-msg');
+function renderChannelList(channels) {
+  var box = $('#channel-list');
+  if (!channels.length) {
+    currentChannel = '';
+    box.innerHTML = '';
+    $('#channel-fields').innerHTML = '<p class="text-muted">管理员还没有开放可配置的通讯渠道。</p>';
+    return;
+  }
+  if (!currentChannel || !channels.some(function(ch) { return ch.key === currentChannel; })) {
+    currentChannel = channels[0].key;
+  }
+  box.innerHTML = channels.map(function(ch) {
+    var active = ch.key === currentChannel ? ' btn-primary' : ' btn-outline';
+    var status = ch.enabled ? '已启用' : (ch.configured ? '已配置' : '未配置');
+    return '<button class="btn btn-sm' + active + '" data-channel-section="' + esc(ch.key) + '">' +
+      esc(ch.label || ch.key) + '<span class="text-muted"> ' + esc(status) + '</span></button>';
+  }).join('');
+  box.querySelectorAll('[data-channel-section]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      currentChannel = btn.dataset.channelSection;
+      renderChannelList(channels);
+      loadChannelFields();
+    });
+  });
+}
+
+async function loadChannelFields() {
+  if (!channelListLoaded) {
+    return loadChannels();
+  }
+  if (!currentChannel) return;
+  try {
+    var data = await apiJSON('GET', '/api/picoclaw/config-fields?section=' + encodeURIComponent(currentChannel));
+    if (!data.success) {
+      showMsg('#channel-msg', data.error || '加载失败', false);
+      return;
+    }
+    renderChannelFields(data.fields || []);
+  } catch (e) {
+    showMsg('#channel-msg', e.message, false);
+  }
+}
+
+function renderChannelFields(fields) {
+  var box = $('#channel-fields');
+  if (!fields.length) {
+    box.innerHTML = '<p class="text-muted">当前渠道没有可配置字段。</p>';
+    return;
+  }
+  box.innerHTML = fields.map(function(item) {
+    var field = item.field || {};
+    var value = item.value === undefined || item.value === null ? '' : item.value;
+    var fieldType = String(field.type || 'text').toLowerCase();
+    var type = fieldType === 'password' ? 'password' : (fieldType === 'boolean' ? 'checkbox' : (fieldType === 'integer' || fieldType === 'number' ? 'number' : 'text'));
+    var checked = type === 'checkbox' && value ? ' checked' : '';
+    var val = type === 'checkbox' ? '' : ' value="' + esc(formatFieldValue(field, value)) + '"';
+    if (fieldType === 'string_list' || fieldType === 'array' || fieldType === 'list' || fieldType === 'json' || fieldType === 'object' || fieldType === 'map') {
+      return '<div class="field">' +
+        '<label>' + esc(field.label || field.key) + '</label>' +
+        '<textarea rows="' + (fieldType === 'json' || fieldType === 'object' || fieldType === 'map' ? '6' : '3') + '" data-channel-field="' + esc(field.key) + '" data-field-type="' + esc(fieldType) + '">' +
+        esc(formatFieldValue(field, value)) + '</textarea>' +
+      '</div>';
+    }
+    if (type === 'checkbox') {
+      return '<div class="field">' +
+        '<label>' + esc(field.label || field.key) + '</label>' +
+        '<label class="toggle-switch toggle-switch-field">' +
+          '<input type="checkbox" data-channel-field="' + esc(field.key) + '" data-field-type="' + esc(fieldType) + '"' + checked + '>' +
+          '<span class="toggle-switch-control" aria-hidden="true"></span>' +
+          '<span class="toggle-switch-label">' + esc(value ? '已启用' : '未启用') + '</span>' +
+        '</label>' +
+      '</div>';
+    }
+    return '<div class="field">' +
+      '<label>' + esc(field.label || field.key) + '</label>' +
+      '<input type="' + type + '" data-channel-field="' + esc(field.key) + '" data-field-type="' + esc(fieldType) + '"' + val + checked + '>' +
+    '</div>';
+  }).join('');
+}
+
+$('#channel-save-btn').addEventListener('click', async function() {
+  var msg = $('#channel-msg');
   showMsg(msg, '保存中...', true);
   try {
     var csrf = await getCSRF();
-    var res = await apiJSON('POST', '/api/dingtalk', {
+    var values = {};
+    $('#channel-fields').querySelectorAll('[data-channel-field]').forEach(function(input) {
+      values[input.dataset.channelField] = readFieldInputValue(input);
+    });
+    var res = await apiJSON('POST', '/api/picoclaw/config-fields', {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formBody({ client_id: $('#dt-client-id').value.trim(), client_secret: $('#dt-client-secret').value.trim(), csrf_token: csrf }),
+      body: formBody({ section: currentChannel, values: JSON.stringify(values), csrf_token: csrf }),
     });
     showMsg(msg, res.message || res.error, res.success);
+    if (res.success) {
+      channelListLoaded = false;
+      loadChannels();
+    }
   } catch (e) { showMsg(msg, e.message, false); }
 });
+
+function formatFieldValue(field, value) {
+  var fieldType = String((field && field.type) || 'text').toLowerCase();
+  if (value === undefined || value === null) return '';
+  if (fieldType === 'string_list' || fieldType === 'array' || fieldType === 'list') {
+    if (Array.isArray(value)) return value.join('\n');
+    return String(value);
+  }
+  if (fieldType === 'json' || fieldType === 'object' || fieldType === 'map') {
+    if (typeof value === 'string') return value;
+    try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+  }
+  return value;
+}
+
+function readFieldInputValue(input) {
+  var fieldType = String(input.dataset.fieldType || '').toLowerCase();
+  if (input.type === 'checkbox') return input.checked;
+  if (fieldType === 'integer' || fieldType === 'number') {
+    if (input.value.trim() === '') return '';
+    return Number(input.value);
+  }
+  return input.value;
+}
 
 // 文件管理
 async function loadFiles(path) {

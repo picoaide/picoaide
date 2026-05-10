@@ -1,0 +1,22 @@
+{
+  "from_config": 1,
+  "to_config": 2,
+  "actions": [
+    {
+      "op": "move",
+      "storage": "config",
+      "path": "channels.*.mention_only",
+      "to": "channels.*.group_trigger.mention_only"
+    },
+    {
+      "op": "move",
+      "storage": "security",
+      "path": "channels.*.mention_only",
+      "to": "channels.*.group_trigger.mention_only"
+    },
+    {
+      "op": "infer_model_enabled",
+      "storage": "config"
+    }
+  ]
+}

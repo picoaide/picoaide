@@ -458,7 +458,7 @@ export async function init(ctx) {
     table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;background:#fff';
     const thead = document.createElement('thead');
     thead.innerHTML = '<tr style="border-bottom:2px solid #ddd;background:#f5f5f5">' +
-      '<th style="padding:6px 8px;text-align:left;width:30px"><input type="checkbox" id="upgrade-header-cb"></th>' +
+      '<th style="padding:6px 8px;text-align:left;width:52px"><label class="toggle-switch toggle-switch-compact"><input type="checkbox" id="upgrade-header-cb"><span class="toggle-switch-control" aria-hidden="true"></span></label></th>' +
       '<th style="padding:6px 8px;text-align:left;color:#555">用户名</th>' +
       '<th style="padding:6px 8px;text-align:left;color:#555">当前版本</th>' +
       '<th style="padding:6px 8px;text-align:left;color:#555">状态</th>' +
@@ -470,7 +470,7 @@ export async function init(ctx) {
       const tr = document.createElement('tr');
       tr.style.cssText = 'border-bottom:1px solid #eee;background:#fff';
       tr.innerHTML =
-        '<td style="padding:4px 8px"><input type="checkbox" value="' + esc(u.username) + '" checked></td>' +
+        '<td style="padding:4px 8px"><label class="toggle-switch toggle-switch-compact"><input type="checkbox" value="' + esc(u.username) + '" checked><span class="toggle-switch-control" aria-hidden="true"></span></label></td>' +
         '<td style="padding:4px 8px;color:#333">' + esc(u.username) + '</td>' +
         '<td style="padding:4px 8px;color:#666;font-family:monospace;font-size:11px">' + esc(u.image.split(':').pop()) + '</td>' +
         '<td style="padding:4px 8px">' + (u.status === 'running' ? '<span style="color:#27ae60">运行中</span>' : '<span style="color:#999">' + esc(u.status) + '</span>') + '</td>' +

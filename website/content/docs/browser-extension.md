@@ -56,6 +56,8 @@ Cookie 同步功能将浏览器中的登录状态传递给 AI，使 AI 能够访
 | -------------------- | ------------------------ |
 | `browser_navigate`   | 导航到指定 URL           |
 | `browser_go_back`    | 浏览器后退               |
+| `browser_go_forward` | 浏览器前进               |
+| `browser_reload`     | 刷新当前标签页           |
 
 ### 页面交互
 
@@ -66,6 +68,10 @@ Cookie 同步功能将浏览器中的登录状态传递给 AI，使 AI 能够访
 | `browser_screenshot` | 截取当前标签页屏幕截图             |
 | `browser_get_content`| 获取页面文本内容                   |
 | `browser_execute`    | 在页面中执行 JavaScript 代码       |
+| `browser_scroll`     | 滚动页面或指定元素                 |
+| `browser_key_press`  | 向当前焦点元素或指定元素发送按键   |
+| `browser_get_attribute` | 获取页面元素属性或 DOM 属性值   |
+| `browser_get_links`  | 提取页面或指定区域内的链接         |
 
 ### 标签页管理
 
@@ -74,6 +80,8 @@ Cookie 同步功能将浏览器中的登录状态传递给 AI，使 AI 能够访
 | `browser_tabs_list`| 列出所有标签页     |
 | `browser_tab_new`  | 新建标签页         |
 | `browser_tab_close`| 关闭指定标签页     |
+| `browser_tab_select` | 切换当前受控标签页 |
+| `browser_current_tab` | 获取当前受控标签页信息 |
 
 ### 等待操作
 

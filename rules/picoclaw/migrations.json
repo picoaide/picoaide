@@ -1,13 +1,50 @@
 {
+  "latest_supported_config_version": 3,
   "versions": [
     {
-      "version": "0.2.8",
+      "version": "0.2.4",
+      "config_version": 1,
+      "config_changed": false,
+      "actions": []
+    },
+    {
+      "version": "0.2.5",
+      "config_version": 2,
       "config_changed": true,
+      "from_config": 1,
+      "to_config": 2,
+      "actions": [
+        {
+          "op": "move",
+          "path": "channels.*.mention_only",
+          "to": "channels.*.group_trigger.mention_only"
+        },
+        {
+          "op": "infer_model_enabled"
+        }
+      ]
+    },
+    {
+      "version": "0.2.6",
+      "config_version": 2,
+      "config_changed": false,
+      "actions": []
+    },
+    {
+      "version": "0.2.7",
+      "config_version": 3,
+      "config_changed": true,
+      "from_config": 2,
+      "to_config": 3,
       "actions": [
         {
           "op": "set",
           "path": "version",
           "value": 3
+        },
+        {
+          "op": "delete",
+          "path": "bindings"
         },
         {
           "op": "rename",
@@ -23,6 +60,12 @@
           "value": "sse"
         }
       ]
+    },
+    {
+      "version": "0.2.8",
+      "config_version": 3,
+      "config_changed": false,
+      "actions": []
     }
   ]
 }

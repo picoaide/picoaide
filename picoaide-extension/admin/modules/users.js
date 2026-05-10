@@ -62,6 +62,7 @@ export async function init(ctx) {
       actions += '<button class="btn btn-sm btn-danger" data-action="delete" data-user="' + esc(u.username) + '">删除</button>';
       actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="start" data-user="' + esc(u.username) + '">启动</button>';
       actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="restart" data-user="' + esc(u.username) + '">重启</button>';
+      actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="debug" data-user="' + esc(u.username) + '">调试重启</button>';
       actions += '<button class="btn btn-sm btn-outline" data-action="stop" data-user="' + esc(u.username) + '">停止</button>';
       actions += '<button class="btn btn-sm btn-outline" data-action="apply" data-user="' + esc(u.username) + '">下发配置</button>';
       actions += '<button class="btn btn-sm btn-outline" data-action="logs" data-user="' + esc(u.username) + '">日志</button>';
@@ -87,6 +88,9 @@ export async function init(ctx) {
           const res = await Api.post('/api/admin/config/apply', { username: btn.dataset.user });
           showMsg('#users-msg', res.message || res.error, res.success);
           return;
+        }
+        if (btn.dataset.action === 'debug') {
+          if (!confirm('确定要以 Picoclaw debug 模式重启用户 ' + btn.dataset.user + ' 的容器吗？日志会更详细。')) return;
         }
         const res = await Api.post('/api/admin/container/' + btn.dataset.action, { username: btn.dataset.user });
         showMsg('#users-msg', res.message || res.error, res.success);
