@@ -7,11 +7,17 @@ type ToolDef struct {
 	InputSchema map[string]interface{} `json:"inputSchema"`
 }
 
+const browserMCPToolPrefix = "Browser MCP 工具。仅在用户已登录 PicoAide Helper 扩展并点击“授权AI控制当前标签页”后可用；操作真实浏览器必须通过 browser MCP 调用。"
+
+func browserToolDescription(text string) string {
+	return browserMCPToolPrefix + text
+}
+
 // browserToolDefs 浏览器 MCP 工具列表
 var browserToolDefs = []ToolDef{
 	{
 		Name:        "browser_navigate",
-		Description: "导航当前标签页到指定 URL",
+		Description: browserToolDescription("导航当前受控标签页到指定 URL。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -22,7 +28,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_screenshot",
-		Description: "截取当前标签页的屏幕截图，返回 base64 PNG",
+		Description: browserToolDescription("截取当前受控标签页的屏幕截图，返回 base64 PNG。"),
 		InputSchema: map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
@@ -30,7 +36,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_click",
-		Description: "通过 CSS 选择器点击页面元素",
+		Description: browserToolDescription("通过 CSS 选择器点击当前受控页面中的元素。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -41,7 +47,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_type",
-		Description: "在指定元素中输入文字",
+		Description: browserToolDescription("在当前受控页面的指定元素中输入文字。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -53,7 +59,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_get_content",
-		Description: "获取页面文本内容，可指定选择器获取特定元素",
+		Description: browserToolDescription("获取当前受控页面的文本内容，可指定选择器获取特定元素。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -63,7 +69,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_execute",
-		Description: "在页面中执行 JavaScript 代码",
+		Description: browserToolDescription("在当前受控页面中执行 JavaScript 代码。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -74,7 +80,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_tabs_list",
-		Description: "列出所有打开的标签页",
+		Description: browserToolDescription("列出浏览器中所有打开的标签页。"),
 		InputSchema: map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
@@ -82,7 +88,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_tab_new",
-		Description: "新建标签页，可指定初始 URL",
+		Description: browserToolDescription("新建浏览器标签页，可指定初始 URL。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -92,7 +98,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_tab_close",
-		Description: "关闭指定标签页",
+		Description: browserToolDescription("关闭指定浏览器标签页。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -103,7 +109,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_go_back",
-		Description: "浏览器后退",
+		Description: browserToolDescription("让当前受控标签页执行浏览器后退。"),
 		InputSchema: map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
@@ -111,7 +117,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_go_forward",
-		Description: "浏览器前进",
+		Description: browserToolDescription("让当前受控标签页执行浏览器前进。"),
 		InputSchema: map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
@@ -119,7 +125,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_reload",
-		Description: "刷新当前标签页",
+		Description: browserToolDescription("刷新当前受控标签页。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -129,7 +135,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_current_tab",
-		Description: "获取当前受控标签页的信息",
+		Description: browserToolDescription("获取当前受控标签页的信息。"),
 		InputSchema: map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
@@ -137,7 +143,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_tab_select",
-		Description: "切换当前受控标签页",
+		Description: browserToolDescription("切换当前受控标签页。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -148,7 +154,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_scroll",
-		Description: "滚动页面或指定元素",
+		Description: browserToolDescription("滚动当前受控页面或指定元素。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -160,7 +166,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_key_press",
-		Description: "向当前焦点元素或指定元素发送键盘事件",
+		Description: browserToolDescription("向当前受控页面的当前焦点元素或指定元素发送键盘事件。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -176,7 +182,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_get_attribute",
-		Description: "获取页面元素的属性或 DOM 属性值",
+		Description: browserToolDescription("获取当前受控页面元素的属性或 DOM 属性值。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -188,7 +194,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_get_links",
-		Description: "提取页面或指定区域内的链接",
+		Description: browserToolDescription("提取当前受控页面或指定区域内的链接。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -199,7 +205,7 @@ var browserToolDefs = []ToolDef{
 	},
 	{
 		Name:        "browser_wait",
-		Description: "等待页面中指定元素出现",
+		Description: browserToolDescription("等待当前受控页面中指定元素出现。"),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

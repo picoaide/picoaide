@@ -80,6 +80,8 @@ X-CSRF-Token: <csrf-token>
 
 MCP SSE 服务支持 `{service}` 值为 `browser` 或 `computer`。
 
+浏览器控制只能通过 `browser` MCP 服务调用 `browser_*` 工具完成。`/api/browser/ws` 是浏览器扩展连接 PicoAide Server 的执行端 WebSocket，不是 AI 容器直接调用的接口。AI 容器应使用下发到 `config.json` 的 `tools.mcp.servers.browser.url`。
+
 ## 用户接口
 
 | 方法   | 端点                  | 说明           |

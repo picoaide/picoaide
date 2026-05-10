@@ -257,11 +257,12 @@ func ApplyConfigToJSONWithMigration(cfg *config.GlobalConfig, picoclawDir string
 		return err
 	}
 
-	// 注入 browser MCP 配置
-	mcpToken, _ := auth.GetMCPToken(username)
-	if mcpToken != "" {
-		injectMCPConfig(merged, mcpToken, cfg)
+	// 注入 MCP 配置。历史用户可能没有 mcp_token，配置下发时自动补齐。
+	mcpToken, err := ensureMCPToken(username)
+	if err != nil {
+		return fmt.Errorf("生成 MCP token 失败: %w", err)
 	}
+	injectMCPConfig(merged, mcpToken, cfg)
 
 	jsonData, err := json.MarshalIndent(merged, "", "  ")
 	if err != nil {
@@ -269,6 +270,17 @@ func ApplyConfigToJSONWithMigration(cfg *config.GlobalConfig, picoclawDir string
 	}
 
 	return os.WriteFile(configPath, jsonData, 0644)
+}
+
+func ensureMCPToken(username string) (string, error) {
+	token, err := auth.GetMCPToken(username)
+	if err != nil {
+		return "", err
+	}
+	if token != "" {
+		return token, nil
+	}
+	return auth.GenerateMCPToken(username)
 }
 
 func stripGlobalChannelPolicy(globalPico map[string]interface{}) {

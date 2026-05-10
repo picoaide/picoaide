@@ -575,10 +575,9 @@ async function cdpEnable() {
   const wsUrl = base.replace(/^http/, 'ws') + '/api/browser/ws?token=' + encodeURIComponent(mcpToken);
 
   await ensureOffscreenDocument();
-  sendToOffscreen('offscreen-connect', { url: wsUrl });
 
   // 等待 WebSocket 连接建立
-  await new Promise((resolve, reject) => {
+  const openPromise = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       chrome.runtime.onMessage.removeListener(handler);
       reject(new Error('连接超时(5s)'));
@@ -597,6 +596,8 @@ async function cdpEnable() {
     }
     chrome.runtime.onMessage.addListener(handler);
   });
+  sendToOffscreen('offscreen-connect', { url: wsUrl });
+  await openPromise;
 
   active = true;
 

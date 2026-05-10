@@ -7,9 +7,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/picoaide/picoaide/internal/auth"
 	"github.com/picoaide/picoaide/internal/config"
 	"gopkg.in/yaml.v3"
 )
+
+func testInitAuthDB(t *testing.T) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	auth.ResetDB()
+	if err := auth.InitDB(tmpDir); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	return tmpDir
+}
 
 func TestValidateUsername(t *testing.T) {
 	validNames := []string{
@@ -145,6 +156,55 @@ func TestInjectMCPConfigUsesContainerBaseURL(t *testing.T) {
 	}
 	if computer["url"] != "http://172.17.0.1:8080/api/mcp/sse/computer?token=alice:token" {
 		t.Fatalf("computer MCP url = %q", computer["url"])
+	}
+}
+
+func TestApplyConfigToJSONGeneratesMissingMCPToken(t *testing.T) {
+	tmpDir := testInitAuthDB(t)
+	cfg := &config.GlobalConfig{
+		UsersRoot: filepath.Join(tmpDir, "users"),
+		Image: config.ImageConfig{
+			Name: "picoaide/picoaide",
+			Tag:  "v0.2.10",
+		},
+		Web: config.WebConfig{
+			Listen:           ":80",
+			ContainerBaseURL: "http://172.17.0.1:8080",
+		},
+		PicoClaw: map[string]interface{}{},
+	}
+	picoclawDir := filepath.Join(UserDir(cfg, "alice"), ".picoclaw")
+	if err := os.MkdirAll(picoclawDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.UpsertContainer(&auth.ContainerRecord{Username: "alice", Image: "picoaide/picoaide:v0.2.10", Status: "stopped", IP: "100.64.0.2"}); err != nil {
+		t.Fatalf("UpsertContainer: %v", err)
+	}
+
+	if err := ApplyConfigToJSON(cfg, picoclawDir, "alice"); err != nil {
+		t.Fatalf("ApplyConfigToJSON: %v", err)
+	}
+
+	token, err := auth.GetMCPToken("alice")
+	if err != nil {
+		t.Fatalf("GetMCPToken: %v", err)
+	}
+	if token == "" {
+		t.Fatal("expected generated MCP token")
+	}
+
+	data, err := os.ReadFile(filepath.Join(picoclawDir, "config.json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	servers := got["tools"].(map[string]interface{})["mcp"].(map[string]interface{})["servers"].(map[string]interface{})
+	browser := servers["browser"].(map[string]interface{})
+	if browser["url"] != "http://172.17.0.1:8080/api/mcp/sse/browser?token="+token {
+		t.Fatalf("browser MCP url = %q", browser["url"])
 	}
 }
 
