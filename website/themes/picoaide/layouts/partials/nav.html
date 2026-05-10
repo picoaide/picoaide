@@ -1,7 +1,11 @@
 <nav class="nav" id="nav">
   <div class="nav-container">
-    <a class="nav-logo" href="{{ "/" | relURL }}">
-      <span class="nav-logo-text">PicoAide</span>
+    <a class="nav-brand" href="{{ "/" | relURL }}">
+      <img class="nav-brand-mark" src="{{ "/images/logo.svg" | relURL }}" alt="">
+      <span class="nav-brand-copy">
+        <strong>{{ .Site.Title }}</strong>
+        {{ with .Site.Params.navTagline }}<small>{{ . }}</small>{{ end }}
+      </span>
     </a>
 
     <button class="nav-toggle" id="nav-toggle" aria-label="切换导航菜单" aria-expanded="false">

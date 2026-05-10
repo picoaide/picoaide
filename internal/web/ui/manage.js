@@ -6,6 +6,7 @@ var $$ = function(s) { return document.querySelectorAll(s); };
 var currentPath = '';
 var currentUser = '';
 var currentChannel = '';
+var currentChannels = [];
 var channelListLoaded = false;
 
 function showManage(username) {
@@ -118,20 +119,30 @@ async function loadChannels() {
 
 function renderChannelList(channels) {
   var box = $('#channel-list');
+  currentChannels = channels || [];
   if (!channels.length) {
     currentChannel = '';
     box.innerHTML = '';
     $('#channel-fields').innerHTML = '<p class="text-muted">管理员还没有开放可配置的通讯渠道。</p>';
+    $('#channel-title').textContent = '渠道配置';
+    $('#channel-subtitle').textContent = '管理员开放渠道后可在这里维护配置';
+    $('#channel-save-btn').disabled = true;
     return;
   }
+  $('#channel-save-btn').disabled = false;
   if (!currentChannel || !channels.some(function(ch) { return ch.key === currentChannel; })) {
     currentChannel = channels[0].key;
   }
   box.innerHTML = channels.map(function(ch) {
-    var active = ch.key === currentChannel ? ' btn-primary' : ' btn-outline';
     var status = ch.enabled ? '已启用' : (ch.configured ? '已配置' : '未配置');
-    return '<button class="btn btn-sm' + active + '" data-channel-section="' + esc(ch.key) + '">' +
-      esc(ch.label || ch.key) + '<span class="text-muted"> ' + esc(status) + '</span></button>';
+    var badgeCls = ch.enabled ? 'badge-ok' : (ch.configured ? 'badge-muted' : 'badge-danger');
+    return '<button class="nav-item' + (ch.key === currentChannel ? ' active' : '') + '" data-channel-section="' + esc(ch.key) + '">' +
+      '<span class="nav-item-main">' +
+        '<span class="nav-item-title">' + esc(ch.label || ch.key) + '</span>' +
+        '<span class="nav-item-subtitle">' + esc(ch.key) + '</span>' +
+      '</span>' +
+      '<span class="badge ' + badgeCls + '">' + esc(status) + '</span>' +
+    '</button>';
   }).join('');
   box.querySelectorAll('[data-channel-section]').forEach(function(btn) {
     btn.addEventListener('click', function() {
@@ -153,6 +164,9 @@ async function loadChannelFields() {
       showMsg('#channel-msg', data.error || '加载失败', false);
       return;
     }
+    var ch = currentChannels.find(function(item) { return item.key === currentChannel; }) || {};
+    $('#channel-title').textContent = ch.label || currentChannel || '渠道配置';
+    $('#channel-subtitle').textContent = (ch.enabled ? '当前渠道已启用' : (ch.configured ? '当前渠道已配置但未启用' : '当前渠道尚未配置')) + '，保存后会重启容器';
     renderChannelFields(data.fields || []);
   } catch (e) {
     showMsg('#channel-msg', e.message, false);
@@ -273,13 +287,16 @@ async function loadFiles(path) {
     var entries = data.entries || data.files || [];
     if (entries.length === 0) { list.innerHTML = '<p class="text-muted text-center">空目录</p>'; return; }
 
+    var wrap = document.createElement('div');
+    wrap.className = 'table-wrap';
     var table = document.createElement('table');
+    table.className = 'compact-table';
     var tbody = document.createElement('tbody');
     for (var j = 0; j < entries.length; j++) {
       (function(entry) {
         var tr = document.createElement('tr');
         tr.style.cursor = 'pointer';
-        tr.innerHTML = '<td>' + (entry.is_dir ? '📁 ' : '📄 ') + esc(entry.name) + '</td><td>' + (entry.is_dir ? '' : (entry.size_str || '')) + '</td><td><div class="btn-group">' + (!entry.is_dir ? '<button class="btn btn-sm btn-outline dl-btn">下载</button>' : '') + '<button class="btn btn-sm btn-danger del-btn">删除</button></div></td>';
+        tr.innerHTML = '<td>' + (entry.is_dir ? '📁 ' : '📄 ') + esc(entry.name) + '</td><td>' + (entry.is_dir ? '' : (entry.size_str || '')) + '</td><td class="actions-cell"><div class="btn-group">' + (!entry.is_dir ? '<button class="btn btn-sm btn-outline dl-btn">下载</button>' : '') + '<button class="btn btn-sm btn-danger del-btn">删除</button></div></td>';
 
         tr.querySelector('td:first-child').addEventListener('click', function() {
           if (entry.is_dir) loadFiles(entry.rel_path);
@@ -311,7 +328,8 @@ async function loadFiles(path) {
       })(entries[j]);
     }
     table.appendChild(tbody);
-    list.appendChild(table);
+    wrap.appendChild(table);
+    list.appendChild(wrap);
   } catch (e) {
     list.innerHTML = '';
     showMsg(msg, e.message, false);
@@ -333,11 +351,21 @@ $('#mkdir-btn').addEventListener('click', async function() {
   } catch (e) { showMsg(msg, e.message, false); }
 });
 
-$('#upload-input').addEventListener('change', async function() {
+$('#upload-input').addEventListener('change', function() {
   var file = $('#upload-input').files[0];
-  if (!file) return;
+  $('#upload-file-name').textContent = file ? (file.name + ' (' + formatBytes(file.size) + ')') : '未选择文件';
+  $('#upload-btn').disabled = !file;
+});
+
+$('#upload-btn').addEventListener('click', async function() {
+  var file = $('#upload-input').files[0];
+  if (!file) {
+    showMsg('#file-msg', '请先选择文件', false);
+    return;
+  }
   var msg = $('#file-msg');
   showMsg(msg, '上传中...', true);
+  $('#upload-btn').disabled = true;
   try {
     var csrf = await getCSRF();
     var formData = new FormData();
@@ -350,7 +378,21 @@ $('#upload-input').addEventListener('change', async function() {
     if (data.success) loadFiles(currentPath);
   } catch (e) { showMsg(msg, e.message, false); }
   $('#upload-input').value = '';
+  $('#upload-file-name').textContent = '未选择文件';
+  $('#upload-btn').disabled = true;
 });
+
+function formatBytes(size) {
+  if (!size) return '0 B';
+  var units = ['B', 'KB', 'MB', 'GB'];
+  var value = size;
+  var idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value = value / 1024;
+    idx++;
+  }
+  return (idx === 0 ? value : value.toFixed(1)) + ' ' + units[idx];
+}
 
 // 编辑器
 async function openEditor(path) {

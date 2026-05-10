@@ -1,132 +1,32 @@
 {{ define "content" }}
-{{ $docsSection := .Site.GetPage "/docs" }}
-{{ $firstPage := "" }}
-
-{{/* Find the first non-section page in docs */}}
-{{ if $docsSection }}
-  {{ range $docsSection.Pages }}
-    {{ if not .IsSection }}
-      {{ if eq $firstPage "" }}
-        {{ $firstPage = .RelPermalink }}
-      {{ end }}
-    {{ else }}
-      {{ range .Pages }}
-        {{ if not .IsSection }}
-          {{ if eq $firstPage "" }}
-            {{ $firstPage = .RelPermalink }}
-          {{ end }}
-        {{ end }}
-      {{ end }}
-    {{ end }}
-  {{ end }}
-{{ end }}
-
-{{ if and $firstPage (eq .RelPermalink ($docsSection.RelPermalink)) }}
-  {{/* Redirect to first docs page via meta refresh */}}
-  <!DOCTYPE html>
-  <html>
-  <head>
-    <meta http-equiv="refresh" content="0; url={{ $firstPage }}">
-    <link rel="canonical" href="{{ $firstPage }}">
-  </head>
-  <body>
-    <p>正在跳转到文档首页... <a href="{{ $firstPage }}">点击此处</a>。</p>
-  </body>
-  </html>
-{{ else }}
-<div class="docs-layout">
+<div class="docs-shell docs-shell--landing">
   {{ partial "docs-sidebar.html" . }}
-  <div class="docs-content-wrapper">
-    <div class="container">
-      <article class="docs-page">
-        <header class="docs-header">
-          <nav class="docs-breadcrumb" aria-label="面包屑导航">
-            <a href="{{ "/" | relURL }}">首页</a>
-            <span class="docs-breadcrumb-sep">/</span>
-            <a href="{{ "/docs/" | relURL }}">文档</a>
-            {{ if .CurrentSection }}
-              {{ if ne .CurrentSection.RelPermalink ($docsSection.RelPermalink | default "/docs/") }}
-              <span class="docs-breadcrumb-sep">/</span>
-              <a href="{{ .CurrentSection.RelPermalink }}">{{ .CurrentSection.Title }}</a>
-              {{ end }}
-            {{ end }}
-            {{ if not .IsSection }}
-            <span class="docs-breadcrumb-sep">/</span>
-            <span class="docs-breadcrumb-current">{{ .Title }}</span>
-            {{ end }}
-          </nav>
-        </header>
 
-        <div class="docs-body">
-          <div class="docs-main">
-            <h1 class="docs-title">{{ .Title }}</h1>
-            {{ with .Description }}
-              <p class="docs-description">{{ . }}</p>
-            {{ end }}
-            <div class="docs-text">
-              {{ .Content }}
-            </div>
-          </div>
-          {{ partial "toc.html" . }}
-        </div>
+  <div class="docs-main-area">
+    <div class="container docs-container">
+      <section class="docs-hero">
+        <div class="eyebrow">{{ .Title }}</div>
+        <h1>{{ .Title }}</h1>
+        {{ with .Description }}<p class="docs-lead">{{ . }}</p>{{ end }}
+      </section>
 
-        {{ with .File }}
-        <div class="docs-edit-link">
-          <a href="{{ $.Site.Params.github }}/blob/main/website/content/{{ .Path }}" target="_blank" rel="noopener noreferrer">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-              <polyline points="15 3 21 3 21 9"></polyline>
-              <line x1="10" y1="14" x2="21" y2="3"></line>
-            </svg>
-            在 GitHub 上编辑此页
-          </a>
-        </div>
+      {{ with .Content }}
+      <section class="docs-prose docs-intro">
+        {{ . }}
+      </section>
+      {{ end }}
+
+      <section class="docs-catalog docs-grid">
+        {{ range .Pages }}
+        <a class="docs-card docs-card--document" href="{{ .RelPermalink }}">
+          <span class="docs-card-kicker">{{ i18n "doc_card" }}</span>
+          <h3>{{ .Title }}</h3>
+          <p>{{ with .Description }}{{ . }}{{ else }}{{ .Summary | plainify | truncate 140 }}{{ end }}</p>
+          <span class="docs-card-arrow">→</span>
+        </a>
         {{ end }}
-      </article>
+      </section>
     </div>
   </div>
 </div>
-{{ end }}
-{{ end }}
-
-{{ define "scripts" }}
-<script>
-(function() {
-  // Mobile menu toggle (inherited from base)
-  var toggle = document.getElementById('nav-toggle');
-  var menu = document.getElementById('nav-menu');
-  if (toggle && menu) {
-    toggle.addEventListener('click', function() {
-      var expanded = this.getAttribute('aria-expanded') === 'true';
-      this.setAttribute('aria-expanded', !expanded);
-      menu.classList.toggle('open');
-      this.classList.toggle('active');
-    });
-  }
-
-  // Docs sidebar section toggle
-  var sectionBtns = document.querySelectorAll('.docs-nav-section-btn');
-  sectionBtns.forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      var expanded = this.getAttribute('aria-expanded') === 'true';
-      this.setAttribute('aria-expanded', !expanded);
-      this.classList.toggle('expanded');
-      var sublist = this.nextElementSibling;
-      if (sublist) {
-        sublist.classList.toggle('open');
-      }
-    });
-  });
-
-  // Mobile docs sidebar toggle
-  var sidebarToggle = document.getElementById('docs-sidebar-toggle');
-  var sidebar = document.getElementById('docs-sidebar');
-  if (sidebarToggle && sidebar) {
-    sidebarToggle.addEventListener('click', function() {
-      sidebar.classList.toggle('open');
-      this.classList.toggle('active');
-    });
-  }
-})();
-</script>
 {{ end }}

@@ -112,7 +112,8 @@ export async function init(ctx) {
 
     var defaultSelect = $('#default-model-select');
     if (defaultSelect) {
-      var currentDefault = deepGet(rawConfig, 'picoclaw.agents.defaults.model_name') || '';
+      var currentDefault = deepGet(rawConfig, 'picoclaw.agents.defaults.model_name') ||
+        deepGet(rawConfig, 'picoclaw.agents.defaults.model') || '';
       defaultSelect.innerHTML = '<option value="">-- 选择默认模型 --</option>';
       models.forEach(function(m) {
         var opt = document.createElement('option');
@@ -147,44 +148,53 @@ export async function init(ctx) {
       });
 
       card.innerHTML =
-        '<div class="grid-2">' +
-          '<div class="field"><label>模型名</label><input type="text" value="' + ctx.esc(m.model_name || '') + '" data-mi="' + i + '" data-mf="model_name"></div>' +
-          '<div class="field"><label>启用</label><label class="toggle-switch toggle-switch-field"><input type="checkbox" ' + (m.enabled !== false ? 'checked' : '') + ' data-mi="' + i + '" data-mf="enabled"><span class="toggle-switch-control" aria-hidden="true"></span><span class="toggle-switch-label">启用这个模型</span></label></div>' +
+        '<div class="toolbar">' +
+          '<div><div class="toolbar-title">' + ctx.esc(m.model_name || '未命名模型') + '</div><div class="toolbar-subtitle">' + ctx.esc(m.model || '未填写模型 ID') + '</div></div>' +
+          '<label class="toggle-switch toggle-switch-field"><input type="checkbox" ' + (m.enabled !== false ? 'checked' : '') + ' data-mi="' + i + '" data-mf="enabled"><span class="toggle-switch-control" aria-hidden="true"></span><span class="toggle-switch-label">启用</span></label>' +
         '</div>' +
-        '<div class="grid-2">' +
-          '<div class="field"><label>供应商 / 模型</label><div class="row">' +
-            '<select data-mi="' + i + '" data-vf="vendor" style="min-width:120px">' + vendorOptions + '</select>' +
-            '<input type="text" value="' + ctx.esc(parsed.modelId) + '" data-mi="' + i + '" data-vf="model_id" placeholder="模型 ID" style="flex:1">' +
-          '</div></div>' +
-          '<div class="field"><label>Provider</label><input type="text" value="' + ctx.esc(m.provider || '') + '" data-mi="' + i + '" data-mf="provider" placeholder="可留空，自动从模型前缀推断"></div>' +
+        '<div class="form-section">' +
+          '<div class="form-section-title">基础配置</div>' +
+          '<div class="grid-2">' +
+            '<div class="field"><label>模型名</label><input type="text" value="' + ctx.esc(m.model_name || '') + '" data-mi="' + i + '" data-mf="model_name"></div>' +
+            '<div class="field"><label>Provider</label><input type="text" value="' + ctx.esc(m.provider || '') + '" data-mi="' + i + '" data-mf="provider" placeholder="可留空，自动从模型前缀推断"></div>' +
+          '</div>' +
+          '<div class="grid-2">' +
+            '<div class="field"><label>供应商 / 模型</label><div class="row">' +
+              '<select data-mi="' + i + '" data-vf="vendor" style="min-width:120px">' + vendorOptions + '</select>' +
+              '<input type="text" value="' + ctx.esc(parsed.modelId) + '" data-mi="' + i + '" data-vf="model_id" placeholder="模型 ID" style="flex:1">' +
+            '</div></div>' +
+            '<div class="field"><label>API Base</label><input type="text" value="' + ctx.esc(apiBaseValue) + '" data-mi="' + i + '" data-mf="api_base" placeholder="' + ctx.esc(defaultBase) + '"></div>' +
+          '</div>' +
+          '<div class="grid-2">' +
+            '<div class="field"><label>超时(秒)</label><input type="number" value="' + (m.request_timeout || '') + '" data-mi="' + i + '" data-mf="request_timeout"></div>' +
+            '<div class="field"><label>RPM</label><input type="number" value="' + (m.rpm || '') + '" data-mi="' + i + '" data-mf="rpm"></div>' +
+          '</div>' +
+          '<div class="field"><label>API 密钥</label>' + keysHtml +
+            '<button class="btn btn-sm btn-outline mt-1" data-add-key="' + i + '">+ 添加密钥</button>' +
+          '</div>' +
         '</div>' +
-        '<div class="grid-2">' +
-          '<div class="field"><label>API Base</label><input type="text" value="' + ctx.esc(apiBaseValue) + '" data-mi="' + i + '" data-mf="api_base" placeholder="' + ctx.esc(defaultBase) + '"></div>' +
-          '<div class="field"><label>代理</label><input type="text" value="' + ctx.esc(m.proxy || '') + '" data-mi="' + i + '" data-mf="proxy"></div>' +
-        '</div>' +
-        '<div class="grid-2">' +
-          '<div class="field"><label>超时(秒)</label><input type="number" value="' + (m.request_timeout || '') + '" data-mi="' + i + '" data-mf="request_timeout"></div>' +
-          '<div class="field"><label>RPM</label><input type="number" value="' + (m.rpm || '') + '" data-mi="' + i + '" data-mf="rpm"></div>' +
-        '</div>' +
-        '<div class="grid-2">' +
-          '<div class="field"><label>认证方式</label><input type="text" value="' + ctx.esc(m.auth_method || '') + '" data-mi="' + i + '" data-mf="auth_method" placeholder="oauth / token"></div>' +
-          '<div class="field"><label>连接模式</label><input type="text" value="' + ctx.esc(m.connect_mode || '') + '" data-mi="' + i + '" data-mf="connect_mode" placeholder="stdio / grpc"></div>' +
-        '</div>' +
-        '<div class="grid-2">' +
-          '<div class="field"><label>Workspace</label><input type="text" value="' + ctx.esc(m.workspace || '') + '" data-mi="' + i + '" data-mf="workspace"></div>' +
-          '<div class="field"><label>Thinking Level</label><input type="text" value="' + ctx.esc(m.thinking_level || '') + '" data-mi="' + i + '" data-mf="thinking_level" placeholder="off / low / medium / high / xhigh / adaptive"></div>' +
-        '</div>' +
-        '<div class="grid-2">' +
-          '<div class="field"><label>Max Tokens 字段</label><input type="text" value="' + ctx.esc(m.max_tokens_field || '') + '" data-mi="' + i + '" data-mf="max_tokens_field"></div>' +
-          '<div class="field"><label>User Agent</label><input type="text" value="' + ctx.esc(m.user_agent || '') + '" data-mi="' + i + '" data-mf="user_agent"></div>' +
-        '</div>' +
-        '<div class="field"><label>Fallbacks</label><textarea rows="2" data-mi="' + i + '" data-mf="fallbacks" data-mf-type="string_list">' + ctx.esc(Array.isArray(m.fallbacks) ? m.fallbacks.join('\\n') : '') + '</textarea></div>' +
-        '<div class="grid-2">' +
-          '<div class="field"><label>Extra Body JSON</label><textarea rows="4" data-mi="' + i + '" data-mf="extra_body" data-mf-type="json">' + ctx.esc(formatJSON(m.extra_body)) + '</textarea></div>' +
-          '<div class="field"><label>Custom Headers JSON</label><textarea rows="4" data-mi="' + i + '" data-mf="custom_headers" data-mf-type="json">' + ctx.esc(formatJSON(m.custom_headers)) + '</textarea></div>' +
-        '</div>' +
-        '<div class="field"><label>API 密钥</label>' + keysHtml +
-          '<button class="btn btn-sm btn-outline mt-1" data-add-key="' + i + '">+ 添加密钥</button>' +
+        '<div class="form-section">' +
+          '<button class="btn btn-sm btn-outline" data-toggle-advanced="' + i + '" type="button">高级配置</button>' +
+          '<div class="advanced-fields mt-1" data-advanced="' + i + '">' +
+            '<div class="grid-2">' +
+              '<div class="field"><label>代理</label><input type="text" value="' + ctx.esc(m.proxy || '') + '" data-mi="' + i + '" data-mf="proxy"></div>' +
+              '<div class="field"><label>认证方式</label><input type="text" value="' + ctx.esc(m.auth_method || '') + '" data-mi="' + i + '" data-mf="auth_method" placeholder="oauth / token"></div>' +
+            '</div>' +
+            '<div class="grid-2">' +
+              '<div class="field"><label>连接模式</label><input type="text" value="' + ctx.esc(m.connect_mode || '') + '" data-mi="' + i + '" data-mf="connect_mode" placeholder="stdio / grpc"></div>' +
+              '<div class="field"><label>Workspace</label><input type="text" value="' + ctx.esc(m.workspace || '') + '" data-mi="' + i + '" data-mf="workspace"></div>' +
+            '</div>' +
+            '<div class="grid-2">' +
+              '<div class="field"><label>Thinking Level</label><input type="text" value="' + ctx.esc(m.thinking_level || '') + '" data-mi="' + i + '" data-mf="thinking_level" placeholder="off / low / medium / high / xhigh / adaptive"></div>' +
+              '<div class="field"><label>Max Tokens 字段</label><input type="text" value="' + ctx.esc(m.max_tokens_field || '') + '" data-mi="' + i + '" data-mf="max_tokens_field"></div>' +
+            '</div>' +
+            '<div class="field"><label>User Agent</label><input type="text" value="' + ctx.esc(m.user_agent || '') + '" data-mi="' + i + '" data-mf="user_agent"></div>' +
+            '<div class="field"><label>Fallbacks</label><textarea rows="2" data-mi="' + i + '" data-mf="fallbacks" data-mf-type="string_list">' + ctx.esc(Array.isArray(m.fallbacks) ? m.fallbacks.join('\\n') : '') + '</textarea></div>' +
+            '<div class="grid-2">' +
+              '<div class="field"><label>Extra Body JSON</label><textarea rows="4" data-mi="' + i + '" data-mf="extra_body" data-mf-type="json">' + ctx.esc(formatJSON(m.extra_body)) + '</textarea></div>' +
+              '<div class="field"><label>Custom Headers JSON</label><textarea rows="4" data-mi="' + i + '" data-mf="custom_headers" data-mf-type="json">' + ctx.esc(formatJSON(m.custom_headers)) + '</textarea></div>' +
+            '</div>' +
+          '</div>' +
         '</div>' +
         '<div class="card-footer"><button class="btn btn-sm btn-danger" data-rm-model="' + i + '">删除模型</button></div>';
 
@@ -298,6 +308,13 @@ export async function init(ctx) {
         setSecurityMap(secMap);
       });
     });
+
+    container.querySelectorAll('[data-toggle-advanced]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var panel = container.querySelector('[data-advanced="' + btn.dataset.toggleAdvanced + '"]');
+        if (panel) panel.classList.toggle('open');
+      });
+    });
   }
 
   function syncSecurityOnRename() {
@@ -334,6 +351,9 @@ export async function init(ctx) {
     });
     $$('select[data-path]').forEach(function(sel) {
       deepSet(rawConfig, sel.dataset.path, sel.value);
+      if (sel.dataset.path === 'picoclaw.agents.defaults.model_name') {
+        deepSet(rawConfig, 'picoclaw.agents.defaults.model', sel.value);
+      }
     });
   }
 }

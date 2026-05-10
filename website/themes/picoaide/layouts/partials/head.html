@@ -3,6 +3,7 @@
 <meta name="description" content="{{ if .Description }}{{ .Description }}{{ else }}{{ .Site.Params.description }}{{ end }}">
 <meta name="author" content="PicoAide">
 <meta name="theme-color" content="#0a1628">
+<meta name="color-scheme" content="light">
 
 {{ if .IsHome }}<meta name="robots" content="index, follow">{{ end }}
 
@@ -24,8 +25,4 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 {{ end }}
 
-{{ with resources.Get "favicon.ico" }}
-  <link rel="alternate icon" href="{{ .RelPermalink }}">
-{{ else }}
-  <link rel="alternate icon" href="/favicon.ico">
-{{ end }}
+<link rel="apple-touch-icon" href="{{ "/images/logo.svg" | relURL }}">

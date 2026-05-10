@@ -12,9 +12,11 @@
 
 <div id="unified-auth-tip" class="msg msg-info hidden">统一认证模式下，用户由外部认证系统管理，不支持手动添加。</div>
 
-<table>
-  <thead><tr><th>用户名</th><th>组</th><th>容器状态</th><th>镜像版本</th><th>IP</th><th>操作</th></tr></thead>
-  <tbody id="users-tbody"></tbody>
-</table>
+<div class="table-wrap">
+  <table class="wide-table">
+    <thead><tr><th>用户名</th><th>组</th><th>容器状态</th><th>镜像版本</th><th>IP</th><th class="actions-cell">操作</th></tr></thead>
+    <tbody id="users-tbody"></tbody>
+  </table>
+</div>
 <p id="users-empty" class="text-muted text-center mt-1 hidden">暂无用户</p>
 <div id="users-msg" class="msg"></div>

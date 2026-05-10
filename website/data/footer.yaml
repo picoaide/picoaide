@@ -1,0 +1,24 @@
+columns:
+  - title: 产品
+    links:
+      - label: 文档
+        href: /docs/
+      - label: 快速开始
+        href: /docs/quick-start/
+      - label: 博客
+        href: /blog/
+  - title: 社区
+    links:
+      - label: GitHub
+        href: https://github.com/picoaide/picoaide
+        external: true
+      - label: 问题反馈
+        href: https://github.com/picoaide/picoaide/issues
+        external: true
+  - title: 更多
+    links:
+      - label: 开源许可
+        href: https://github.com/picoaide/picoaide/blob/main/LICENSE
+        external: true
+      - label: API 参考
+        href: /docs/api/

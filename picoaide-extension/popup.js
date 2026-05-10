@@ -16,6 +16,12 @@ async function apiJSON(method, path, opts = {}) {
   return res.json();
 }
 
+async function getCSRF() {
+  const data = await apiJSON('GET', '/api/csrf');
+  if (!data.success) throw new Error(data.error || '获取 CSRF token 失败');
+  return data.csrf_token;
+}
+
 function formBody(obj) {
   return Object.entries(obj)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
@@ -130,6 +136,7 @@ syncBtn.addEventListener('click', async () => {
     const body = new FormData();
     body.append('domain', domain);
     body.append('cookies', cookieStr);
+    body.append('csrf_token', await getCSRF());
 
     const res = await api('POST', '/api/cookies', { body });
     const data = await res.json();

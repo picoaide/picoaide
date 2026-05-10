@@ -1,188 +1,169 @@
 ---
 title: "配置参考"
-description: "PicoAide 配置详细说明"
+description: "PicoAide 配置结构、数据目录、认证、镜像和 Picoclaw 适配包"
 weight: 6
 draft: false
 ---
 
-PicoAide 的配置存储在 SQLite 数据库中，通过管理面板或 API 进行修改。
+PicoAide 的配置主要存储在 SQLite 数据库中，用户运行时配置落在用户目录。超管可以通过管理后台或 `/api/config` 修改全局配置。
 
-## 配置方式
+## 数据目录
 
-### 通过管理面板
+初始化时默认数据目录是 `/data/picoaide`。典型结构：
 
-安装浏览器扩展后，使用超管账户登录，在管理面板中可以直接修改：
-
-- 认证配置（LDAP/本地/OIDC）
-- 镜像仓库设置
-- 全局模型配置
-- 技能仓库管理
-
-### 通过 API
-
-```bash
-# 读取当前配置
-curl http://localhost/api/config \
-  -b "picoaide-session=your-session-cookie"
-
-# 更新配置（合并模式，只传需要修改的字段）
-curl -X POST http://localhost/api/config \
-  -H "Content-Type: application/json" \
-  -b "picoaide-session=your-session-cookie" \
-  -d '{"picoclaw": {"agents": {"defaults": {"model_name": "claude-4.7"}}}}'
-```
-
-## 配置结构
-
-### 认证配置
-
-支持三种认证模式，通过管理面板的「认证配置」页面切换：
-
-| 模式     | 说明                                       |
-| -------- | ------------------------------------------ |
-| `local`  | 仅使用本地账号认证，不连接外部服务（默认） |
-| `ldap`   | 使用 LDAP 服务器认证，同时支持本地超管账号 |
-| `oidc`   | 使用 OpenID Connect 认证                   |
-
-#### LDAP 配置
-
-| 配置项                   | 类型   | 默认值                         | 说明                       |
-| ------------------------ | ------ | ------------------------------ | -------------------------- |
-| `host`                   | string | `ldap://ldap.example.com:389`  | LDAP 服务器地址            |
-| `bind_dn`                | string | -                              | 绑定用户 DN                |
-| `bind_password`          | string | -                              | 绑定用户密码               |
-| `base_dn`                | string | -                              | 用户搜索基础 DN            |
-| `filter`                 | string | `(objectClass=inetOrgPerson)`  | 用户搜索过滤器             |
-| `username_attribute`     | string | `uid`                          | 用户名属性                 |
-| `group_search_mode`      | string | `member_of`                    | 组搜索模式                 |
-| `group_base_dn`          | string | 空                             | 组搜索基础 DN              |
-| `group_filter`           | string | 空                             | 组搜索过滤器               |
-| `group_member_attribute` | string | `member`                       | 组成员属性                 |
-| `whitelist_enabled`      | bool   | `false`                        | 是否启用白名单             |
-| `sync_interval`          | string | `0`                            | 自动同步间隔               |
-
-组搜索模式说明：
-
-- **`member_of`**：通过用户的 `memberOf` 属性获取所属组
-- **`group_search`**：通过搜索组的 `member` 属性反向查找用户所属组
-
-### 镜像仓库配置
-
-`image.registry` 控制容器镜像的拉取源：
-
-| 值         | 拉取地址                                          | 说明         |
-| ---------- | ------------------------------------------------- | ------------ |
-| `github`   | `ghcr.io/picoaide/picoaide:<tag>`                 | GitHub 默认  |
-| `tencent`  | `hkccr.ccs.tencentyun.com/picoaide/picoaide:<tag>` | 腾讯云镜像   |
-
-初始化时选择镜像仓库后，后续也可以在管理面板中切换。
-
-### 目录结构
-
-初始化完成后，数据目录（默认 `/data/picoaide`）结构如下：
-
-```
+```text
 /data/picoaide/
-  picoaide.db        # SQLite 数据库（配置、用户、容器状态）
-  users/             # 用户数据目录
-    zhangsan/
+  picoaide.db
+  users/
+    <username>/
       .picoclaw/
-        config.json    # 用户 PicoClaw 配置
-        .security.yml  # 安全配置（API 密钥，权限 0600）
-  archive/           # 归档目录
+        config.json
+        .security.yml
+        workspace/
+          skills/
+  archive/
 ```
 
-### TLS 配置
+`~/.picoaide-config.yaml` 用于保存本机级配置：
 
-启用 HTTPS 需要在配置中设置 TLS 证书：
-
-```json
-{
-  "web": {
-    "tls": {
-      "enabled": true,
-      "cert_file": "/path/to/cert.pem",
-      "key_file": "/path/to/key.pem"
-    }
-  }
-}
+```yaml
+work_dir: /data/picoaide
+rule_cache_dir: /data/picoaide/rules
+picoclaw_adapter_remote_base_url: https://raw.githubusercontent.com/picoaide/picoaide/main/rules/picoclaw
 ```
 
-也可以使用 Nginx 等反向代理来终止 TLS。
+## 全局配置结构
 
-### PicoClaw AI 代理配置
+主要结构来自 `internal/config/config.go`：
 
-全局 PicoClaw 配置会通过合并策略下发到各用户容器：
+| 顶层字段 | 说明 |
+| --- | --- |
+| `ldap` | LDAP 服务器、用户搜索和组同步配置 |
+| `image` | PicoClaw 镜像名、标签、时区、仓库源 |
+| `users_root` | 用户目录根路径 |
+| `archive_root` | 归档目录根路径 |
+| `picoclaw_adapter_remote_base_url` | 适配包远端地址 |
+| `web` | 监听、认证模式、日志和 TLS |
+| `picoclaw` | 下发给用户的 PicoClaw 配置 |
+| `security` | 下发给用户的密钥类配置 |
+| `skills` | 技能仓库配置 |
 
-- 管理员通过 API 或管理面板修改全局配置
-- 系统将全局配置合并到用户配置，用户已有的键值保留，缺失的键从全局补充
-- 合并后的配置写入 `users/<用户名>/.picoclaw/config.json`
-- 重启容器后生效
+## Web 配置
 
-主要配置项：
+| 字段 | 说明 |
+| --- | --- |
+| `web.listen` | 服务监听地址，默认 `:80` |
+| `web.container_base_url` | 容器访问服务端时使用的基础地址 |
+| `web.password` | 兼容旧版本的会话密钥来源 |
+| `web.ldap_enabled` | 兼容旧版本的 LDAP 开关 |
+| `web.auth_mode` | `local` 或 `ldap` |
+| `web.log_retention` | 访问日志保留周期 |
+| `web.log_level` | `debug`、`info`、`warn`、`error` |
+| `web.tls.enabled` | 是否启用 TLS |
+| `web.tls.cert_file` | 证书路径 |
+| `web.tls.key_file` | 私钥路径 |
 
-```json
-{
-  "picoclaw": {
-    "agents": {
-      "defaults": {
-        "model_name": "gpt-5.4",
-        "max_tokens": 32768,
-        "max_tool_iterations": 50
-      }
-    },
-    "model_list": [
-      {
-        "model_name": "gpt-5.4",
-        "model": "openai/gpt-5.4",
-        "api_base": "https://api.openai.com/v1",
-        "request_timeout": 6000
-      }
-    ],
-    "gateway": {
-      "host": "0.0.0.0",
-      "port": 18790
-    }
-  }
-}
+当 TLS 启用且监听地址是 `:443` 时，服务端会额外启动 `:80` 入口。来自 Docker 网络的内部请求仍由应用处理，外部 HTTP 请求重定向到 HTTPS。
+
+## 认证配置
+
+### 本地模式
+
+`web.auth_mode = "local"` 时，普通用户和超管都由本地数据库管理。普通用户可以在 `/manage` 修改自己的密码。
+
+### LDAP 模式
+
+`web.auth_mode = "ldap"` 时，普通用户通过 LDAP 验证，本地超管仍可登录管理后台。
+
+| 字段 | 说明 |
+| --- | --- |
+| `ldap.host` | LDAP 服务器地址 |
+| `ldap.bind_dn` | Bind DN |
+| `ldap.bind_password` | Bind 密码 |
+| `ldap.base_dn` | 用户搜索根 DN |
+| `ldap.filter` | 用户过滤器 |
+| `ldap.username_attribute` | 用户名属性 |
+| `ldap.group_search_mode` | `member_of` 或 `group_search` |
+| `ldap.group_base_dn` | 组搜索根 DN |
+| `ldap.group_filter` | 组过滤器 |
+| `ldap.group_member_attribute` | 组成员属性 |
+| `ldap.whitelist_enabled` | 是否使用白名单 |
+| `ldap.sync_interval` | 定时同步间隔，`0` 表示关闭 |
+
+`sync_interval` 支持 Go duration，比如 `30m`、`1h`、`24h`。纯数字会按小时处理。
+
+## 镜像配置
+
+| 字段 | 说明 |
+| --- | --- |
+| `image.name` | 镜像名 |
+| `image.tag` | 默认标签 |
+| `image.timezone` | 容器时区 |
+| `image.registry` | `github` 或 `tencent` |
+
+拉取地址由代码生成：
+
+| registry | 拉取地址 |
+| --- | --- |
+| `github` | `ghcr.io/picoaide/picoaide:<tag>` |
+| `tencent` | `hkccr.ccs.tencentyun.com/picoaide/picoaide:<tag>` |
+
+腾讯云模式拉取后会 retag 成统一的 `ghcr.io/...` 引用，便于后续容器记录统一。
+
+## 技能仓库配置
+
+技能仓库写入 `skills.repos`：
+
+```yaml
+skills:
+  repos:
+    - name: company-skills
+      url: https://git.example.com/ai/company-skills.git
+      ref: main
+      ref_type: branch
+      public: false
+      credentials:
+        - name: gitlab-token
+          provider: gitlab
+          mode: https
+          username: oauth2
+          secret: <token>
 ```
 
-### 安全配置
+支持的 Git 地址前缀：
 
-模型 API 密钥存储在安全配置中：
+- `https://`
+- `http://`
+- `git@`
+- `ssh://`
 
-```json
-{
-  "security": {
-    "model_list": {
-      "gpt-5.4:0": {
-        "api_keys": ["sk-openai-replace-me"]
-      }
-    }
-  }
-}
-```
+私有仓库必须配置凭据。仓库会克隆到工作目录下的 `skill-repos/`，同步安装到 `skill/`。
+
+## Picoclaw 适配包
+
+Picoclaw adapter 位于 `rules/picoclaw`，包含：
+
+- `index.json`
+- `hash`
+- `schemas/config-v*.json`
+- `ui/ui-v*.json`
+- `migrations/*.json`
+
+管理后台可以刷新远端适配包，也可以上传 zip。上传 zip 时不能包含 `picoclaw` 顶层目录，应直接压缩 `rules/picoclaw/` 下的文件。
 
 ## 文件权限
 
-| 文件              | 推荐权限 | 说明                       |
-| ----------------- | -------- | -------------------------- |
-| `picoaide.db`     | 0600     | SQLite 数据库              |
-| `.security.yml`   | 0600     | 用户安全配置（API 密钥）  |
-| `config.json`     | 0644     | 用户 PicoClaw 配置         |
+| 文件 | 推荐权限 | 说明 |
+| --- | --- | --- |
+| `picoaide.db` | `0600` | SQLite 数据库 |
+| `.security.yml` | `0600` | 用户密钥配置 |
+| `config.json` | `0644` | 用户 PicoClaw 配置 |
 
-## CLI 命令参考
+## 常用命令
 
 ```bash
-# 首次运行引导（交互式）
 picoaide init
-
-# 初始化指定用户
 picoaide init -user <username>
-
-# 启动 Web 管理面板（通常由 systemd 管理）
 picoaide serve -listen :80
-
-# 重置本地用户密码
 picoaide reset-password <username>
 ```

@@ -229,6 +229,13 @@ func ApplyConfigToJSONForTag(cfg *config.GlobalConfig, picoclawDir string, usern
 // ApplyConfigToJSONWithMigration 按迁移规则链升级 config.json，再下发全局配置和 MCP 配置
 func ApplyConfigToJSONWithMigration(cfg *config.GlobalConfig, picoclawDir string, username string, fromTag string, targetTag string) error {
 	configPath := filepath.Join(picoclawDir, "config.json")
+	migrator, err := NewPicoClawMigrationService(config.RuleCacheDir())
+	if err != nil {
+		return err
+	}
+	if err := migrator.EnsureUpgradeable(fromTag, targetTag); err != nil {
+		return err
+	}
 
 	existing := make(map[string]interface{})
 	if data, err := os.ReadFile(configPath); err == nil {
@@ -243,13 +250,10 @@ func ApplyConfigToJSONWithMigration(cfg *config.GlobalConfig, picoclawDir string
 	} else {
 		globalPico = make(map[string]interface{})
 	}
+	globalPico = projectGlobalPicoConfigForTag(globalPico, targetTag)
 	stripGlobalChannelPolicy(globalPico)
 
 	merged := util.MergeMap(existing, globalPico)
-	migrator, err := NewPicoClawMigrationService(config.RuleCacheDir())
-	if err != nil {
-		return err
-	}
 	if err := migrator.Migrate(merged, fromTag, targetTag); err != nil {
 		return err
 	}
@@ -296,6 +300,162 @@ func stripGlobalChannelPolicy(globalPico map[string]interface{}) {
 	}
 }
 
+func projectGlobalPicoConfigForTag(globalPico map[string]interface{}, targetTag string) map[string]interface{} {
+	if globalPico == nil {
+		return map[string]interface{}{}
+	}
+	configVersion := configVersionForPicoClawTag(targetTag)
+	schema, hasSchema := picoClawConfigSchemaForVersion(configVersion)
+	if !hasSchema {
+		return globalPico
+	}
+
+	projected := util.DeepCopyMap(globalPico)
+	projectDefaultModel(projected, schema.DefaultModelPath)
+	projectChannels(projected, schema)
+	projected["version"] = float64(configVersion)
+	return projected
+}
+
+func configVersionForPicoClawTag(targetTag string) int {
+	pkg, err := NewPicoClawAdapterPackage(config.RuleCacheDir())
+	if err != nil {
+		return PicoAideSupportedPicoClawConfigVersion
+	}
+	normalized := normalizeVersion(targetTag)
+	if normalized != "" {
+		for _, version := range pkg.Index.PicoClawVersions {
+			if normalizeVersion(version.Version) == normalized {
+				return version.ConfigVersion
+			}
+		}
+	}
+	return pkg.Index.LatestSupportedConfigVersion
+}
+
+func picoClawConfigSchemaForVersion(configVersion int) (PicoClawConfigSchema, bool) {
+	pkg, err := NewPicoClawAdapterPackage(config.RuleCacheDir())
+	if err != nil {
+		return PicoClawConfigSchema{}, false
+	}
+	schema, ok := pkg.ConfigSchemas[configVersion]
+	return schema, ok
+}
+
+func projectDefaultModel(cfg map[string]interface{}, targetPath string) {
+	if targetPath == "" {
+		return
+	}
+	value, ok := firstDeepValue(cfg, "agents.defaults.model_name", "agents.defaults.model")
+	if !ok {
+		return
+	}
+	deleteByPath(cfg, "agents.defaults.model_name")
+	deleteByPath(cfg, "agents.defaults.model")
+	setByPath(cfg, targetPath, value)
+}
+
+func projectChannels(cfg map[string]interface{}, schema PicoClawConfigSchema) {
+	targetRoot := strings.TrimSpace(schema.ChannelsPath)
+	if targetRoot == "" {
+		return
+	}
+	sourceChannels := collectProjectedChannels(cfg)
+	delete(cfg, "channels")
+	delete(cfg, "channel_list")
+	if len(sourceChannels) == 0 {
+		return
+	}
+	allowed := stringSet(schema.ChannelTypes)
+	targetChannels := make(map[string]interface{})
+	for name, channel := range sourceChannels {
+		if len(allowed) > 0 && !allowed[name] {
+			continue
+		}
+		if targetRoot == "channel_list" {
+			targetChannels[name] = projectChannelToV3(name, channel)
+			continue
+		}
+		targetChannels[name] = projectChannelToLegacy(channel)
+	}
+	if len(targetChannels) > 0 {
+		cfg[targetRoot] = targetChannels
+	}
+}
+
+func collectProjectedChannels(cfg map[string]interface{}) map[string]map[string]interface{} {
+	out := map[string]map[string]interface{}{}
+	roots := []string{"channels", "channel_list"}
+	for _, root := range roots {
+		channels, _ := cfg[root].(map[string]interface{})
+		for name, raw := range channels {
+			channel, _ := raw.(map[string]interface{})
+			if channel == nil {
+				continue
+			}
+			if existing, ok := out[name]; ok {
+				out[name] = util.MergeMap(existing, util.DeepCopyMap(channel))
+				continue
+			}
+			out[name] = util.DeepCopyMap(channel)
+		}
+	}
+	return out
+}
+
+func projectChannelToLegacy(channel map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{})
+	settings, _ := channel["settings"].(map[string]interface{})
+	for key, value := range channel {
+		if key == "settings" || key == "type" {
+			continue
+		}
+		out[key] = deepCopyInterface(value)
+	}
+	for key, value := range settings {
+		out[key] = deepCopyInterface(value)
+	}
+	return out
+}
+
+func projectChannelToV3(name string, channel map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{})
+	settings, _ := channel["settings"].(map[string]interface{})
+	if settings != nil {
+		settings = util.DeepCopyMap(settings)
+	} else {
+		settings = make(map[string]interface{})
+	}
+	for key, value := range channel {
+		if key == "settings" {
+			continue
+		}
+		if isPicoClawChannelBaseField(key) || key == "type" {
+			out[key] = deepCopyInterface(value)
+			continue
+		}
+		if _, exists := settings[key]; !exists {
+			settings[key] = deepCopyInterface(value)
+		}
+	}
+	if _, ok := out["type"]; !ok {
+		out["type"] = name
+	}
+	if len(settings) > 0 {
+		out["settings"] = settings
+	}
+	return out
+}
+
+func firstDeepValue(root map[string]interface{}, paths ...string) (interface{}, bool) {
+	for _, path := range paths {
+		if value, ok := deepGet(root, path); ok {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
 // injectMCPConfig 向 config.json 注入 MCP server 配置
 func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config.GlobalConfig) {
 	tools, _ := config["tools"].(map[string]interface{})
@@ -333,10 +493,6 @@ func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config
 }
 
 func containerBaseURL(cfg *config.GlobalConfig) string {
-	if cfg.Web.ContainerBaseURL != "" {
-		return strings.TrimRight(cfg.Web.ContainerBaseURL, "/")
-	}
-
 	listenAddr := cfg.Web.Listen
 	host := "100.64.0.1"
 	port := "80"
@@ -363,7 +519,11 @@ func containerBaseURL(cfg *config.GlobalConfig) string {
 }
 
 func applyPicoClawCompatibilityFixups(cfg map[string]interface{}, targetTag string, fallbackTag string) error {
-	if !picoclawTagAtLeast(targetTag, 0, 2, 8) && !picoclawTagAtLeast(fallbackTag, 0, 2, 8) && !picoclawConfigVersionAtLeast(cfg, 3) {
+	targetAtLeast028 := picoclawTagAtLeast(targetTag, 0, 2, 8)
+	if normalizeVersion(targetTag) == "" {
+		targetAtLeast028 = picoclawTagAtLeast(fallbackTag, 0, 2, 8)
+	}
+	if !targetAtLeast028 && !picoclawConfigVersionAtLeast(cfg, 3) {
 		return nil
 	}
 
@@ -640,7 +800,9 @@ func SyncCookies(cfg *config.GlobalConfig, username, domain, cookieStr string) e
 
 	secMap := make(map[string]interface{})
 	if data, err := os.ReadFile(securityPath); err == nil {
-		yaml.Unmarshal(data, &secMap)
+		if err := yaml.Unmarshal(data, &secMap); err != nil {
+			return fmt.Errorf(".security.yml 格式错误，拒绝覆盖: %w", err)
+		}
 	}
 
 	cookiesMap, _ := secMap["cookies"].(map[string]interface{})

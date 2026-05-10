@@ -135,7 +135,12 @@ export async function init(ctx) {
   await loadRepos();
   ctx.$('#deploy-btn').addEventListener('click', deploySkills);
   ctx.$('#skill-add-btn')?.addEventListener('click', addSkill);
-  ctx.$('#skill-source')?.addEventListener('change', toggleSkillSource);
+  ctx.$('[data-skill-source="zip"]')?.addEventListener('click', () => setSkillSource('zip'));
+  ctx.$('[data-skill-source="git"]')?.addEventListener('click', () => setSkillSource('git'));
+  ctx.$('#skill-upload-file')?.addEventListener('change', function() {
+    var file = this.files && this.files[0];
+    ctx.$('#skill-upload-file-name').textContent = file ? file.name : '未选择 zip 文件';
+  });
   ctx.$('#repo-use-credentials')?.addEventListener('change', function() {
     ctx.$('#repo-new-credentials').classList.toggle('hidden', !this.checked);
   });
@@ -151,8 +156,11 @@ export async function init(ctx) {
     bindNewCredentialEvents();
   });
 
-  function toggleSkillSource() {
-    var source = ctx.$('#skill-source').value;
+  function setSkillSource(source) {
+    ctx.$('#skill-source').value = source;
+    ctx.$$('[data-skill-source]').forEach(function(btn) {
+      btn.classList.toggle('active', btn.dataset.skillSource === source);
+    });
     ctx.$('#skill-source-zip')?.classList.toggle('hidden', source !== 'zip');
     ctx.$('#skill-source-git')?.classList.toggle('hidden', source !== 'git');
   }
@@ -171,7 +179,7 @@ export async function init(ctx) {
     else {
       for (const sk of skills) {
         const tr = document.createElement('tr');
-        tr.innerHTML = '<td><strong>' + esc(sk.name) + '</strong></td><td>' + sk.file_count + ' 文件</td><td>' + sk.size_str + '</td><td>' + sk.mod_time + '</td><td><div class="btn-group"><button class="btn btn-sm btn-outline" data-dl="' + esc(sk.name) + '">下载</button><button class="btn btn-sm btn-danger" data-rm="' + esc(sk.name) + '">删除</button></div></td>';
+        tr.innerHTML = '<td><strong>' + esc(sk.name) + '</strong></td><td>' + sk.file_count + ' 文件</td><td>' + sk.size_str + '</td><td>' + sk.mod_time + '</td><td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline" data-dl="' + esc(sk.name) + '">下载</button><button class="btn btn-sm btn-danger" data-rm="' + esc(sk.name) + '">删除</button></div></td>';
         tbody.appendChild(tr);
       }
     }
@@ -257,6 +265,7 @@ export async function init(ctx) {
       showMsg('#skills-msg', res.message || res.error, !!res.success);
       if (res.success) {
         input.value = '';
+        ctx.$('#skill-upload-file-name').textContent = '未选择 zip 文件';
         loadSkills();
       }
     } catch (e) { showMsg('#skills-msg', e.message, false); }

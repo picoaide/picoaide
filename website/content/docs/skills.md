@@ -1,169 +1,122 @@
 ---
 title: "技能系统"
-description: "PicoAide 技能开发与管理"
+description: "PicoAide 技能仓库、上传安装、按用户和按组部署说明"
 weight: 3
 draft: false
 ---
 
-技能（Skills）是 PicoAide 扩展 AI 能力的核心机制。通过技能系统，管理员可以为不同用户组部署定制化的工具和能力。
+技能是部署到用户 PicoClaw 工作区的目录。PicoAide 不限定技能必须使用某种语言；实际部署动作是把技能目录复制到用户的：
 
-## 什么是技能
-
-技能是对内部网站和工具的 CLI 包装，让 PicoClaw AI 能够调用企业内部的 Web 服务。每个技能本质上是一个目录，包含可被 AI 代理调用的工具文件。
-
-技能可以包括：
-
-- **内部系统接口**：如 OA 系统、CRM、ERP 的 API 封装
-- **数据处理工具**：如报表生成、数据查询
-- **自动化脚本**：如批量操作、定时任务触发
-- **文档检索**：如知识库查询、内部 Wiki 搜索
-
-## 技能目录结构
-
-每个技能是一个独立目录，存放在 `skills/` 下：
-
-```
-skills/
-├── skill-a/
-│   ├── manifest.json        # 技能元数据
-│   ├── tools/
-│   │   ├── query.sh         # 工具脚本
-│   │   └── report.py        # 工具脚本
-│   └── config/
-│       └── defaults.json    # 默认配置
-├── skill-b/
-│   ├── manifest.json
-│   └── ...
+```text
+users/<username>/.picoclaw/workspace/skills/<skill-name>
 ```
 
-## 技能开发流程
+## 本地目录
 
-### 1. 创建技能仓库
+服务端工作目录下有两个技能相关目录：
 
-管理员在 Git 仓库中管理技能代码：
+| 目录 | 说明 |
+| --- | --- |
+| `skill/` | 已安装技能目录 |
+| `skill-repos/` | Git 仓库克隆目录 |
 
-```bash
-# 技能仓库结构示例
-my-skills-repo/
-├── internal-tools/
-│   ├── manifest.json
-│   └── tools/
-│       └── search.sh
-├── report-generator/
-│   ├── manifest.json
-│   └── tools/
-│       └── generate.py
-└── README.md
+`config.SkillsDirPath()` 当前返回工作目录下的 `skill`。
+
+## 技能来源
+
+PicoAide 支持三种来源：
+
+1. 上传 zip 到 `/api/admin/skills/upload`
+2. 添加 Git 仓库到 `/api/admin/skills/repos/add`
+3. 从已拉取仓库安装指定技能到 `/api/admin/skills/install`
+
+上传 zip 时需要传：
+
+| 字段 | 说明 |
+| --- | --- |
+| `name` | 技能名 |
+| `file` | zip 包 |
+| `csrf_token` | CSRF token |
+
+zip 包会被校验路径，避免写出目标目录。
+
+## Git 仓库
+
+仓库配置字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `name` | 仓库名称 |
+| `url` | Git 地址 |
+| `ref` | 分支或 tag |
+| `ref_type` | `branch` 或 `tag` |
+| `public` | 是否公开仓库 |
+| `credentials` | 私有仓库凭据列表 |
+
+支持地址：
+
+- `https://`
+- `http://`
+- `git@`
+- `ssh://`
+
+私有仓库必须提供凭据。Git 操作受全局互斥锁保护，避免并发 clone 或 pull。
+
+## 部署方式
+
+### 部署到单个用户
+
+```text
+POST /api/admin/skills/deploy
+skill_name=<skill>
+username=<user>
 ```
 
-### 2. 添加技能仓库
+如果 `skill_name` 为空，服务端会部署 `skill/` 下全部技能。
 
-通过 API 或管理后台添加 Git 仓库：
+### 部署到用户组
 
-```bash
-# 添加技能仓库
-curl -X POST http://localhost/api/admin/skills/repos/add \
-  -H "Content-Type: application/json" \
-  -b "picoaide-session=your-session-cookie" \
-  -d '{"name": "company-skills", "url": "https://git.example.com/skills/company-skills.git"}'
+```text
+POST /api/admin/skills/deploy
+skill_name=<skill>
+group_name=<group>
 ```
 
-### 3. 拉取技能
+按组部署会走任务队列，目标用户来自组成员展开结果。
 
-从 Git 仓库拉取最新技能到本地：
+### 绑定到用户组
 
-```bash
-# 拉取指定仓库的技能
-curl -X POST http://localhost/api/admin/skills/repos/pull \
-  -H "Content-Type: application/json" \
-  -b "picoaide-session=your-session-cookie" \
-  -d '{"name": "company-skills"}'
+```text
+POST /api/admin/groups/skills/bind
+group_name=<group>
+skill_name=<skill>
 ```
 
-### 4. 测试环境验证
+绑定成功后代码会立即把技能复制到该组所有可部署成员的工作区。
 
-在部署到生产环境之前，先在测试用户容器中验证技能：
+解绑只删除绑定关系，不会自动删除已经复制到用户工作区的技能目录。
 
-```bash
-# 部署技能到单个测试用户
-curl -X POST http://localhost/api/admin/skills/deploy \
-  -H "Content-Type: application/json" \
-  -b "picoaide-session=your-session-cookie" \
-  -d '{"skill_name": "internal-tools", "username": "test-user"}'
-```
+## 技能管理接口
 
-### 5. 部署到生产环境
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/admin/skills` | 列出已安装技能和仓库 |
+| `POST /api/admin/skills/deploy` | 部署技能 |
+| `GET /api/admin/skills/download` | 下载技能 zip |
+| `POST /api/admin/skills/remove` | 删除已安装技能 |
+| `POST /api/admin/skills/upload` | 上传技能 zip |
+| `POST /api/admin/skills/install` | 从仓库安装技能 |
+| `GET /api/admin/skills/repos/list` | 列仓库和仓库内技能 |
+| `POST /api/admin/skills/repos/add` | 添加并 clone 仓库 |
+| `POST /api/admin/skills/repos/save` | 保存仓库配置 |
+| `POST /api/admin/skills/repos/pull` | 拉取更新并同步技能 |
+| `POST /api/admin/skills/repos/remove` | 删除仓库配置和克隆目录 |
 
-验证通过后，通过组部署将技能批量部署给目标用户：
+## 推荐流程
 
-```bash
-# 部署技能到整个组
-curl -X POST http://localhost/api/admin/skills/deploy \
-  -H "Content-Type: application/json" \
-  -b "picoaide-session=your-session-cookie" \
-  -d '{"skill_name": "internal-tools", "group_name": "engineering"}'
-```
-
-## Git 仓库管理
-
-### 查看仓库列表
-
-```bash
-curl http://localhost/api/admin/skills/repos/list \
-  -b "picoaide-session=your-session-cookie"
-```
-
-### 删除仓库
-
-```bash
-curl -X POST http://localhost/api/admin/skills/repos/remove \
-  -H "Content-Type: application/json" \
-  -b "picoaide-session=your-session-cookie" \
-  -d '{"name": "old-skills"}'
-```
-
-## 基于组的部署
-
-PicoAide 支持基于用户组的技能绑定，实现差异化能力分配：
-
-### 绑定技能到组
-
-```bash
-curl -X POST http://localhost/api/admin/groups/skills/bind \
-  -H "Content-Type: application/json" \
-  -b "picoaide-session=your-session-cookie" \
-  -d '{"group_name": "finance", "skill_name": "financial-report"}'
-```
-
-### 解绑技能
-
-```bash
-curl -X POST http://localhost/api/admin/groups/skills/unbind \
-  -H "Content-Type: application/json" \
-  -b "picoaide-session=your-session-cookie" \
-  -d '{"group_name": "finance", "skill_name": "financial-report"}'
-```
-
-### 组层级
-
-组支持父子层级关系，部署到父组时递归包含所有子组的成员。这使得技能管理可以按照组织架构进行：
-
-```
-公司
-├── 技术部
-│   ├── 前端组
-│   └── 后端组
-└── 财务部
-    ├── 会计组
-    └── 审计组
-```
-
-部署技能到「技术部」组时，前端组和后端组的成员都会获得该技能。
-
-## 技能生命周期
-
-```
-开发 → Git 提交 → 添加仓库 → 拉取技能 → 测试验证 → 绑定组 → 部署 → 更新迭代
-```
-
-每次技能更新后，重新拉取并部署即可将新版本推送到用户容器。
+1. 在 Git 仓库中维护技能源码。
+2. 在管理后台添加仓库并拉取。
+3. 安装技能到 `skill/`。
+4. 用测试用户部署验证。
+5. 绑定到目标用户组。
+6. 更新仓库后重新 pull 并部署。

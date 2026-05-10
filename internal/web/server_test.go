@@ -5,11 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/picoaide/picoaide/internal/auth"
 	"github.com/picoaide/picoaide/internal/config"
 )
 
@@ -66,6 +69,40 @@ func TestHTTPSRedirectTargetDropsDefaultHTTPPort(t *testing.T) {
 	req := httptest.NewRequest("GET", "http://example.com:80/path?q=1", nil)
 	if got := httpsRedirectTarget(req); got != "https://example.com/path?q=1" {
 		t.Fatalf("httpsRedirectTarget = %q", got)
+	}
+}
+
+func TestSortTagsForDisplay(t *testing.T) {
+	tags := []string{"v0.2.7", "v0.2.8", "dev", "v0.2.5", "v0.2.6", "latest"}
+	sortTagsForDisplay(tags)
+	want := []string{"v0.2.8", "v0.2.7", "v0.2.6", "v0.2.5", "dev", "latest"}
+	if !reflect.DeepEqual(tags, want) {
+		t.Fatalf("tags = %#v, want %#v", tags, want)
+	}
+}
+
+func TestCompareImageForDisplay(t *testing.T) {
+	images := []struct {
+		tags    []string
+		created int64
+	}{
+		{[]string{"ghcr.io/picoaide/picoaide:v0.2.6"}, 30},
+		{[]string{"ghcr.io/picoaide/picoaide:dev"}, 100},
+		{[]string{"ghcr.io/picoaide/picoaide:v0.2.8"}, 10},
+		{[]string{"ghcr.io/picoaide/picoaide:v0.2.7"}, 20},
+	}
+	sort.SliceStable(images, func(i, j int) bool {
+		return compareImageForDisplay(images[i].tags, images[i].created, images[j].tags, images[j].created) < 0
+	})
+	got := []string{
+		tagNameOnly(images[0].tags[0]),
+		tagNameOnly(images[1].tags[0]),
+		tagNameOnly(images[2].tags[0]),
+		tagNameOnly(images[3].tags[0]),
+	}
+	want := []string{"v0.2.8", "v0.2.7", "v0.2.6", "dev"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("image order = %#v, want %#v", got, want)
 	}
 }
 
@@ -172,6 +209,74 @@ func TestCheckCSRFInvalid(t *testing.T) {
 	}
 }
 
+func TestAllowedExtensionOrigin(t *testing.T) {
+	s := newTestServer(t)
+	if !s.allowedExtensionOrigin("chrome-extension://picoaide-test") {
+		t.Fatal("extension origin should be allowed by default")
+	}
+	if s.allowedExtensionOrigin("https://example.com") {
+		t.Fatal("non-extension origin should be rejected")
+	}
+}
+
+func TestAllowedExtensionOriginEnvAllowlist(t *testing.T) {
+	t.Setenv("PICOAIDE_ALLOWED_EXTENSION_ORIGINS", "chrome-extension://allowed")
+	s := newTestServer(t)
+	if !s.allowedExtensionOrigin("chrome-extension://allowed") {
+		t.Fatal("configured extension origin should be allowed")
+	}
+	if s.allowedExtensionOrigin("chrome-extension://other") {
+		t.Fatal("unconfigured extension origin should be rejected")
+	}
+}
+
+func TestWebSocketOriginCheck(t *testing.T) {
+	req := httptest.NewRequest("GET", "http://picoaide.test/api/browser/ws", nil)
+	req.Header.Set("Origin", "http://picoaide.test")
+	if !upgrader.CheckOrigin(req) {
+		t.Fatal("same-origin websocket should be accepted")
+	}
+
+	req = httptest.NewRequest("GET", "http://picoaide.test/api/browser/ws", nil)
+	req.Header.Set("Origin", "chrome-extension://picoaide-test")
+	if !upgrader.CheckOrigin(req) {
+		t.Fatal("extension websocket should be accepted")
+	}
+
+	req = httptest.NewRequest("GET", "http://picoaide.test/api/browser/ws", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	if upgrader.CheckOrigin(req) {
+		t.Fatal("cross-site websocket should be rejected")
+	}
+}
+
+func TestEnsureSessionSecretPersistsGeneratedSecret(t *testing.T) {
+	auth.ResetDB()
+	tmpDir := t.TempDir()
+	if err := auth.InitDB(tmpDir); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+
+	cfg := &config.GlobalConfig{}
+	first, err := ensureSessionSecret(cfg)
+	if err != nil {
+		t.Fatalf("ensureSessionSecret first: %v", err)
+	}
+	second, err := ensureSessionSecret(cfg)
+	if err != nil {
+		t.Fatalf("ensureSessionSecret second: %v", err)
+	}
+	if first == "" || second == "" {
+		t.Fatal("generated secrets should not be empty")
+	}
+	if first != second {
+		t.Fatal("generated session secret should persist")
+	}
+	if first == config.SessionSecret {
+		t.Fatal("generated session secret must not use legacy default")
+	}
+}
+
 func TestGetSessionUser(t *testing.T) {
 	s := newTestServer(t)
 
@@ -245,6 +350,14 @@ func TestAdminRedirectsToDashboard(t *testing.T) {
 
 func TestAdminSectionRoutesServeAdminShell(t *testing.T) {
 	s := newTestServer(t)
+	auth.ResetDB()
+	tmpDir := t.TempDir()
+	if err := auth.InitDB(tmpDir); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	if err := auth.CreateUser("admin", "password123", "superadmin"); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -253,6 +366,7 @@ func TestAdminSectionRoutesServeAdminShell(t *testing.T) {
 	for _, path := range []string{"/admin/dashboard", "/admin/users", "/admin/settings"} {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", path, nil)
+		req.AddCookie(&http.Cookie{Name: "session", Value: s.createSessionToken("admin")})
 		r.ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
@@ -265,5 +379,24 @@ func TestAdminSectionRoutesServeAdminShell(t *testing.T) {
 		if !strings.Contains(string(body), "PicoAide 管理后台") {
 			t.Fatalf("%s did not serve admin shell", path)
 		}
+	}
+}
+
+func TestAdminSectionRoutesRedirectUnauthenticated(t *testing.T) {
+	s := newTestServer(t)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	s.registerUIRoutes(r)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/admin/dashboard", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("status=%d, want %d", w.Code, http.StatusFound)
+	}
+	if got := w.Header().Get("Location"); got != "/login" {
+		t.Fatalf("Location=%q, want /login", got)
 	}
 }

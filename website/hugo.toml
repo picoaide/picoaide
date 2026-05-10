@@ -10,6 +10,7 @@ theme = "picoaide"
   description = "企业级 AI PaaS 工作平台"
   github = "https://github.com/picoaide/picoaide"
   version = "v1.0.0"
+  navTagline = "Enterprise AI PaaS"
   docVersions = ["v1.0.0", "v0.2.8", "v0.2.7"]
 
 [params.home]

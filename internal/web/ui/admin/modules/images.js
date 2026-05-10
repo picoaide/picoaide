@@ -39,7 +39,7 @@ export async function init(ctx) {
         ? '<button class="btn btn-sm btn-outline" data-users-img="' + esc(tags) + '">' + userCount + ' 个用户</button>'
         : '<small class="text-muted">-</small>';
       const tr = document.createElement('tr');
-      const actionsTd = '<td></td>';
+      const actionsTd = '<td class="actions-cell"><div class="btn-group"></div></td>';
       tr.innerHTML =
         '<td style="font-family:monospace;font-size:12px;word-break:break-all">' + esc(tags) + '</td>' +
         '<td style="font-family:monospace;font-size:12px">' + esc(img.id || '-') + '</td>' +
@@ -53,7 +53,7 @@ export async function init(ctx) {
         btn.textContent = '删除';
         btn.dataset.image = tag;
         btn.addEventListener('click', () => deleteImage(tag));
-        tr.querySelector('td:last-child').appendChild(btn);
+        tr.querySelector('td:last-child .btn-group').appendChild(btn);
       }
       tbody.appendChild(tr);
     }
@@ -108,7 +108,7 @@ export async function init(ctx) {
       tr.innerHTML =
         '<td style="font-family:monospace">' + esc(tag) + '</td>' +
         '<td>' + statusHtml + '</td>' +
-        '<td><button class="btn btn-sm btn-outline" data-tag="' + esc(tag) + '">' + (exists ? '重新拉取' : '拉取') + '</button>' + upgradeBtnHtml + '</td>';
+        '<td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline" data-tag="' + esc(tag) + '">' + (exists ? '重新拉取' : '拉取') + '</button>' + upgradeBtnHtml + '</div></td>';
       tbody.appendChild(tr);
     }
     tbody.querySelectorAll('[data-tag]').forEach(btn => {
@@ -449,12 +449,15 @@ export async function init(ctx) {
   function renderUpgradeTable(users) {
     const usersDiv = $('#upgrade-users');
     usersDiv.innerHTML = '';
+    usersDiv.classList.add('table-wrap');
+    usersDiv.style.overflow = 'auto';
     if (users.length === 0) {
       usersDiv.innerHTML = '<div style="padding:12px;color:#999;text-align:center">无匹配用户</div>';
       updateUpgradeCount();
       return;
     }
     const table = document.createElement('table');
+    table.className = 'compact-table';
     table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;background:#fff';
     const thead = document.createElement('thead');
     thead.innerHTML = '<tr style="border-bottom:2px solid #ddd;background:#f5f5f5">' +
@@ -470,7 +473,7 @@ export async function init(ctx) {
       const tr = document.createElement('tr');
       tr.style.cssText = 'border-bottom:1px solid #eee;background:#fff';
       tr.innerHTML =
-        '<td style="padding:4px 8px"><label class="toggle-switch toggle-switch-compact"><input type="checkbox" value="' + esc(u.username) + '" checked><span class="toggle-switch-control" aria-hidden="true"></span></label></td>' +
+        '<td style="padding:4px 8px"><label class="toggle-switch toggle-switch-compact"><input type="checkbox" value="' + esc(u.username) + '"><span class="toggle-switch-control" aria-hidden="true"></span></label></td>' +
         '<td style="padding:4px 8px;color:#333">' + esc(u.username) + '</td>' +
         '<td style="padding:4px 8px;color:#666;font-family:monospace;font-size:11px">' + esc(u.image.split(':').pop()) + '</td>' +
         '<td style="padding:4px 8px">' + (u.status === 'running' ? '<span style="color:#27ae60">运行中</span>' : '<span style="color:#999">' + esc(u.status) + '</span>') + '</td>' +
@@ -521,10 +524,10 @@ export async function init(ctx) {
     container.innerHTML = '';
     for (const name of upgradeSelectedGroups) {
       const tag = document.createElement('span');
-      tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:#e8f4fd;color:#333;font-size:12px;border:1px solid #b3d9f2';
+      tag.className = 'tag';
       tag.textContent = name;
       const x = document.createElement('span');
-      x.style.cssText = 'cursor:pointer;color:#c0392b;font-weight:bold;margin-left:4px';
+      x.style.cssText = 'cursor:pointer;color:var(--danger);font-weight:bold;margin-left:4px';
       x.textContent = '×';
       x.addEventListener('click', () => {
         upgradeSelectedGroups.delete(name);

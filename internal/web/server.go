@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -37,6 +39,49 @@ type Server struct {
 	csrfKey         string
 	dockerAvailable bool
 	loginLimiter    *rateLimiter
+}
+
+const sessionSecretSettingKey = "internal.session_secret"
+
+func randomHex(bytesLen int) (string, error) {
+	b := make([]byte, bytesLen)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func ensureSessionSecret(cfg *config.GlobalConfig) (string, error) {
+	if cfg.Web.Password != "" {
+		return cfg.Web.Password, nil
+	}
+
+	engine, err := auth.GetEngine()
+	if err != nil {
+		return "", err
+	}
+	var setting auth.Setting
+	has, err := engine.Where("key = ?", sessionSecretSettingKey).Get(&setting)
+	if err != nil {
+		return "", err
+	}
+	if has && setting.Value != "" {
+		return setting.Value, nil
+	}
+
+	secret, err := randomHex(32)
+	if err != nil {
+		return "", fmt.Errorf("生成 session 密钥失败: %w", err)
+	}
+	if _, err := engine.Exec(
+		"INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
+		sessionSecretSettingKey,
+		secret,
+	); err != nil {
+		return "", fmt.Errorf("保存 session 密钥失败: %w", err)
+	}
+	slog.Info("已生成持久化 session 密钥")
+	return secret, nil
 }
 
 // startLDAPSyncScheduler 定时同步 LDAP 组
@@ -157,7 +202,7 @@ const maxBodyBytes = 1 << 20
 func (s *Server) secureHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
-		if strings.HasPrefix(origin, "chrome-extension://") || strings.HasPrefix(origin, "moz-extension://") {
+		if s.allowedExtensionOrigin(origin) {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Credentials", "true")
 			c.Header("Access-Control-Allow-Headers", "Content-Type")
@@ -181,6 +226,27 @@ func (s *Server) secureHeaders() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func (s *Server) allowedExtensionOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	if !strings.HasPrefix(origin, "chrome-extension://") && !strings.HasPrefix(origin, "moz-extension://") {
+		return false
+	}
+	allowed := strings.TrimSpace(os.Getenv("PICOAIDE_ALLOWED_EXTENSION_ORIGINS"))
+	if allowed == "" {
+		// Backward-compatible default: allow extension origins, but only extension
+		// code that can fetch a CSRF token can complete mutating requests.
+		return true
+	}
+	for _, item := range strings.Split(allowed, ",") {
+		if strings.TrimSpace(item) == origin {
+			return true
+		}
+	}
+	return false
 }
 
 // RegisterRoutes 将所有 API 路由注册到 Gin 引擎
@@ -342,14 +408,6 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 		listenAddr = ":80"
 	}
 
-	secret := cfg.Web.Password
-	if secret == "" {
-		secret = config.SessionSecret
-		slog.Warn("未配置 web.password，使用默认 session 密钥，请尽快修改")
-	}
-
-	csrfKey := secret + "-csrf"
-
 	// 确保工作目录存在
 	wd, _ := os.Getwd()
 	if wd != "" {
@@ -369,6 +427,12 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 			return fmt.Errorf("初始化用户数据库失败: %w", err)
 		}
 	}
+
+	secret, err := ensureSessionSecret(cfg)
+	if err != nil {
+		return err
+	}
+	csrfKey := secret + "-csrf"
 
 	// 初始化 Docker 客户端
 	dockerOK := false
@@ -592,6 +656,9 @@ func (s *Server) handleAdminImages(c *gin.Context) {
 			Users:      users,
 		})
 	}
+	sort.SliceStable(list, func(i, j int) bool {
+		return compareImageForDisplay(list[i].RepoTags, list[i].Created, list[j].RepoTags, list[j].Created) < 0
+	})
 	if list == nil {
 		list = []ImageInfo{}
 	}
@@ -1122,11 +1189,100 @@ func (s *Server) handleAdminImageRegistry(c *gin.Context) {
 	if tags == nil {
 		tags = []string{}
 	}
+	sortTagsForDisplay(tags)
 
 	writeJSON(c, http.StatusOK, struct {
 		Success bool     `json:"success"`
 		Tags    []string `json:"tags"`
 	}{true, tags})
+}
+
+func compareImageForDisplay(aTags []string, aCreated int64, bTags []string, bCreated int64) int {
+	tagCmp := compareTagsForDisplay(primaryDisplayTag(aTags), primaryDisplayTag(bTags))
+	if tagCmp != 0 {
+		return tagCmp
+	}
+	if aCreated != bCreated {
+		if aCreated > bCreated {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(strings.Join(aTags, ","), strings.Join(bTags, ","))
+}
+
+func primaryDisplayTag(repoTags []string) string {
+	if len(repoTags) == 0 {
+		return ""
+	}
+	best := repoTags[0]
+	for _, tag := range repoTags[1:] {
+		if compareTagsForDisplay(tagNameOnly(tag), tagNameOnly(best)) < 0 {
+			best = tag
+		}
+	}
+	return tagNameOnly(best)
+}
+
+func tagNameOnly(ref string) string {
+	idx := strings.LastIndex(ref, ":")
+	if idx < 0 || idx == len(ref)-1 {
+		return ref
+	}
+	slashIdx := strings.LastIndex(ref, "/")
+	if slashIdx > idx {
+		return ref
+	}
+	return ref[idx+1:]
+}
+
+func sortTagsForDisplay(tags []string) {
+	sort.SliceStable(tags, func(i, j int) bool {
+		return compareTagsForDisplay(tags[i], tags[j]) < 0
+	})
+}
+
+func compareTagsForDisplay(a, b string) int {
+	av, aOK := parseVersionTag(a)
+	bv, bOK := parseVersionTag(b)
+	if aOK && bOK {
+		for i := 0; i < len(av); i++ {
+			if av[i] != bv[i] {
+				if av[i] > bv[i] {
+					return -1
+				}
+				return 1
+			}
+		}
+		return strings.Compare(a, b)
+	}
+	if aOK {
+		return -1
+	}
+	if bOK {
+		return 1
+	}
+	return strings.Compare(a, b)
+}
+
+func parseVersionTag(tag string) ([3]int, bool) {
+	var out [3]int
+	tag = strings.TrimSpace(strings.TrimPrefix(tagNameOnly(tag), "v"))
+	parts := strings.Split(tag, ".")
+	if len(parts) != 3 {
+		return out, false
+	}
+	for i, part := range parts {
+		if part == "" {
+			return out, false
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return out, false
+		}
+		out[i] = n
+	}
+	return out, true
 }
 
 // handleAdminLocalTags 列出本地镜像的所有标签
@@ -1148,6 +1304,7 @@ func (s *Server) handleAdminLocalTags(c *gin.Context) {
 	if tags == nil {
 		tags = []string{}
 	}
+	sortTagsForDisplay(tags)
 
 	writeJSON(c, http.StatusOK, struct {
 		Success bool     `json:"success"`

@@ -9,6 +9,11 @@ export async function init(ctx) {
   $('#reset-btn').addEventListener('click', () => { if (confirm('重新加载？未保存的修改将丢失。')) loadConfig(); });
   $('#refresh-migration-rules-btn')?.addEventListener('click', refreshMigrationRules);
   $('#upload-migration-rules-btn')?.addEventListener('click', uploadMigrationRules);
+  $('#migration-rules-file')?.addEventListener('change', function() {
+    var file = this.files && this.files[0];
+    $('#migration-rules-file-name').textContent = file ? file.name : '未选择适配包';
+    $('#upload-migration-rules-btn').disabled = !file;
+  });
 
   async function loadConfig() {
     showMsg('#settings-msg', '加载中...', true);
@@ -18,6 +23,7 @@ export async function init(ctx) {
       var text = await resp.text();
       try { var e = JSON.parse(text); if (e.success === false) { showMsg('#settings-msg', e.error, false); return; } } catch {}
       rawConfig = JSON.parse(text);
+      removeFixedConfigFields();
       showMsg('#settings-msg', '');
       renderConfig();
     } catch (e) { showMsg('#settings-msg', e.message, false); }
@@ -37,6 +43,7 @@ export async function init(ctx) {
   async function saveConfig() {
     showMsg('#settings-msg', '保存中...', true);
     collectFields();
+    removeFixedConfigFields();
     try {
       var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
       showMsg('#settings-msg', res.message || res.error, res.success);
@@ -85,7 +92,11 @@ export async function init(ctx) {
       var res = await resp.json();
       showMsg('#settings-msg', res.message || res.error, !!res.success);
       if (res.success && res.rules) renderMigrationRulesInfo(res.rules);
-      if (fileInput && res.success) fileInput.value = '';
+      if (fileInput && res.success) {
+        fileInput.value = '';
+        $('#migration-rules-file-name').textContent = '未选择适配包';
+        $('#upload-migration-rules-btn').disabled = true;
+      }
     } catch (e) { showMsg('#settings-msg', e.message, false); }
   }
 
@@ -129,6 +140,10 @@ export async function init(ctx) {
     $$('select[data-path]').forEach(function(sel) {
       deepSet(rawConfig, sel.dataset.path, sel.value);
     });
+  }
+
+  function removeFixedConfigFields() {
+    if (rawConfig.web) delete rawConfig.web.container_base_url;
   }
 }
 

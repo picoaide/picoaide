@@ -41,3 +41,20 @@ def test_check_whitelist_relative_path():
     os.makedirs("/tmp/test/sub", exist_ok=True)
     result = check_whitelist("/tmp/test/file.txt", whitelist)
     assert result is True
+
+
+def test_check_whitelist_rejects_symlink_escape(tmp_path):
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_text("secret")
+
+    link = allowed / "link"
+    try:
+        link.symlink_to(secret)
+    except OSError:
+        return
+
+    assert check_whitelist(str(link), [str(allowed)]) is False

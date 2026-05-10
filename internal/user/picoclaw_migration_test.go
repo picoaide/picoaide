@@ -290,6 +290,31 @@ func TestPicoClawMigrationBlocksUnsupportedVersion(t *testing.T) {
 	}
 }
 
+func TestPicoClawMigrationBlocksUnsupportedDowngradeEndpoint(t *testing.T) {
+	svc := testPicoClawMigrationService(t, testRulesJSON)
+	err := svc.EnsureUpgradeable("v0.2.9", "v0.2.8")
+	if err == nil {
+		t.Fatal("EnsureUpgradeable() error = nil, want unsupported downgrade endpoint error")
+	}
+	if !strings.Contains(err.Error(), "v0.2.9") {
+		t.Fatalf("error = %q, want unsupported version", err.Error())
+	}
+}
+
+func TestPicoClawMigrationAllowsSupportedDowngrade(t *testing.T) {
+	svc := testPicoClawMigrationService(t, testRulesJSON)
+	if err := svc.EnsureUpgradeable("v0.2.8", "v0.2.4"); err != nil {
+		t.Fatalf("EnsureUpgradeable() error = %v", err)
+	}
+	cfg := map[string]interface{}{"version": float64(3)}
+	if err := svc.Migrate(cfg, "v0.2.8", "v0.2.4"); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	if cfg["version"] != float64(3) {
+		t.Fatalf("downgrade migration should be noop, got config %+v", cfg)
+	}
+}
+
 func TestPicoClawMigrationNoConfigChangeIsNoop(t *testing.T) {
 	cfg := map[string]interface{}{
 		"version": float64(3),

@@ -539,7 +539,6 @@ func LoadFromDB() (*GlobalConfig, error) {
 	cfg.ArchiveRoot = kv["archive_root"]
 	cfg.PicoClawAdapterRemoteBaseURL = kv["picoclaw_adapter_remote_base_url"]
 	cfg.Web.Listen = kv["web.listen"]
-	cfg.Web.ContainerBaseURL = kv["web.container_base_url"]
 	cfg.Web.Password = kv["web.password"]
 	cfg.Web.AuthMode = kv["web.auth_mode"]
 	cfg.Web.LogRetention = kv["web.log_retention"]
@@ -600,7 +599,6 @@ func configToKV(cfg *GlobalConfig) (map[string]string, error) {
 	kv["users_root"] = cfg.UsersRoot
 	kv["archive_root"] = cfg.ArchiveRoot
 	kv["web.listen"] = cfg.Web.Listen
-	kv["web.container_base_url"] = cfg.Web.ContainerBaseURL
 	kv["web.password"] = cfg.Web.Password
 	kv["web.auth_mode"] = cfg.Web.AuthMode
 	kv["web.log_retention"] = cfg.Web.LogRetention
@@ -721,6 +719,7 @@ func LoadRawFromDB() (map[string]interface{}, error) {
 
 // SaveRawToDB 将嵌套 JSON 配置保存到数据库
 func SaveRawToDB(data map[string]interface{}, changedBy string) error {
+	removeFixedConfigFields(data)
 	flat := flattenConfig(data)
 
 	engine, err := auth.GetEngine()
@@ -771,6 +770,14 @@ func SaveRawToDB(data map[string]interface{}, changedBy string) error {
 	}
 
 	return session.Commit()
+}
+
+func removeFixedConfigFields(data map[string]interface{}) {
+	web, ok := data["web"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	delete(web, "container_base_url")
 }
 
 func DefaultGlobalConfig() *GlobalConfig {

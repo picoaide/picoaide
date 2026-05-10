@@ -1,3 +1,5 @@
+let actionMenuCloseBound = false;
+
 export async function init(ctx) {
   const { Api, esc, showMsg } = ctx;
 
@@ -59,15 +61,17 @@ export async function init(ctx) {
       const groupTags = groups.map(g => '<span class="tag">' + esc(g) + '</span>').join(' ');
       const tr = document.createElement('tr');
       let actions = '<div class="btn-group">';
-      actions += '<button class="btn btn-sm btn-danger" data-action="delete" data-user="' + esc(u.username) + '">删除</button>';
       actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="start" data-user="' + esc(u.username) + '">启动</button>';
       actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="restart" data-user="' + esc(u.username) + '">重启</button>';
-      actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="debug" data-user="' + esc(u.username) + '">调试重启</button>';
-      actions += '<button class="btn btn-sm btn-outline" data-action="stop" data-user="' + esc(u.username) + '">停止</button>';
       actions += '<button class="btn btn-sm btn-outline" data-action="apply" data-user="' + esc(u.username) + '">下发配置</button>';
       actions += '<button class="btn btn-sm btn-outline" data-action="logs" data-user="' + esc(u.username) + '">日志</button>';
+      actions += '<span class="action-menu"><button class="btn btn-sm btn-outline" data-menu-toggle type="button">更多</button><span class="action-menu-panel">';
+      actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="debug" data-user="' + esc(u.username) + '">调试重启</button>';
+      actions += '<button class="btn btn-sm btn-outline" data-action="stop" data-user="' + esc(u.username) + '">停止</button>';
+      actions += '<button class="btn btn-sm btn-danger" data-action="delete" data-user="' + esc(u.username) + '">删除用户</button>';
+      actions += '</span></span>';
       actions += '</div>';
-      tr.innerHTML = '<td><strong>' + esc(u.username) + '</strong></td><td>' + (groupTags || '<small class="text-muted">-</small>') + '</td><td><span class="badge ' + statusCls + '">' + esc(u.status) + '</span></td><td>' + esc(u.image_tag) + ' ' + imgBadge + '</td><td>' + esc(u.ip || '-') + '</td><td>' + actions + '</td>';
+      tr.innerHTML = '<td><strong>' + esc(u.username) + '</strong></td><td>' + (groupTags || '<small class="text-muted">-</small>') + '</td><td><span class="badge ' + statusCls + '">' + esc(u.status) + '</span></td><td>' + esc(u.image_tag) + ' ' + imgBadge + '</td><td>' + esc(u.ip || '-') + '</td><td class="actions-cell">' + actions + '</td>';
       tbody.appendChild(tr);
     }
 
@@ -97,6 +101,36 @@ export async function init(ctx) {
         if (res.success) setTimeout(loadUsers, 1500);
       });
     });
+    tbody.querySelectorAll('[data-menu-toggle]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const menu = btn.closest('.action-menu');
+        tbody.querySelectorAll('.action-menu.open').forEach(item => {
+          if (item !== menu) item.classList.remove('open');
+        });
+        menu.classList.toggle('open');
+        if (menu.classList.contains('open')) positionActionMenu(menu, btn);
+      });
+    });
+  }
+
+  if (!actionMenuCloseBound) {
+    actionMenuCloseBound = true;
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.action-menu.open').forEach(menu => menu.classList.remove('open'));
+    });
+  }
+
+  function positionActionMenu(menu, btn) {
+    const panel = menu.querySelector('.action-menu-panel');
+    if (!panel) return;
+    panel.style.left = '0px';
+    panel.style.top = '0px';
+    const rect = btn.getBoundingClientRect();
+    const panelWidth = Math.max(panel.offsetWidth || 168, 168);
+    const left = Math.min(Math.max(8, rect.right - panelWidth), window.innerWidth - panelWidth - 8);
+    panel.style.left = left + 'px';
+    panel.style.top = (rect.bottom + 4) + 'px';
   }
 
   async function openLogModal(username) {
@@ -169,10 +203,10 @@ export async function init(ctx) {
           '<div id="modal-msg" class="msg"></div>' +
           '<div id="batch-result" class="hidden">' +
             '<div class="msg msg-ok">创建完成，请复制账号密码并告知用户</div>' +
-            '<table class="mt-1">' +
+            '<div class="table-wrap mt-1"><table class="compact-table">' +
               '<thead><tr><th>用户名</th><th>密码</th></tr></thead>' +
               '<tbody id="batch-result-tbody"></tbody>' +
-            '</table>' +
+            '</table></div>' +
           '</div>' +
         '</div>' +
         '<div class="modal-footer">' +
