@@ -2,7 +2,9 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -12,12 +14,29 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 	"xorm.io/xorm"
 )
 
 const dbFileName = "picoaide.db"
+
+const argon2idHashPrefix = "$argon2id$"
+
+var passwordHashParams = struct {
+	memory  uint32
+	time    uint32
+	threads uint8
+	keyLen  uint32
+	saltLen int
+}{
+	memory:  4 * 1024,
+	time:    1,
+	threads: 1,
+	keyLen:  32,
+	saltLen: 16,
+}
 
 var (
 	engine    *xorm.Engine
@@ -373,12 +392,70 @@ func syncSchema() error {
 // 用户认证管理
 // ============================================================
 
+func hashPassword(password string) (string, error) {
+	salt := make([]byte, passwordHashParams.saltLen)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	key := argon2.IDKey([]byte(password), salt, passwordHashParams.time, passwordHashParams.memory, passwordHashParams.threads, passwordHashParams.keyLen)
+	return fmt.Sprintf("%sv=%d$m=%d,t=%d,p=%d$%s$%s",
+		argon2idHashPrefix,
+		argon2.Version,
+		passwordHashParams.memory,
+		passwordHashParams.time,
+		passwordHashParams.threads,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(key),
+	), nil
+}
+
+func verifyPassword(storedHash, password string) (ok bool, needsUpgrade bool, err error) {
+	if strings.HasPrefix(storedHash, argon2idHashPrefix) {
+		ok, err := verifyArgon2idPassword(storedHash, password)
+		return ok, false, err
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password)); err != nil {
+		return false, false, nil
+	}
+	return true, true, nil
+}
+
+func verifyArgon2idPassword(storedHash, password string) (bool, error) {
+	parts := strings.Split(storedHash, "$")
+	if len(parts) != 6 || parts[1] != "argon2id" {
+		return false, nil
+	}
+
+	var version int
+	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil || version != argon2.Version {
+		return false, nil
+	}
+
+	var memory, iterations uint32
+	var threads uint8
+	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &threads); err != nil {
+		return false, nil
+	}
+
+	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
+	if err != nil {
+		return false, nil
+	}
+	expectedKey, err := base64.RawStdEncoding.DecodeString(parts[5])
+	if err != nil {
+		return false, nil
+	}
+	actualKey := argon2.IDKey([]byte(password), salt, iterations, memory, threads, uint32(len(expectedKey)))
+	return subtle.ConstantTimeCompare(actualKey, expectedKey) == 1, nil
+}
+
 // CreateUser 创建本地用户
 func CreateUser(username, password, role string) error {
 	if err := ensureDB(); err != nil {
 		return err
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := hashPassword(password)
 	if err != nil {
 		return fmt.Errorf("密码哈希失败: %w", err)
 	}
@@ -409,8 +486,17 @@ func AuthenticateLocal(username, password string) (bool, string, error) {
 		return false, "", nil
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+	ok, needsUpgrade, err := verifyPassword(user.PasswordHash, password)
+	if err != nil {
+		return false, "", fmt.Errorf("校验密码失败: %w", err)
+	}
+	if !ok {
 		return false, "", nil
+	}
+	if needsUpgrade {
+		if hash, err := hashPassword(password); err == nil {
+			_, _ = engine.ID(user.ID).Cols("password_hash").Update(&LocalUser{PasswordHash: hash})
+		}
 	}
 
 	return true, user.Role, nil
@@ -500,7 +586,7 @@ func ChangePassword(username, newPassword string) error {
 	if err := ensureDB(); err != nil {
 		return err
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hash, err := hashPassword(newPassword)
 	if err != nil {
 		return fmt.Errorf("密码哈希失败: %w", err)
 	}

@@ -19,7 +19,7 @@ function showManage(username) {
 async function redirectIfSuperadmin() {
   var info = await apiJSON('GET', '/api/user/info');
   if (info.success && info.role === 'superadmin') {
-    window.location.href = '/admin/';
+    window.location.href = '/admin/dashboard';
     return true;
   }
   return false;
@@ -78,7 +78,7 @@ async function tryAutoLogin() {
     var info = await apiJSON('GET', '/api/user/info');
     if (info.success) {
       if (info.role === 'superadmin') {
-        window.location.href = '/admin/';
+        window.location.href = '/admin/dashboard';
         return;
       }
       showManage(info.username || 'user');

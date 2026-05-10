@@ -358,7 +358,7 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 		secret:          secret,
 		csrfKey:         csrfKey,
 		dockerAvailable: dockerOK,
-		loginLimiter:    newRateLimiter(10, time.Minute),
+		loginLimiter:    newLoginRateLimiter(),
 	}
 
 	// LDAP 定时同步

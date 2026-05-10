@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -98,7 +97,7 @@ func setupTestServer(t *testing.T) *testEnv {
 		secret:          "test-integration-secret",
 		csrfKey:         "test-integration-secret-csrf",
 		dockerAvailable: false,
-		loginLimiter:    newRateLimiter(10, time.Minute),
+		loginLimiter:    newLoginRateLimiter(),
 	}
 
 	// 注册所有路由到 Gin 引擎
