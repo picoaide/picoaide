@@ -36,6 +36,7 @@ const usernameInput = document.getElementById('username');
 const passwordInput = document.getElementById('password');
 const loginError = document.getElementById('login-error');
 const loginBtn = document.getElementById('login-btn');
+const openAdminBtn = document.getElementById('open-admin-btn');
 const userDisplay = document.getElementById('user-display');
 const logoutBtn = document.getElementById('logout-btn');
 const syncBtn = document.getElementById('sync-btn');
@@ -47,10 +48,11 @@ function showLogin() {
   mainView.style.display = 'none';
 }
 
-function showMain(username) {
+function showMain(username, role = '') {
   loginView.style.display = 'none';
   mainView.style.display = '';
   userDisplay.textContent = username;
+  userDisplay.dataset.role = role;
   setStatus('已连接', 'ok');
   syncBtn.style.display = '';
   cdpBtn.style.display = '';
@@ -76,7 +78,8 @@ loginBtn.addEventListener('click', async () => {
     });
     if (res.success) {
       passwordInput.value = '';
-      showMain(res.username);
+      const info = await apiJSON('GET', '/api/user/info');
+      showMain(res.username, info.role || '');
     } else {
       loginError.textContent = res.error || '登录失败';
     }
@@ -91,6 +94,24 @@ logoutBtn.addEventListener('click', async () => {
   showLogin();
 });
 
+async function openServerPage(path) {
+  const base = await getServerUrl();
+  if (!base) throw new Error('未设置服务器地址');
+  chrome.tabs.create({ url: base + path });
+}
+
+openAdminBtn.addEventListener('click', async () => {
+  loginError.textContent = '';
+  const url = serverUrlInput.value.trim().replace(/\/+$/, '');
+  if (!url) { loginError.textContent = '请输入服务器地址'; return; }
+  await chrome.storage.local.set({ serverUrl: url });
+  try {
+    await openServerPage('/admin/dashboard');
+  } catch (e) {
+    loginError.textContent = e.message;
+  }
+});
+
 // --- 同步登录状态 ---
 syncBtn.addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -101,11 +122,9 @@ syncBtn.addEventListener('click', async () => {
   setStatus('正在同步 ' + domain + ' 的登录状态...', '');
 
   try {
-    // 获取当前页面及子域名的所有 Cookie
     const cookies = await chrome.cookies.getAll({ domain });
     if (cookies.length === 0) { setStatus('当前网站没有可同步的登录状态', 'err'); return; }
 
-    // 转为一行 Cookie 字符串：name1=value1; name2=value2
     const cookieStr = cookies.map(c => c.name + '=' + c.value).join('; ');
 
     const body = new FormData();
@@ -125,12 +144,11 @@ syncBtn.addEventListener('click', async () => {
   }
 });
 
-// --- 配置管理（打开后端管理页面，沿用当前登录态）---
+// --- 打开后端管理页面，沿用当前登录态 ---
 manageBtn.addEventListener('click', async () => {
   try {
-    const base = await getServerUrl();
-    if (!base) { setStatus('未设置服务器地址', 'err'); return; }
-    chrome.tabs.create({ url: base + '/manage' });
+    const role = userDisplay.dataset.role;
+    await openServerPage(role === 'superadmin' ? '/admin/dashboard' : '/manage');
   } catch (e) {
     setStatus(e.message, 'err');
   }
@@ -200,12 +218,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const info = await apiJSON('GET', '/api/user/info');
     if (info.success) {
-      if (info.role === 'superadmin') {
-        showLogin();
-        loginError.textContent = '超管用户不允许登录插件，使用普通用户登录';
-        return;
-      }
-      showMain(info.username || '');
+      showMain(info.username || '', info.role || '');
       return;
     }
   } catch {}

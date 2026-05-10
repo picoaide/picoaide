@@ -2,7 +2,7 @@
   <div>
     <div class="page-kicker">平台配置</div>
     <h2>系统配置</h2>
-    <p>集中维护模型、网关、用户目录和 Web 服务参数。</p>
+    <p>集中维护镜像、网关、用户目录、Web 服务和 Picoclaw 配置适配包。</p>
   </div>
 </section>
 <div id="settings-msg" class="msg"></div>
@@ -18,10 +18,17 @@
   <div class="field"><label>时区</label><input type="text" data-path="image.timezone" placeholder="Asia/Shanghai"></div>
   <div class="card-footer">
     <div>
-      <strong>Picoclaw 迁移规则</strong>
-      <p class="text-sm text-muted">镜像升级前会检查配置迁移规则。仅规则文件明确支持的版本链允许升级；未变更配置的版本会明确跳过。</p>
+      <strong>Picoclaw 配置适配</strong>
+      <p class="text-sm text-muted">镜像升级和配置下发只读取本地适配包。离线环境可上传包含 index、hash、schemas、ui 和 migrations 的 zip 包。</p>
     </div>
-    <button class="btn btn-outline btn-sm" id="refresh-migration-rules-btn">手动更新迁移规则</button>
+    <div class="btn-group">
+      <button class="btn btn-outline btn-sm" id="refresh-migration-rules-btn">远端更新</button>
+      <button class="btn btn-outline btn-sm" id="upload-migration-rules-btn">导入适配包</button>
+    </div>
+  </div>
+  <div id="migration-rules-info" class="text-sm text-muted mt-1">配置适配信息加载中...</div>
+  <div class="row">
+    <input type="file" id="migration-rules-file" accept="application/zip,.zip">
   </div>
 </div>
 
@@ -36,6 +43,7 @@
 <div class="card">
   <div class="card-header">Web 服务</div>
   <div class="field"><label>监听地址</label><input type="text" data-path="web.listen" placeholder=":80"></div>
+  <div class="field"><label>容器访问地址</label><input type="text" data-path="web.container_base_url" placeholder="http://100.64.0.1:80"></div>
   <div class="field"><label>启用 HTTPS</label>
     <select data-path="web.tls.enabled">
       <option value="false">关闭</option>
@@ -46,24 +54,7 @@
     <div class="field"><label>证书文件 (PEM)</label><input type="text" data-path="web.tls.cert_file" placeholder="/path/to/cert.pem"></div>
     <div class="field"><label>私钥文件 (PEM)</label><input type="text" data-path="web.tls.key_file" placeholder="/path/to/key.pem"></div>
   </div>
-  <p class="text-sm text-muted">启用 HTTPS 后需重启服务生效。监听地址改为 :443 可自动启用 80→443 重定向。</p>
-</div>
-
-<div class="card">
-  <div class="card-header">模型配置</div>
-  <div class="grid-2">
-    <div class="field">
-      <label>默认模型</label>
-      <select data-path="picoclaw.agents.defaults.model_name" id="default-model-select"></select>
-    </div>
-    <div class="field"><label>最大 Token</label><input type="number" data-path="picoclaw.agents.defaults.max_tokens" placeholder="32768"></div>
-  </div>
-  <div class="grid-2">
-    <div class="field"><label>最大工具迭代次数</label><input type="number" data-path="picoclaw.agents.defaults.max_tool_iterations" placeholder="50"></div>
-    <div class="field"></div>
-  </div>
-  <div id="model-list"></div>
-  <button class="btn btn-primary btn-sm mt-1" id="add-model-btn">+ 添加模型</button>
+  <p class="text-sm text-muted">容器访问地址用于下发 MCP SSE 地址，留空时默认使用内部地址。HTTPS 监听 :443 时，外部 HTTP 会跳转 HTTPS，Docker 内网仍使用 http://100.64.0.1:80。启用 HTTPS 后需重启服务生效。</p>
 </div>
 
 <div class="card">

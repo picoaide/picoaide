@@ -3,7 +3,7 @@
   "name": "PicoAide Helper",
   "version": "1.0.0",
   "description": "PicoAide 浏览器助手 — 同步登录状态给 AI，并授权 AI 控制当前标签页",
-  "permissions": ["storage", "cookies", "activeTab", "scripting", "tabs", "tabGroups", "offscreen"],
+  "permissions": ["storage", "cookies", "scripting", "tabs", "tabGroups", "offscreen"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

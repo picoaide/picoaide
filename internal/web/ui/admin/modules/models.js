@@ -14,6 +14,17 @@ var VENDORS = {
   'lmstudio':     { label: 'LM Studio',      api_base: 'http://localhost:1234/v1' },
   'openrouter':   { label: 'OpenRouter',     api_base: 'https://openrouter.ai/api/v1' },
   'gemini':       { label: 'Google Gemini',  api_base: '' },
+  'nvidia':       { label: 'NVIDIA',         api_base: 'https://integrate.api.nvidia.com/v1' },
+  'cerebras':     { label: 'Cerebras',       api_base: 'https://api.cerebras.ai/v1' },
+  'mistral':      { label: 'Mistral',        api_base: 'https://api.mistral.ai/v1' },
+  'modelscope':   { label: 'ModelScope',     api_base: 'https://api-inference.modelscope.cn/v1' },
+  'minimax':      { label: 'MiniMax',        api_base: 'https://api.minimax.chat/v1' },
+  'longcat':      { label: 'LongCat',        api_base: '' },
+  'vllm':         { label: 'vLLM',           api_base: 'http://localhost:8000/v1' },
+  'antigravity':  { label: 'Antigravity',    api_base: '' },
+  'claude-cli':   { label: 'Claude CLI',     api_base: '' },
+  'codex-cli':    { label: 'Codex CLI',      api_base: '' },
+  'github-copilot': { label: 'GitHub Copilot', api_base: '' },
   'custom':       { label: '自定义',          api_base: '' }
 };
 
@@ -36,26 +47,26 @@ export async function init(ctx) {
   const { Api, showMsg, $, $$ } = ctx;
   await loadConfig();
 
-  $('#save-btn').addEventListener('click', saveConfig);
-  $('#reset-btn').addEventListener('click', () => { if (confirm('重新加载？未保存的修改将丢失。')) loadConfig(); });
+  $('#models-save-btn').addEventListener('click', saveConfig);
+  $('#models-reset-btn').addEventListener('click', () => { if (confirm('重新加载？未保存的修改将丢失。')) loadConfig(); });
   $('#add-model-btn').addEventListener('click', () => {
     if (!rawConfig.picoclaw) rawConfig.picoclaw = {};
     if (!rawConfig.picoclaw.model_list) rawConfig.picoclaw.model_list = [];
-    rawConfig.picoclaw.model_list.push({ model_name: '', model: '', api_base: '', request_timeout: 6000 });
+    rawConfig.picoclaw.model_list.push({ model_name: '', provider: '', model: '', api_base: '', request_timeout: 6000, enabled: true });
     renderModelList();
   });
 
   async function loadConfig() {
-    showMsg('#settings-msg', '加载中...', true);
+    showMsg('#models-msg', '加载中...', true);
     try {
       var base = await getServerUrl();
       var resp = await fetch(base + '/api/config', { method: 'GET', credentials: 'include' });
       var text = await resp.text();
-      try { var e = JSON.parse(text); if (e.success === false) { showMsg('#settings-msg', e.error, false); return; } } catch {}
+      try { var e = JSON.parse(text); if (e.success === false) { showMsg('#models-msg', e.error, false); return; } } catch {}
       rawConfig = JSON.parse(text);
-      showMsg('#settings-msg', '');
+      showMsg('#models-msg', '');
       renderConfig();
-    } catch (e) { showMsg('#settings-msg', e.message, false); }
+    } catch (e) { showMsg('#models-msg', e.message, false); }
   }
 
   function renderConfig() {
@@ -63,19 +74,13 @@ export async function init(ctx) {
       var val = deepGet(rawConfig, input.dataset.path);
       if (val !== undefined && val !== null) input.value = val;
     });
-    $$('select[data-path]').forEach(function(sel) {
-      var val = deepGet(rawConfig, sel.dataset.path);
-      if (val !== undefined && val !== null) sel.value = val;
-    });
     renderModelList();
   }
 
-  // 构建安全密钥的查找映射：model_name -> api_keys[]
   function getSecurityMap() {
     var secList = (rawConfig.security && rawConfig.security.model_list) || {};
     var map = {};
     Object.keys(secList).forEach(function(key) {
-      // key 格式为 "model_name:0"，提取 model_name
       var parts = key.split(':');
       var modelName = parts.slice(0, -1).join(':');
       var keys = Array.isArray(secList[key].api_keys) ? secList[key].api_keys : [];
@@ -85,7 +90,6 @@ export async function init(ctx) {
     return map;
   }
 
-  // 保存安全密钥映射回 security.model_list
   function setSecurityMap(secMap) {
     if (!rawConfig.security) rawConfig.security = {};
     rawConfig.security.model_list = {};
@@ -101,9 +105,11 @@ export async function init(ctx) {
     var container = $('#model-list');
     container.innerHTML = '';
     var models = (rawConfig.picoclaw && rawConfig.picoclaw.model_list) || [];
+    models.forEach(function(m) {
+      if (m && m.enabled === undefined) m.enabled = true;
+    });
     var secMap = getSecurityMap();
 
-    // 更新默认模型下拉
     var defaultSelect = $('#default-model-select');
     if (defaultSelect) {
       var currentDefault = deepGet(rawConfig, 'picoclaw.agents.defaults.model_name') || '';
@@ -143,14 +149,39 @@ export async function init(ctx) {
       card.innerHTML =
         '<div class="grid-2">' +
           '<div class="field"><label>模型名</label><input type="text" value="' + ctx.esc(m.model_name || '') + '" data-mi="' + i + '" data-mf="model_name"></div>' +
+          '<div class="field"><label>启用</label><label class="toggle-switch toggle-switch-field"><input type="checkbox" ' + (m.enabled !== false ? 'checked' : '') + ' data-mi="' + i + '" data-mf="enabled"><span class="toggle-switch-control" aria-hidden="true"></span><span class="toggle-switch-label">启用这个模型</span></label></div>' +
+        '</div>' +
+        '<div class="grid-2">' +
           '<div class="field"><label>供应商 / 模型</label><div class="row">' +
             '<select data-mi="' + i + '" data-vf="vendor" style="min-width:120px">' + vendorOptions + '</select>' +
             '<input type="text" value="' + ctx.esc(parsed.modelId) + '" data-mi="' + i + '" data-vf="model_id" placeholder="模型 ID" style="flex:1">' +
           '</div></div>' +
+          '<div class="field"><label>Provider</label><input type="text" value="' + ctx.esc(m.provider || '') + '" data-mi="' + i + '" data-mf="provider" placeholder="可留空，自动从模型前缀推断"></div>' +
         '</div>' +
         '<div class="grid-2">' +
           '<div class="field"><label>API Base</label><input type="text" value="' + ctx.esc(apiBaseValue) + '" data-mi="' + i + '" data-mf="api_base" placeholder="' + ctx.esc(defaultBase) + '"></div>' +
+          '<div class="field"><label>代理</label><input type="text" value="' + ctx.esc(m.proxy || '') + '" data-mi="' + i + '" data-mf="proxy"></div>' +
+        '</div>' +
+        '<div class="grid-2">' +
           '<div class="field"><label>超时(秒)</label><input type="number" value="' + (m.request_timeout || '') + '" data-mi="' + i + '" data-mf="request_timeout"></div>' +
+          '<div class="field"><label>RPM</label><input type="number" value="' + (m.rpm || '') + '" data-mi="' + i + '" data-mf="rpm"></div>' +
+        '</div>' +
+        '<div class="grid-2">' +
+          '<div class="field"><label>认证方式</label><input type="text" value="' + ctx.esc(m.auth_method || '') + '" data-mi="' + i + '" data-mf="auth_method" placeholder="oauth / token"></div>' +
+          '<div class="field"><label>连接模式</label><input type="text" value="' + ctx.esc(m.connect_mode || '') + '" data-mi="' + i + '" data-mf="connect_mode" placeholder="stdio / grpc"></div>' +
+        '</div>' +
+        '<div class="grid-2">' +
+          '<div class="field"><label>Workspace</label><input type="text" value="' + ctx.esc(m.workspace || '') + '" data-mi="' + i + '" data-mf="workspace"></div>' +
+          '<div class="field"><label>Thinking Level</label><input type="text" value="' + ctx.esc(m.thinking_level || '') + '" data-mi="' + i + '" data-mf="thinking_level" placeholder="off / low / medium / high / xhigh / adaptive"></div>' +
+        '</div>' +
+        '<div class="grid-2">' +
+          '<div class="field"><label>Max Tokens 字段</label><input type="text" value="' + ctx.esc(m.max_tokens_field || '') + '" data-mi="' + i + '" data-mf="max_tokens_field"></div>' +
+          '<div class="field"><label>User Agent</label><input type="text" value="' + ctx.esc(m.user_agent || '') + '" data-mi="' + i + '" data-mf="user_agent"></div>' +
+        '</div>' +
+        '<div class="field"><label>Fallbacks</label><textarea rows="2" data-mi="' + i + '" data-mf="fallbacks" data-mf-type="string_list">' + ctx.esc(Array.isArray(m.fallbacks) ? m.fallbacks.join('\\n') : '') + '</textarea></div>' +
+        '<div class="grid-2">' +
+          '<div class="field"><label>Extra Body JSON</label><textarea rows="4" data-mi="' + i + '" data-mf="extra_body" data-mf-type="json">' + ctx.esc(formatJSON(m.extra_body)) + '</textarea></div>' +
+          '<div class="field"><label>Custom Headers JSON</label><textarea rows="4" data-mi="' + i + '" data-mf="custom_headers" data-mf-type="json">' + ctx.esc(formatJSON(m.custom_headers)) + '</textarea></div>' +
         '</div>' +
         '<div class="field"><label>API 密钥</label>' + keysHtml +
           '<button class="btn btn-sm btn-outline mt-1" data-add-key="' + i + '">+ 添加密钥</button>' +
@@ -160,17 +191,14 @@ export async function init(ctx) {
       container.appendChild(card);
     });
 
-    // 供应商下拉 + 模型ID输入 → 合并为 model 字段
     container.querySelectorAll('[data-vf="vendor"]').forEach(function(sel) {
       sel.addEventListener('change', function() {
         var idx = parseInt(sel.dataset.mi);
         var vendor = sel.value;
         var modelIdInput = container.querySelector('input[data-vf="model_id"][data-mi="' + idx + '"]');
         var modelId = modelIdInput ? modelIdInput.value : '';
-        if (!rawConfig.picoclaw) rawConfig.picoclaw = {};
-        if (!rawConfig.picoclaw.model_list) rawConfig.picoclaw.model_list = [];
+        ensureModelList();
         rawConfig.picoclaw.model_list[idx].model = buildModelField(vendor, modelId);
-        // 自动填充默认 api_base
         if (VENDORS[vendor] && VENDORS[vendor].api_base) {
           var card = sel.closest('.card');
           var apiBaseInput = card.querySelector('input[data-mf="api_base"]');
@@ -186,28 +214,25 @@ export async function init(ctx) {
         }
       });
     });
+
     container.querySelectorAll('[data-vf="model_id"]').forEach(function(input) {
       input.addEventListener('change', function() {
         var idx = parseInt(input.dataset.mi);
         var card = input.closest('.card');
         var vendorSel = card.querySelector('select[data-vf="vendor"]');
         var vendor = vendorSel ? vendorSel.value : 'custom';
-        if (!rawConfig.picoclaw) rawConfig.picoclaw = {};
-        if (!rawConfig.picoclaw.model_list) rawConfig.picoclaw.model_list = [];
+        ensureModelList();
         rawConfig.picoclaw.model_list[idx].model = buildModelField(vendor, input.value);
       });
     });
 
-    // 绑定模型字段修改
     container.querySelectorAll('[data-mf]').forEach(function(input) {
       input.addEventListener('change', function() {
         var idx = parseInt(input.dataset.mi);
-        var val = input.value;
-        if (input.dataset.mf === 'request_timeout' && val !== '') val = Number(val);
-        if (!rawConfig.picoclaw) rawConfig.picoclaw = {};
-        if (!rawConfig.picoclaw.model_list) rawConfig.picoclaw.model_list = [];
-        rawConfig.picoclaw.model_list[idx][input.dataset.mf] = val;
-        // 如果改了 model_name，同步更新 security 中的 key 和默认模型下拉
+        var val = modelInputValue(input);
+        ensureModelList();
+        if (val === '' || val === null || (Array.isArray(val) && val.length === 0)) delete rawConfig.picoclaw.model_list[idx][input.dataset.mf];
+        else rawConfig.picoclaw.model_list[idx][input.dataset.mf] = val;
         if (input.dataset.mf === 'model_name') {
           syncSecurityOnRename();
           renderModelList();
@@ -215,13 +240,11 @@ export async function init(ctx) {
       });
     });
 
-    // 删除模型
     container.querySelectorAll('[data-rm-model]').forEach(function(btn) {
       btn.addEventListener('click', function() {
         var idx = parseInt(btn.dataset.rmModel);
         var removedName = rawConfig.picoclaw.model_list[idx].model_name;
         rawConfig.picoclaw.model_list.splice(idx, 1);
-        // 同时删除该模型的 API 密钥
         if (removedName && rawConfig.security && rawConfig.security.model_list) {
           var toDelete = [];
           Object.keys(rawConfig.security.model_list).forEach(function(k) {
@@ -234,7 +257,6 @@ export async function init(ctx) {
       });
     });
 
-    // 添加密钥
     container.querySelectorAll('[data-add-key]').forEach(function(btn) {
       btn.addEventListener('click', function() {
         var idx = parseInt(btn.dataset.addKey);
@@ -248,7 +270,6 @@ export async function init(ctx) {
       });
     });
 
-    // 删除密钥
     container.querySelectorAll('[data-rm-key]').forEach(function(btn) {
       btn.addEventListener('click', function() {
         var parts = btn.dataset.rmKey.split(':').map(Number);
@@ -265,7 +286,6 @@ export async function init(ctx) {
       });
     });
 
-    // 修改密钥值
     container.querySelectorAll('[data-sf="keyval"]').forEach(function(input) {
       input.addEventListener('change', function() {
         var modelIdx = parseInt(input.dataset.mi);
@@ -280,7 +300,6 @@ export async function init(ctx) {
     });
   }
 
-  // 当模型名被修改时，同步更新 security 中的 key
   function syncSecurityOnRename() {
     if (!rawConfig.security) rawConfig.security = {};
     if (!rawConfig.security.model_list) return;
@@ -288,7 +307,6 @@ export async function init(ctx) {
     var models = (rawConfig.picoclaw && rawConfig.picoclaw.model_list) || [];
     var modelNames = {};
     models.forEach(function(m) { if (m.model_name) modelNames[m.model_name] = true; });
-    // 删除 security 中不再对应任何模型的 key
     Object.keys(secList).forEach(function(k) {
       var parts = k.split(':');
       var name = parts.slice(0, -1).join(':');
@@ -296,37 +314,48 @@ export async function init(ctx) {
     });
   }
 
+  function ensureModelList() {
+    if (!rawConfig.picoclaw) rawConfig.picoclaw = {};
+    if (!rawConfig.picoclaw.model_list) rawConfig.picoclaw.model_list = [];
+  }
+
   async function saveConfig() {
-    showMsg('#settings-msg', '保存中...', true);
+    showMsg('#models-msg', '保存中...', true);
     collectFields();
     try {
       var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
-      showMsg('#settings-msg', res.message || res.error, res.success);
-    } catch (e) { showMsg('#settings-msg', e.message, false); }
+      showMsg('#models-msg', res.message || res.error, res.success);
+    } catch (e) { showMsg('#models-msg', e.message, false); }
   }
-
-  // 下发配置到全部用户
-  $('#apply-all-btn').addEventListener('click', async function() {
-    if (!confirm('确定要下发配置到所有用户并重启其容器吗？')) return;
-    showMsg('#settings-msg', '正在提交下发任务...', true);
-    try {
-      var res = await Api.post('/api/admin/config/apply', {});
-      if (res.task_id) {
-        pollTaskStatus('#settings-msg', res.message);
-      } else {
-        showMsg('#settings-msg', res.message || res.error, res.success);
-      }
-    } catch (e) { showMsg('#settings-msg', e.message, false); }
-  });
 
   function collectFields() {
     $$('input[data-path]').forEach(function(input) {
-      deepSet(rawConfig, input.dataset.path, input.value);
+      deepSet(rawConfig, input.dataset.path, input.type === 'number' && input.value !== '' ? Number(input.value) : input.value);
     });
     $$('select[data-path]').forEach(function(sel) {
       deepSet(rawConfig, sel.dataset.path, sel.value);
     });
   }
+}
+
+function formatJSON(value) {
+  if (value === undefined || value === null) return '';
+  try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+}
+
+function modelInputValue(input) {
+  var key = input.dataset.mf;
+  if (input.type === 'checkbox') return input.checked;
+  if ((key === 'request_timeout' || key === 'rpm') && input.value !== '') return Number(input.value);
+  if (input.dataset.mfType === 'string_list') {
+    return input.value.split(/\n|,/).map(function(v) { return v.trim(); }).filter(Boolean);
+  }
+  if (input.dataset.mfType === 'json') {
+    var text = input.value.trim();
+    if (!text) return null;
+    return JSON.parse(text);
+  }
+  return input.value;
 }
 
 function deepGet(obj, path) {
@@ -357,27 +386,5 @@ function deepSet(obj, path, value) {
 }
 
 async function getServerUrl() {
-  var r = await chrome.storage.local.get('serverUrl');
-  return (r.serverUrl || '').replace(/\/+$/, '');
+  return window.location.origin.replace(/\/+$/, '');
 }
-
-// pollTaskStatus 轮询任务队列进度
-async function pollTaskStatus(selector, initialMsg) {
-  showMsg(selector, initialMsg + '...', true);
-  var poll = async function() {
-    try {
-      var st = await Api.get('/api/admin/task/status');
-      if (st.running) {
-        var pct = st.total > 0 ? Math.round((st.done + st.failed) / st.total * 100) : 0;
-        showMsg(selector, initialMsg + ' ' + (st.done + st.failed) + '/' + st.total + ' (' + pct + '%)', true);
-        setTimeout(poll, 2000);
-      } else {
-        showMsg(selector, st.message || '完成', st.failed === 0);
-      }
-    } catch (e) {
-      showMsg(selector, '查询进度失败: ' + e.message, false);
-    }
-  };
-  setTimeout(poll, 1500);
-}
-

@@ -8,7 +8,7 @@ var loginBtn = document.getElementById('login-btn');
 
 function redirectByRole(info) {
   if (info.role === 'superadmin') {
-    window.location.replace('/admin/');
+    window.location.replace('/admin/dashboard');
     return;
   }
   window.location.replace('/manage');

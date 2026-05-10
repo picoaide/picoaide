@@ -25,20 +25,18 @@
       </section>
 
       <div class="tabs">
-        <button class="tab active" data-tab="dingtalk">钉钉配置</button>
+        <button class="tab active" data-tab="channels">通讯渠道</button>
         <button class="tab" data-tab="files">文件管理</button>
         <button class="tab" data-tab="password" id="tab-password-btn">修改密码</button>
       </div>
 
-      <div id="tab-dingtalk" class="panel active">
+      <div id="tab-channels" class="panel active">
         <div class="card">
-          <div class="card-header">钉钉机器人配置</div>
-          <div class="grid-2">
-            <div class="field"><label>Client ID</label><input type="text" id="dt-client-id" placeholder="dingxxx"></div>
-            <div class="field"><label>Client Secret</label><input type="password" id="dt-client-secret" placeholder="secret"></div>
-          </div>
-          <div id="dt-msg" class="msg"></div>
-          <button class="btn btn-primary" id="dt-save-btn">保存并重启容器</button>
+          <div class="card-header">通讯渠道</div>
+          <div id="channel-list" class="btn-group mb-1"></div>
+          <div id="channel-fields"></div>
+          <div id="channel-msg" class="msg"></div>
+          <button class="btn btn-primary" id="channel-save-btn">保存并重启容器</button>
         </div>
       </div>
 

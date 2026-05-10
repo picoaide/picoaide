@@ -4,9 +4,17 @@ const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 
 let currentUser = '';
+const sections = Array.from($$('.sidebar-nav a')).map(a => a.dataset.section);
+const defaultSection = 'dashboard';
 
 async function getServerUrl() {
   return window.location.origin.replace(/\/+$/, '');
+}
+
+function getSectionFromPath() {
+  const path = window.location.pathname.replace(/\/+$/, '');
+  const section = path.split('/').filter(Boolean)[1];
+  return sections.includes(section) ? section : defaultSection;
 }
 
 function showAdmin(username) {
@@ -25,6 +33,7 @@ $('#logout-btn').addEventListener('click', async () => {
 let currentSection = '';
 
 async function navigate(section) {
+  if (!sections.includes(section)) section = defaultSection;
   if (currentSection === section) return;
   currentSection = section;
 
@@ -40,10 +49,6 @@ async function navigate(section) {
   }
 }
 
-$$('.sidebar-nav a').forEach(a => {
-  a.addEventListener('click', e => { e.preventDefault(); navigate(a.dataset.section); });
-});
-
 // 自动登录
 document.addEventListener('DOMContentLoaded', async () => {
   const base = await getServerUrl();
@@ -54,7 +59,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (info.success && info.role === 'superadmin') {
       currentUser = info.username;
       showAdmin(info.username);
-      navigate('dashboard');
+      navigate(getSectionFromPath());
       return;
     }
   } catch {}

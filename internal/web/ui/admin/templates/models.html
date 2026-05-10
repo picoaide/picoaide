@@ -1,0 +1,34 @@
+<section class="page-header">
+  <div>
+    <div class="page-kicker">Picoclaw</div>
+    <h2>模型配置</h2>
+    <p>管理员维护平台可用模型、默认模型和模型调用参数。</p>
+  </div>
+</section>
+<div id="models-msg" class="msg"></div>
+
+<div class="card">
+  <div class="card-header">默认策略</div>
+  <div class="grid-2">
+    <div class="field">
+      <label>默认模型</label>
+      <select data-path="picoclaw.agents.defaults.model_name" id="default-model-select"></select>
+    </div>
+    <div class="field"><label>最大 Token</label><input type="number" data-path="picoclaw.agents.defaults.max_tokens" placeholder="32768"></div>
+  </div>
+  <div class="grid-2">
+    <div class="field"><label>最大工具迭代次数</label><input type="number" data-path="picoclaw.agents.defaults.max_tool_iterations" placeholder="50"></div>
+    <div class="field"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">模型列表</div>
+  <div id="model-list"></div>
+  <button class="btn btn-primary btn-sm mt-1" id="add-model-btn">+ 添加模型</button>
+</div>
+
+<div class="btn-group mt-2" style="justify-content:flex-end">
+  <button class="btn btn-ghost" id="models-reset-btn">重置</button>
+  <button class="btn btn-primary" id="models-save-btn">保存模型配置</button>
+</div>

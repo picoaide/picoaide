@@ -1,0 +1,1743 @@
+{
+  "config_version": 2,
+  "pages": [
+    {
+      "key": "models",
+      "label": "Models",
+      "sections": [
+        {
+          "key": "defaults",
+          "label": "Defaults",
+          "fields": [
+            {
+              "key": "default_model",
+              "label": "Default model",
+              "type": "text",
+              "storage": "config",
+              "path": "agents.defaults.model_name"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "channels",
+      "label": "Channels",
+      "sections": [
+        {
+          "key": "telegram",
+          "label": "Telegram",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.telegram.enabled"
+            },
+            {
+              "key": "token",
+              "label": "Bot Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.telegram.token",
+              "secret": true
+            },
+            {
+              "key": "base_url",
+              "label": "API Base URL",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.telegram.base_url"
+            },
+            {
+              "key": "proxy",
+              "label": "代理",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.telegram.proxy"
+            },
+            {
+              "key": "streaming_enabled",
+              "label": "流式输出",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.telegram.streaming.enabled"
+            },
+            {
+              "key": "streaming_throttle_seconds",
+              "label": "流式节流秒数",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.telegram.streaming.throttle_seconds"
+            },
+            {
+              "key": "streaming_min_growth_chars",
+              "label": "流式最小增长字符",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.telegram.streaming.min_growth_chars"
+            },
+            {
+              "key": "use_markdown_v2",
+              "label": "MarkdownV2",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.telegram.use_markdown_v2"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.telegram.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.telegram.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.telegram.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.telegram.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.telegram.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.telegram.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.telegram.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "discord",
+          "label": "Discord",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.discord.enabled"
+            },
+            {
+              "key": "token",
+              "label": "Bot Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.discord.token",
+              "secret": true
+            },
+            {
+              "key": "proxy",
+              "label": "代理",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.discord.proxy"
+            },
+            {
+              "key": "mention_only",
+              "label": "仅响应提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.discord.mention_only"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.discord.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.discord.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.discord.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.discord.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.discord.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.discord.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.discord.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "feishu",
+          "label": "飞书",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.feishu.enabled"
+            },
+            {
+              "key": "app_id",
+              "label": "App ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.feishu.app_id"
+            },
+            {
+              "key": "app_secret",
+              "label": "App Secret",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.feishu.app_secret",
+              "secret": true
+            },
+            {
+              "key": "encrypt_key",
+              "label": "Encrypt Key",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.feishu.encrypt_key",
+              "secret": true
+            },
+            {
+              "key": "verification_token",
+              "label": "Verification Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.feishu.verification_token",
+              "secret": true
+            },
+            {
+              "key": "random_reaction_emoji",
+              "label": "随机反应表情",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.feishu.random_reaction_emoji"
+            },
+            {
+              "key": "is_lark",
+              "label": "Lark 模式",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.feishu.is_lark"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.feishu.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.feishu.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.feishu.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.feishu.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.feishu.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.feishu.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.feishu.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "weixin",
+          "label": "微信",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.weixin.enabled"
+            },
+            {
+              "key": "token",
+              "label": "Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.weixin.token",
+              "secret": true
+            },
+            {
+              "key": "account_id",
+              "label": "Account ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.weixin.account_id"
+            },
+            {
+              "key": "base_url",
+              "label": "Base URL",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.weixin.base_url"
+            },
+            {
+              "key": "cdn_base_url",
+              "label": "CDN Base URL",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.weixin.cdn_base_url"
+            },
+            {
+              "key": "proxy",
+              "label": "代理",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.weixin.proxy"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.weixin.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.weixin.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.weixin.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.weixin.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.weixin.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.weixin.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.weixin.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "wecom",
+          "label": "企业微信",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.wecom.enabled"
+            },
+            {
+              "key": "bot_id",
+              "label": "Bot ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.wecom.bot_id"
+            },
+            {
+              "key": "secret",
+              "label": "Secret",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.wecom.secret",
+              "secret": true
+            },
+            {
+              "key": "websocket_url",
+              "label": "WebSocket URL",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.wecom.websocket_url"
+            },
+            {
+              "key": "send_thinking_message",
+              "label": "发送思考消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.wecom.send_thinking_message"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.wecom.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.wecom.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.wecom.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.wecom.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.wecom.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.wecom.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.wecom.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "dingtalk",
+          "label": "钉钉",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.dingtalk.enabled"
+            },
+            {
+              "key": "client_id",
+              "label": "Client ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.dingtalk.client_id"
+            },
+            {
+              "key": "client_secret",
+              "label": "Client Secret",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.dingtalk.client_secret",
+              "secret": true
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.dingtalk.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.dingtalk.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.dingtalk.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.dingtalk.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.dingtalk.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.dingtalk.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.dingtalk.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "slack",
+          "label": "Slack",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.slack.enabled"
+            },
+            {
+              "key": "bot_token",
+              "label": "Bot Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.slack.bot_token",
+              "secret": true
+            },
+            {
+              "key": "app_token",
+              "label": "App Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.slack.app_token",
+              "secret": true
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.slack.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.slack.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.slack.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.slack.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.slack.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.slack.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.slack.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "matrix",
+          "label": "Matrix",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.matrix.enabled"
+            },
+            {
+              "key": "homeserver",
+              "label": "Homeserver",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.matrix.homeserver"
+            },
+            {
+              "key": "user_id",
+              "label": "User ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.matrix.user_id"
+            },
+            {
+              "key": "access_token",
+              "label": "Access Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.matrix.access_token",
+              "secret": true
+            },
+            {
+              "key": "device_id",
+              "label": "Device ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.matrix.device_id"
+            },
+            {
+              "key": "join_on_invite",
+              "label": "自动接受邀请",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.matrix.join_on_invite"
+            },
+            {
+              "key": "message_format",
+              "label": "消息格式",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.matrix.message_format"
+            },
+            {
+              "key": "crypto_database_path",
+              "label": "加密数据库路径",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.matrix.crypto_database_path"
+            },
+            {
+              "key": "crypto_passphrase",
+              "label": "加密口令",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.matrix.crypto_passphrase",
+              "secret": true
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.matrix.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.matrix.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.matrix.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.matrix.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.matrix.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.matrix.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.matrix.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "line",
+          "label": "LINE",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.line.enabled"
+            },
+            {
+              "key": "channel_secret",
+              "label": "Channel Secret",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.line.channel_secret",
+              "secret": true
+            },
+            {
+              "key": "channel_access_token",
+              "label": "Channel Access Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.line.channel_access_token",
+              "secret": true
+            },
+            {
+              "key": "webhook_host",
+              "label": "Webhook Host",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.line.webhook_host"
+            },
+            {
+              "key": "webhook_port",
+              "label": "Webhook Port",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.line.webhook_port"
+            },
+            {
+              "key": "webhook_path",
+              "label": "Webhook Path",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.line.webhook_path"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.line.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.line.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.line.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.line.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.line.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.line.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.line.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "onebot",
+          "label": "OneBot",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.onebot.enabled"
+            },
+            {
+              "key": "ws_url",
+              "label": "WebSocket URL",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.onebot.ws_url"
+            },
+            {
+              "key": "access_token",
+              "label": "Access Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.onebot.access_token",
+              "secret": true
+            },
+            {
+              "key": "reconnect_interval",
+              "label": "重连间隔",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.onebot.reconnect_interval"
+            },
+            {
+              "key": "group_trigger_prefix",
+              "label": "群触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.onebot.group_trigger_prefix"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.onebot.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.onebot.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.onebot.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.onebot.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.onebot.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.onebot.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.onebot.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "qq",
+          "label": "QQ",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.qq.enabled"
+            },
+            {
+              "key": "app_id",
+              "label": "App ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.qq.app_id"
+            },
+            {
+              "key": "app_secret",
+              "label": "App Secret",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.qq.app_secret",
+              "secret": true
+            },
+            {
+              "key": "max_message_length",
+              "label": "最大消息长度",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.qq.max_message_length"
+            },
+            {
+              "key": "max_base64_file_size_mib",
+              "label": "Base64 文件上限 MiB",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.qq.max_base64_file_size_mib"
+            },
+            {
+              "key": "send_markdown",
+              "label": "发送 Markdown",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.qq.send_markdown"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.qq.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.qq.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.qq.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.qq.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.qq.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.qq.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.qq.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "irc",
+          "label": "IRC",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.irc.enabled"
+            },
+            {
+              "key": "server",
+              "label": "Server",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.irc.server"
+            },
+            {
+              "key": "tls",
+              "label": "TLS",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.irc.tls"
+            },
+            {
+              "key": "nick",
+              "label": "Nick",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.irc.nick"
+            },
+            {
+              "key": "user",
+              "label": "User",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.irc.user"
+            },
+            {
+              "key": "real_name",
+              "label": "Real Name",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.irc.real_name"
+            },
+            {
+              "key": "password",
+              "label": "Password",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.irc.password",
+              "secret": true
+            },
+            {
+              "key": "nickserv_password",
+              "label": "NickServ Password",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.irc.nickserv_password",
+              "secret": true
+            },
+            {
+              "key": "sasl_user",
+              "label": "SASL User",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.irc.sasl_user"
+            },
+            {
+              "key": "sasl_password",
+              "label": "SASL Password",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.irc.sasl_password",
+              "secret": true
+            },
+            {
+              "key": "channels",
+              "label": "Channels",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.irc.channels"
+            },
+            {
+              "key": "request_caps",
+              "label": "Request Caps",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.irc.request_caps"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.irc.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.irc.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.irc.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.irc.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.irc.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.irc.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.irc.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "maixcam",
+          "label": "MaixCam",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.maixcam.enabled"
+            },
+            {
+              "key": "host",
+              "label": "Host",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.maixcam.host"
+            },
+            {
+              "key": "port",
+              "label": "Port",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.maixcam.port"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.maixcam.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.maixcam.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.maixcam.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.maixcam.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.maixcam.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.maixcam.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.maixcam.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "whatsapp",
+          "label": "WhatsApp",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.whatsapp.enabled"
+            },
+            {
+              "key": "bridge_url",
+              "label": "Bridge URL",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.whatsapp.bridge_url"
+            },
+            {
+              "key": "use_native",
+              "label": "使用 Native",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.whatsapp.use_native"
+            },
+            {
+              "key": "session_store_path",
+              "label": "Session Store Path",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.whatsapp.session_store_path"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.whatsapp.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.whatsapp.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.whatsapp.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.whatsapp.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.whatsapp.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.whatsapp.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.whatsapp.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "pico",
+          "label": "Pico",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.pico.enabled"
+            },
+            {
+              "key": "token",
+              "label": "Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.pico.token",
+              "secret": true
+            },
+            {
+              "key": "allow_token_query",
+              "label": "允许 URL Token",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.pico.allow_token_query"
+            },
+            {
+              "key": "allow_origins",
+              "label": "允许 Origins",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.pico.allow_origins"
+            },
+            {
+              "key": "ping_interval",
+              "label": "Ping 间隔",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.pico.ping_interval"
+            },
+            {
+              "key": "read_timeout",
+              "label": "读取超时",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.pico.read_timeout"
+            },
+            {
+              "key": "write_timeout",
+              "label": "写入超时",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.pico.write_timeout"
+            },
+            {
+              "key": "max_connections",
+              "label": "最大连接数",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.pico.max_connections"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.pico.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.pico.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.pico.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.pico.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.pico.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.pico.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.pico.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "pico_client",
+          "label": "Pico Client",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.pico_client.enabled"
+            },
+            {
+              "key": "url",
+              "label": "URL",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.pico_client.url"
+            },
+            {
+              "key": "token",
+              "label": "Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.pico_client.token",
+              "secret": true
+            },
+            {
+              "key": "session_id",
+              "label": "Session ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.pico_client.session_id"
+            },
+            {
+              "key": "ping_interval",
+              "label": "Ping 间隔",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.pico_client.ping_interval"
+            },
+            {
+              "key": "read_timeout",
+              "label": "读取超时",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.pico_client.read_timeout"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.pico_client.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.pico_client.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.pico_client.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.pico_client.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.pico_client.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.pico_client.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.pico_client.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "vk",
+          "label": "VK",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.vk.enabled"
+            },
+            {
+              "key": "token",
+              "label": "Token",
+              "type": "password",
+              "storage": "security",
+              "path": "channels.vk.token",
+              "secret": true
+            },
+            {
+              "key": "group_id",
+              "label": "Group ID",
+              "type": "integer",
+              "storage": "config",
+              "path": "channels.vk.group_id"
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.vk.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.vk.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.vk.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.vk.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.vk.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.vk.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.vk.placeholder.text"
+            }
+          ]
+        },
+        {
+          "key": "teams_webhook",
+          "label": "Teams Webhook",
+          "fields": [
+            {
+              "key": "enabled",
+              "label": "启用",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.teams_webhook.enabled"
+            },
+            {
+              "key": "webhooks",
+              "label": "Webhooks JSON",
+              "type": "json",
+              "storage": "security",
+              "path": "channels.teams_webhook.webhooks",
+              "secret": true
+            },
+            {
+              "key": "allow_from",
+              "label": "允许来源",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.teams_webhook.allow_from"
+            },
+            {
+              "key": "reasoning_channel_id",
+              "label": "Reasoning Channel ID",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.teams_webhook.reasoning_channel_id"
+            },
+            {
+              "key": "group_mention_only",
+              "label": "群聊仅提及",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.teams_webhook.group_trigger.mention_only"
+            },
+            {
+              "key": "group_prefixes",
+              "label": "群聊触发前缀",
+              "type": "string_list",
+              "storage": "config",
+              "path": "channels.teams_webhook.group_trigger.prefixes"
+            },
+            {
+              "key": "typing_enabled",
+              "label": "Typing 指示",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.teams_webhook.typing.enabled"
+            },
+            {
+              "key": "placeholder_enabled",
+              "label": "占位消息",
+              "type": "boolean",
+              "storage": "config",
+              "path": "channels.teams_webhook.placeholder.enabled"
+            },
+            {
+              "key": "placeholder_text",
+              "label": "占位消息文本",
+              "type": "text",
+              "storage": "config",
+              "path": "channels.teams_webhook.placeholder.text"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

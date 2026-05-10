@@ -85,11 +85,12 @@ WebSocket 连接
 
 ### SSE 流程
 
-1. AI 容器通过 SSE 连接 PicoAide Server 的 `/api/mcp/sse/browser` 或 `/api/mcp/sse/computer`
-2. Server 返回 `endpoint` 事件，包含 POST 端点地址
-3. AI 容器通过 POST 端点发送 JSON-RPC 请求（`tools/list`、`tools/call`）
-4. Server 查找用户对应的浏览器扩展/桌面客户端 WebSocket 连接
-5. 将命令转发到客户端，等待响应并返回给 AI
+1. AI 容器通过 MCP SSE 连接 PicoAide Server 的 `/api/mcp/sse/browser` 或 `/api/mcp/sse/computer`
+2. Server 返回工具列表，AI 只能通过 `tools/call` 调用 `browser_*` 或 `computer_*` 工具
+3. Server 查找用户对应的浏览器扩展/桌面客户端 WebSocket 连接
+4. 将命令转发到客户端，等待响应并返回给 AI
+
+浏览器操作必须走 `browser` MCP 服务。扩展 WebSocket 只负责执行端连接，AI 侧不应直接调用 `/api/browser/ws`，也不应绕过 MCP 使用普通 API 模拟浏览器控制。如果用户没有在扩展中点击「授权 AI 控制当前标签页」，`browser_*` 工具调用会返回浏览器代理未连接。
 
 ### 服务注册
 
@@ -130,7 +131,7 @@ bcrypt 验证（本地用户表）
 LDAP Bind 验证
     │
     ▼
-检查白名单（whitelist.yaml）
+检查数据库白名单
     │
     ▼
 自动创建/更新本地用户记录
