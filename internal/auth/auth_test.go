@@ -228,6 +228,39 @@ func TestSyncUserGroups(t *testing.T) {
 	}
 }
 
+func TestGetGroupMembersForDeployIncludesSubGroups(t *testing.T) {
+	testInitDB(t)
+
+	if err := CreateGroup("parent", "local", "", nil); err != nil {
+		t.Fatalf("CreateGroup parent: %v", err)
+	}
+	parentID, err := GetGroupID("parent")
+	if err != nil {
+		t.Fatalf("GetGroupID parent: %v", err)
+	}
+	if err := CreateGroup("child", "local", "", &parentID); err != nil {
+		t.Fatalf("CreateGroup child: %v", err)
+	}
+	if err := AddUsersToGroup("parent", []string{"direct"}); err != nil {
+		t.Fatalf("AddUsersToGroup parent: %v", err)
+	}
+	if err := AddUsersToGroup("child", []string{"nested"}); err != nil {
+		t.Fatalf("AddUsersToGroup child: %v", err)
+	}
+
+	members, err := GetGroupMembersForDeploy("parent")
+	if err != nil {
+		t.Fatalf("GetGroupMembersForDeploy: %v", err)
+	}
+	got := map[string]bool{}
+	for _, member := range members {
+		got[member] = true
+	}
+	if !got["direct"] || !got["nested"] {
+		t.Fatalf("parent deploy members = %v, want direct and nested", members)
+	}
+}
+
 func TestDeleteUser(t *testing.T) {
 	testInitDB(t)
 

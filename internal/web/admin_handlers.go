@@ -2734,7 +2734,7 @@ func (s *Server) handleAdminGroupMembers(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "组名不能为空")
 		return
 	}
-	members, err := auth.GetGroupMembers(groupName)
+	members, inheritedMembers, err := auth.GetGroupMembersWithSubGroups(groupName)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err.Error())
 		return
@@ -2747,14 +2747,18 @@ func (s *Server) handleAdminGroupMembers(c *gin.Context) {
 	if members == nil {
 		members = []string{}
 	}
+	if inheritedMembers == nil {
+		inheritedMembers = []string{}
+	}
 	if skills == nil {
 		skills = []string{}
 	}
 	writeJSON(c, http.StatusOK, struct {
-		Success bool     `json:"success"`
-		Members []string `json:"members"`
-		Skills  []string `json:"skills"`
-	}{true, members, skills})
+		Success          bool     `json:"success"`
+		Members          []string `json:"members"`
+		InheritedMembers []string `json:"inherited_members"`
+		Skills           []string `json:"skills"`
+	}{true, members, inheritedMembers, skills})
 }
 
 // handleAdminAuthSyncGroups 手动触发 LDAP 组同步
@@ -2784,7 +2788,7 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
 	groupCount := 0
 	userCount := result.GroupMemberCount
 	if s.cfg.LDAP.GroupSearchMode != "" {
-		groupMap, err := ldap.FetchAllGroupsWithMembers(s.cfg)
+		groupMap, err := ldap.FetchAllGroupsWithHierarchy(s.cfg)
 		if err != nil {
 			writeError(c, http.StatusInternalServerError, "获取 LDAP 组失败: "+err.Error())
 			return
@@ -2793,14 +2797,14 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
 		// 获取白名单
 		whitelist, _ := user.LoadWhitelist()
 
-		for groupName, members := range groupMap {
+		for groupName, group := range groupMap {
 			// 创建组（如果不存在）
 			auth.CreateGroup(groupName, "ldap", "", nil)
 			groupCount++
 
 			// 过滤白名单用户
 			var filtered []string
-			for _, m := range members {
+			for _, m := range group.Members {
 				if whitelist == nil || whitelist[m] {
 					filtered = append(filtered, m)
 				}
@@ -2810,6 +2814,9 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
 				auth.AddUsersToGroup(groupName, filtered)
 				userCount += len(filtered)
 			}
+		}
+		if s.cfg.LDAP.GroupSearchMode == "group_search" {
+			s.syncLDAPGroupParents(groupMap)
 		}
 	}
 

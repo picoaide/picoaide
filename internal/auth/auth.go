@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -790,7 +791,7 @@ func AllocateNextIP() (string, error) {
 // 用户组管理
 // ============================================================
 
-// CreateGroup 创建组，parentID 为 nil 表示顶级组
+// CreateGroup 创建组，parentID 为 nil 表示顶级组。
 func CreateGroup(name, source, description string, parentID *int64) error {
 	if err := ensureDB(); err != nil {
 		return err
@@ -828,12 +829,36 @@ func ListGroups() ([]GroupInfo, error) {
 	if err := ensureDB(); err != nil {
 		return nil, err
 	}
-	var list []GroupInfo
-	err := engine.SQL(`SELECT g.id, g.name, g.parent_id, g.source, g.description,
+	rows, err := engine.DB().Query(`SELECT g.id, g.name, g.parent_id, g.source, g.description,
     (SELECT COUNT(*) FROM user_groups ug WHERE ug.group_id = g.id) AS member_count,
     (SELECT COUNT(*) FROM group_skills gs WHERE gs.group_id = g.id) AS skill_count
-    FROM groups g ORDER BY g.name`).Find(&list)
+    FROM groups g ORDER BY g.name`)
 	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []GroupInfo
+	for rows.Next() {
+		var group GroupInfo
+		var parentID sql.NullInt64
+		if err := rows.Scan(
+			&group.ID,
+			&group.Name,
+			&parentID,
+			&group.Source,
+			&group.Description,
+			&group.MemberCount,
+			&group.SkillCount,
+		); err != nil {
+			return nil, err
+		}
+		if parentID.Valid {
+			group.ParentID = &parentID.Int64
+		}
+		list = append(list, group)
+	}
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return list, nil
@@ -894,6 +919,30 @@ func GetGroupMembers(groupName string) ([]string, error) {
 		list = append(list, ug.Username)
 	}
 	return list, nil
+}
+
+// GetGroupMembersWithSubGroups 获取组的直接成员和子组成员。
+func GetGroupMembersWithSubGroups(groupName string) ([]string, []string, error) {
+	directMembers, err := GetGroupMembers(groupName)
+	if err != nil {
+		return nil, nil, err
+	}
+	allMembers, err := GetGroupMembersForDeploy(groupName)
+	if err != nil {
+		return nil, nil, err
+	}
+	direct := make(map[string]bool, len(directMembers))
+	for _, member := range directMembers {
+		direct[member] = true
+	}
+	var inherited []string
+	for _, member := range allMembers {
+		if !direct[member] {
+			inherited = append(inherited, member)
+		}
+	}
+	sort.Strings(inherited)
+	return directMembers, inherited, nil
 }
 
 // GetGroupsForUser 获取用户所属的组名列表
@@ -986,7 +1035,7 @@ func GetGroupSkills(groupName string) ([]string, error) {
 	return list, nil
 }
 
-// GetGroupMembersForDeploy 获取组成员的用户名列表（递归包含所有子组成员）
+// GetGroupMembersForDeploy 获取组成员的用户名列表（包含子组成员）。
 func GetGroupMembersForDeploy(groupName string) ([]string, error) {
 	if err := ensureDB(); err != nil {
 		return nil, err
@@ -998,7 +1047,6 @@ func GetGroupMembersForDeploy(groupName string) ([]string, error) {
 		return nil, fmt.Errorf("组 %s 不存在", groupName)
 	}
 
-	// 收集目标组及所有子组 ID
 	ids := []int64{group.ID}
 	subIDs, err := GetSubGroupIDs(group.ID)
 	if err != nil {
@@ -1006,14 +1054,12 @@ func GetGroupMembersForDeploy(groupName string) ([]string, error) {
 	}
 	ids = append(ids, subIDs...)
 
-	// 批量查询所有组的成员
 	seen := make(map[string]bool)
 	var members []string
 	for _, gid := range ids {
 		var userGroups []UserGroup
-		err := engine.Where("group_id = ?", gid).Find(&userGroups)
-		if err != nil {
-			continue
+		if err := engine.Where("group_id = ?", gid).OrderBy("username").Find(&userGroups); err != nil {
+			return nil, err
 		}
 		for _, ug := range userGroups {
 			if !seen[ug.Username] {
@@ -1025,7 +1071,7 @@ func GetGroupMembersForDeploy(groupName string) ([]string, error) {
 	return members, nil
 }
 
-// GetSubGroupIDs 递归获取所有子组 ID
+// GetSubGroupIDs 递归获取所有子组 ID。
 func GetSubGroupIDs(groupID int64) ([]int64, error) {
 	if err := ensureDB(); err != nil {
 		return nil, err
@@ -1034,13 +1080,14 @@ func GetSubGroupIDs(groupID int64) ([]int64, error) {
 	var walk func(pid int64) error
 	walk = func(pid int64) error {
 		var children []Group
-		err := engine.Where("parent_id = ?", pid).Find(&children)
-		if err != nil {
+		if err := engine.Where("parent_id = ?", pid).OrderBy("name").Find(&children); err != nil {
 			return err
 		}
 		for _, child := range children {
 			result = append(result, child.ID)
-			walk(child.ID)
+			if err := walk(child.ID); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -1050,7 +1097,7 @@ func GetSubGroupIDs(groupID int64) ([]int64, error) {
 	return result, nil
 }
 
-// SetGroupParent 设置组的父组
+// SetGroupParent 设置组的父组。
 func SetGroupParent(groupName string, parentID *int64) error {
 	if err := ensureDB(); err != nil {
 		return err

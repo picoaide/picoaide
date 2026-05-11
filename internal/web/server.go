@@ -102,18 +102,18 @@ func (s *Server) syncLDAPGroups() {
 	if s.cfg.LDAP.GroupSearchMode == "" {
 		return
 	}
-	groupMap, err := ldap.FetchAllGroupsWithMembers(s.cfg)
+	groupMap, err := ldap.FetchAllGroupsWithHierarchy(s.cfg)
 	if err != nil {
 		slog.Error("LDAP 定时同步失败", "error", err)
 		return
 	}
 	whitelist, _ := user.LoadWhitelist()
 	groupCount := 0
-	for groupName, members := range groupMap {
+	for groupName, group := range groupMap {
 		auth.CreateGroup(groupName, "ldap", "", nil)
 		groupCount++
 		var filtered []string
-		for _, m := range members {
+		for _, m := range group.Members {
 			if whitelist == nil || whitelist[m] {
 				filtered = append(filtered, m)
 			}
@@ -122,7 +122,32 @@ func (s *Server) syncLDAPGroups() {
 			auth.AddUsersToGroup(groupName, filtered)
 		}
 	}
+	if s.cfg.LDAP.GroupSearchMode == "group_search" {
+		s.syncLDAPGroupParents(groupMap)
+	}
 	slog.Info("LDAP 定时同步完成", "groups", groupCount)
+}
+
+func (s *Server) syncLDAPGroupParents(groupMap map[string]ldap.GroupHierarchy) {
+	for groupName := range groupMap {
+		if err := auth.SetGroupParent(groupName, nil); err != nil {
+			slog.Warn("清空 LDAP 组父级失败", "group", groupName, "error", err)
+		}
+	}
+	for parentName, group := range groupMap {
+		parentID, err := auth.GetGroupID(parentName)
+		if err != nil {
+			continue
+		}
+		for _, childName := range group.SubGroups {
+			if _, ok := groupMap[childName]; !ok {
+				continue
+			}
+			if err := auth.SetGroupParent(childName, &parentID); err != nil {
+				slog.Warn("同步 LDAP 组父子关系失败", "parent", parentName, "child", childName, "error", err)
+			}
+		}
+	}
 }
 
 // createSessionToken 生成 HMAC 签名的 session token

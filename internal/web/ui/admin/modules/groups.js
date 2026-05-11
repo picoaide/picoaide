@@ -60,7 +60,7 @@ export async function init(ctx) {
     });
     tbody.querySelectorAll('[data-group-apply]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('确定要下发配置到组 ' + btn.dataset.groupApply + ' 的所有成员（含子组）并重启容器吗？')) return;
+        if (!confirm('确定要下发配置到组 ' + btn.dataset.groupApply + ' 的所有成员（包含子组成员）并重启容器吗？')) return;
         showMsg('#groups-msg', '提交中...', true);
         try {
           const res = await Api.post('/api/admin/config/apply', { group: btn.dataset.groupApply });
@@ -174,6 +174,7 @@ export async function init(ctx) {
 
     const detail = await Api.get('/api/admin/groups/members?name=' + encodeURIComponent(groupName));
     const members = (detail.success ? detail.members : []) || [];
+    const inheritedMembers = (detail.success ? detail.inherited_members : []) || [];
     const skills = (detail.success ? detail.skills : []) || [];
 
     const skillData = await Api.get('/api/admin/skills');
@@ -186,8 +187,15 @@ export async function init(ctx) {
 
     function renderMembers() {
       const el = overlay.querySelector('#gd-members');
-      if (members.length === 0) { el.innerHTML = '<small class="text-muted">暂无成员</small>'; return; }
-      el.innerHTML = members.map(m => '<span class="tag">' + esc(m) + ' <button data-rm-member="' + esc(m) + '">&times;</button></span>').join(' ');
+      let html = '';
+      if (members.length === 0) html += '<small class="text-muted">暂无直接成员</small>';
+      else html += members.map(m => '<span class="tag">' + esc(m) + ' <button data-rm-member="' + esc(m) + '">&times;</button></span>').join(' ');
+      if (inheritedMembers.length > 0) {
+        html += '<div class="mt-1"><small class="text-muted">子组成员</small><div>' +
+          inheritedMembers.map(m => '<span class="tag">' + esc(m) + '</span>').join(' ') +
+          '</div></div>';
+      }
+      el.innerHTML = html;
       el.querySelectorAll('[data-rm-member]').forEach(btn => {
         btn.addEventListener('click', async () => {
           const res = await Api.post('/api/admin/groups/members/remove', { group_name: groupName, username: btn.dataset.rmMember });
