@@ -6,19 +6,14 @@ export async function init(ctx) {
 
   $('#auth-mode').addEventListener('change', function() {
     var mode = this.value;
-    var ldapOn = mode === 'ldap';
-    if (ldapOn) {
-      if (!confirm('切换到 LDAP 统一登录模式？\n\n启用后，本地用户（非超管）将被禁用，仅超管可使用本地密码登录。')) {
-        this.value = 'local';
-        return;
-      }
-    } else {
-      if (!confirm('切换到本地认证模式？\n\nLDAP 用户将无法登录。')) {
-        this.value = 'ldap';
+    var current = currentAuthMode();
+    if (mode !== current) {
+      if (!confirm('切换认证方式会清空当前普通用户、容器记录、用户目录和归档目录。确定切换到 ' + authModeLabel(mode) + '？')) {
+        this.value = current;
         return;
       }
     }
-    updateLDAPVisibility(ldapOn);
+    updateProviderVisibility(mode);
   });
 
   $('#save-auth-config-btn').addEventListener('click', saveAllConfig);
@@ -45,12 +40,10 @@ export async function init(ctx) {
   }
 
   function renderConfig() {
-    var ldapOn = rawConfig.web?.ldap_enabled === true || rawConfig.web?.ldap_enabled === 'true';
-    if (rawConfig.web?.auth_mode === 'local') ldapOn = false;
-    if (rawConfig.web?.auth_mode === 'ldap') ldapOn = true;
+    var mode = currentAuthMode();
 
-    $('#auth-mode').value = ldapOn ? 'ldap' : 'local';
-    updateLDAPVisibility(ldapOn);
+    $('#auth-mode').value = mode;
+    updateProviderVisibility(mode);
 
     $('#session-secret').value = rawConfig.web?.password || '';
 
@@ -66,29 +59,64 @@ export async function init(ctx) {
     $('#ldap-group-filter').value = rawConfig.ldap?.group_filter || '';
     $('#ldap-group-member-attr').value = rawConfig.ldap?.group_member_attribute || '';
 
-    $('#wl-enabled').value = rawConfig.ldap?.whitelist_enabled ? 'true' : 'false';
+    $('#wl-enabled').value = whitelistEnabledForMode(mode) ? 'true' : 'false';
     $('#sync-interval').value = rawConfig.ldap?.sync_interval || '24h';
+    $('#oidc-issuer-url').value = rawConfig.oidc?.issuer_url || '';
+    $('#oidc-client-id').value = rawConfig.oidc?.client_id || '';
+    $('#oidc-client-secret').value = rawConfig.oidc?.client_secret || '';
+    $('#oidc-redirect-url').value = rawConfig.oidc?.redirect_url || '';
+    $('#oidc-scopes').value = rawConfig.oidc?.scopes || 'openid profile email';
+    $('#oidc-username-claim').value = rawConfig.oidc?.username_claim || 'preferred_username';
+    $('#oidc-groups-claim').value = rawConfig.oidc?.groups_claim || 'groups';
+    $('#oidc-sync-interval').value = rawConfig.oidc?.sync_interval || '0';
 
     updateWhitelistVisibility();
 
-    if (ldapOn && rawConfig.ldap?.whitelist_enabled) loadWhitelist();
+    if (mode !== 'local' && whitelistEnabledForMode(mode)) loadWhitelist();
   }
 
   function updateWhitelistVisibility() {
+    var mode = $('#auth-mode').value;
+    $('#auth-whitelist-section').style.display = mode === 'local' ? 'none' : '';
+    $('#wl-search-row').style.display = mode === 'ldap' ? '' : 'none';
+    $('#wl-add-input').placeholder = mode === 'oidc' ? '手动输入 OIDC 用户名' : '手动输入用户名';
     var wlOn = $('#wl-enabled').value === 'true';
-    $('#wl-section').classList.toggle('hidden', !wlOn);
+    $('#wl-section').classList.toggle('hidden', mode === 'local' || !wlOn);
   }
 
-  function updateLDAPVisibility(ldapOn) {
-    $('#ldap-section').style.display = ldapOn ? '' : 'none';
-    $('#ldap-mode-notice').classList.toggle('hidden', !ldapOn);
+  function whitelistEnabledForMode(mode) {
+    if (mode === 'ldap') return rawConfig.ldap?.whitelist_enabled === true;
+    if (mode === 'oidc') return rawConfig.oidc?.whitelist_enabled === true;
+    return false;
+  }
+
+  function currentAuthMode() {
+    if (rawConfig.web?.auth_mode) return rawConfig.web.auth_mode;
+    var ldapOn = rawConfig.web?.ldap_enabled === true || rawConfig.web?.ldap_enabled === 'true';
+    return ldapOn ? 'ldap' : 'local';
+  }
+
+  function authModeLabel(mode) {
+    if (mode === 'ldap') return 'LDAP 统一登录';
+    if (mode === 'oidc') return 'OIDC 统一登录';
+    return '本地认证';
+  }
+
+  function updateProviderVisibility(mode) {
+    $('#ldap-section').style.display = mode === 'ldap' ? '' : 'none';
+    $('#oidc-section').style.display = mode === 'oidc' ? '' : 'none';
+    $('#provider-mode-notice').classList.toggle('hidden', mode === 'local');
+    if (mode !== 'local') {
+      $('#wl-enabled').value = whitelistEnabledForMode(mode) ? 'true' : 'false';
+    }
+    updateWhitelistVisibility();
   }
 
   function collectConfigFromForm() {
-    var ldapOn = $('#auth-mode').value === 'ldap';
+    var mode = $('#auth-mode').value;
     if (!rawConfig.web) rawConfig.web = {};
-    rawConfig.web.ldap_enabled = ldapOn;
-    rawConfig.web.auth_mode = ldapOn ? 'ldap' : 'local';
+    rawConfig.web.ldap_enabled = mode === 'ldap';
+    rawConfig.web.auth_mode = mode;
     rawConfig.web.password = $('#session-secret').value;
 
     if (!rawConfig.ldap) rawConfig.ldap = {};
@@ -104,8 +132,19 @@ export async function init(ctx) {
     rawConfig.ldap.group_filter = $('#ldap-group-filter').value;
     rawConfig.ldap.group_member_attribute = $('#ldap-group-member-attr').value;
 
-    rawConfig.ldap.whitelist_enabled = $('#wl-enabled').value === 'true';
+    rawConfig.ldap.whitelist_enabled = mode === 'ldap' ? $('#wl-enabled').value === 'true' : rawConfig.ldap.whitelist_enabled === true;
     rawConfig.ldap.sync_interval = $('#sync-interval').value;
+
+    if (!rawConfig.oidc) rawConfig.oidc = {};
+    rawConfig.oidc.issuer_url = $('#oidc-issuer-url').value;
+    rawConfig.oidc.client_id = $('#oidc-client-id').value;
+    rawConfig.oidc.client_secret = $('#oidc-client-secret').value;
+    rawConfig.oidc.redirect_url = $('#oidc-redirect-url').value;
+    rawConfig.oidc.scopes = $('#oidc-scopes').value;
+    rawConfig.oidc.username_claim = $('#oidc-username-claim').value;
+    rawConfig.oidc.groups_claim = $('#oidc-groups-claim').value;
+    rawConfig.oidc.whitelist_enabled = mode === 'oidc' ? $('#wl-enabled').value === 'true' : rawConfig.oidc.whitelist_enabled === true;
+    rawConfig.oidc.sync_interval = $('#oidc-sync-interval').value;
   }
 
   async function saveAllConfig() {
@@ -115,11 +154,12 @@ export async function init(ctx) {
       var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
       if (res.success) {
         showMsg('#auth-msg', res.message + '。自动同步间隔修改后需重启服务生效。', true);
+        await loadConfig();
       } else {
         showMsg('#auth-msg', res.error, false);
       }
       updateWhitelistVisibility();
-      if (rawConfig.ldap.whitelist_enabled) loadWhitelist();
+      if (whitelistEnabledForMode($('#auth-mode').value)) loadWhitelist();
     } catch (e) { showMsg('#auth-msg', e.message, false); }
   }
 
@@ -132,8 +172,8 @@ export async function init(ctx) {
   }
 
   async function syncLDAPUsersWithCleanup() {
-    if (!confirm('确定同步 LDAP 账号并归档不在 LDAP 或白名单中的旧账号吗？')) return;
-    showMsg('#sync-groups-msg', '同步并归档旧账号中...', true);
+    if (!confirm('确定同步账号并清理不在当前认证源或白名单中的旧账号吗？')) return;
+    showMsg('#sync-groups-msg', '同步并清理旧账号中...', true);
     try {
       var res = await Api.post('/api/admin/auth/sync-users', { cleanup: 'true' });
       showMsg('#sync-groups-msg', res.message || res.error, res.success);

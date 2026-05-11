@@ -107,6 +107,35 @@ func TestIsWhitelisted(t *testing.T) {
 	}
 }
 
+func TestAllowedByWhitelistUsesProviderConfig(t *testing.T) {
+	testInitAuthDB(t)
+
+	cfg := &config.GlobalConfig{
+		LDAP: config.LDAPConfig{WhitelistEnabled: false},
+		OIDC: config.OIDCConfig{WhitelistEnabled: true},
+	}
+	if !AllowedByWhitelist(cfg, "ldap", "alice") {
+		t.Fatal("disabled LDAP whitelist should allow users")
+	}
+	if !AllowedByWhitelist(cfg, "oidc", "alice") {
+		t.Fatal("enabled OIDC whitelist with empty list should allow users")
+	}
+
+	engine, err := auth.GetEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Exec("INSERT INTO whitelist (username, added_by) VALUES (?, ?)", "bob", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if !AllowedByWhitelist(cfg, "oidc", "bob") {
+		t.Fatal("enabled OIDC whitelist should allow listed users")
+	}
+	if AllowedByWhitelist(cfg, "oidc", "alice") {
+		t.Fatal("enabled OIDC whitelist should reject users missing from non-empty whitelist")
+	}
+}
+
 func TestContainerBaseURLDefault(t *testing.T) {
 	cfg := &config.GlobalConfig{
 		Web: config.WebConfig{Listen: ":80"},

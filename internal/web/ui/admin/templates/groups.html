@@ -2,13 +2,14 @@
   <div>
     <div class="page-kicker">组织策略</div>
     <h2>用户组</h2>
-    <p>按组织或 LDAP 组统一绑定 Skill、下发配置和管理容器策略。</p>
+    <p>用户组来自当前认证源，可用于绑定 Skill、下发配置和管理容器策略。</p>
   </div>
   <div class="page-actions">
-    <button class="btn btn-primary btn-sm" id="create-group-btn">新建组</button>
     <button class="btn btn-outline btn-sm" id="refresh-groups">刷新</button>
   </div>
 </section>
+
+<div class="msg msg-info">用户组和成员由当前认证源同步，不支持手动新建、删除或编辑成员。</div>
 
 <div class="list-controls">
   <div class="list-search">

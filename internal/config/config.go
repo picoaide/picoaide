@@ -47,6 +47,18 @@ type LDAPConfig struct {
 	SyncInterval         string `yaml:"sync_interval"` // "0" 禁用, "1h", "24h", "30m" 等
 }
 
+type OIDCConfig struct {
+	IssuerURL        string `yaml:"issuer_url"`
+	ClientID         string `yaml:"client_id"`
+	ClientSecret     string `yaml:"client_secret"`
+	RedirectURL      string `yaml:"redirect_url"`
+	Scopes           string `yaml:"scopes"`
+	UsernameClaim    string `yaml:"username_claim"`
+	GroupsClaim      string `yaml:"groups_claim"`
+	WhitelistEnabled bool   `yaml:"whitelist_enabled"`
+	SyncInterval     string `yaml:"sync_interval"`
+}
+
 type ImageConfig struct {
 	Name     string `yaml:"name"`
 	Tag      string `yaml:"tag"`
@@ -127,6 +139,7 @@ type SkillsConfig struct {
 
 type GlobalConfig struct {
 	LDAP                         LDAPConfig   `yaml:"ldap"`
+	OIDC                         OIDCConfig   `yaml:"oidc"`
 	Image                        ImageConfig  `yaml:"image"`
 	UsersRoot                    string       `yaml:"users_root"`
 	ArchiveRoot                  string       `yaml:"archive_root"`
@@ -175,8 +188,40 @@ func (cfg *GlobalConfig) AuthMode() string {
 	return "local"
 }
 
+func (cfg *GlobalConfig) ActiveAuthProvider() string {
+	return cfg.AuthMode()
+}
+
+func (cfg *GlobalConfig) WhitelistEnabledForProvider(provider string) bool {
+	switch provider {
+	case "ldap":
+		return cfg.LDAP.WhitelistEnabled
+	case "oidc":
+		return cfg.OIDC.WhitelistEnabled
+	default:
+		return false
+	}
+}
+
+func (cfg *GlobalConfig) WhitelistEnabled() bool {
+	return cfg.WhitelistEnabledForProvider(cfg.AuthMode())
+}
+
 // SyncIntervalDuration 解析同步间隔配置，返回 time.Duration，0 表示禁用
 func (cfg *GlobalConfig) SyncIntervalDuration() time.Duration {
+	if cfg.AuthMode() == "oidc" {
+		if cfg.OIDC.SyncInterval == "" || cfg.OIDC.SyncInterval == "0" {
+			return 0
+		}
+		if d, err := strconv.ParseInt(cfg.OIDC.SyncInterval, 10, 64); err == nil {
+			return time.Duration(d) * time.Hour
+		}
+		d, err := time.ParseDuration(cfg.OIDC.SyncInterval)
+		if err != nil {
+			return 0
+		}
+		return d
+	}
 	if cfg.LDAP.SyncInterval == "" || cfg.LDAP.SyncInterval == "0" {
 		return 0
 	}
@@ -531,6 +576,15 @@ func LoadFromDB() (*GlobalConfig, error) {
 	cfg.LDAP.GroupBaseDN = kv["ldap.group_base_dn"]
 	cfg.LDAP.GroupFilter = kv["ldap.group_filter"]
 	cfg.LDAP.GroupMemberAttribute = kv["ldap.group_member_attribute"]
+	cfg.LDAP.SyncInterval = kv["ldap.sync_interval"]
+	cfg.OIDC.IssuerURL = kv["oidc.issuer_url"]
+	cfg.OIDC.ClientID = kv["oidc.client_id"]
+	cfg.OIDC.ClientSecret = kv["oidc.client_secret"]
+	cfg.OIDC.RedirectURL = kv["oidc.redirect_url"]
+	cfg.OIDC.Scopes = kv["oidc.scopes"]
+	cfg.OIDC.UsernameClaim = kv["oidc.username_claim"]
+	cfg.OIDC.GroupsClaim = kv["oidc.groups_claim"]
+	cfg.OIDC.SyncInterval = kv["oidc.sync_interval"]
 	cfg.Image.Name = kv["image.name"]
 	cfg.Image.Tag = kv["image.tag"]
 	cfg.Image.Timezone = kv["image.timezone"]
@@ -551,6 +605,8 @@ func LoadFromDB() (*GlobalConfig, error) {
 			cfg.Web.LDAPEnabled = &b
 		}
 	}
+	cfg.LDAP.WhitelistEnabled, _ = strconv.ParseBool(kv["ldap.whitelist_enabled"])
+	cfg.OIDC.WhitelistEnabled, _ = strconv.ParseBool(kv["oidc.whitelist_enabled"])
 
 	// TLS 配置
 	cfg.Web.TLS.Enabled, _ = strconv.ParseBool(kv["web.tls.enabled"])
@@ -592,6 +648,17 @@ func configToKV(cfg *GlobalConfig) (map[string]string, error) {
 	kv["ldap.group_base_dn"] = cfg.LDAP.GroupBaseDN
 	kv["ldap.group_filter"] = cfg.LDAP.GroupFilter
 	kv["ldap.group_member_attribute"] = cfg.LDAP.GroupMemberAttribute
+	kv["ldap.whitelist_enabled"] = strconv.FormatBool(cfg.LDAP.WhitelistEnabled)
+	kv["ldap.sync_interval"] = cfg.LDAP.SyncInterval
+	kv["oidc.issuer_url"] = cfg.OIDC.IssuerURL
+	kv["oidc.client_id"] = cfg.OIDC.ClientID
+	kv["oidc.client_secret"] = cfg.OIDC.ClientSecret
+	kv["oidc.redirect_url"] = cfg.OIDC.RedirectURL
+	kv["oidc.scopes"] = cfg.OIDC.Scopes
+	kv["oidc.username_claim"] = cfg.OIDC.UsernameClaim
+	kv["oidc.groups_claim"] = cfg.OIDC.GroupsClaim
+	kv["oidc.whitelist_enabled"] = strconv.FormatBool(cfg.OIDC.WhitelistEnabled)
+	kv["oidc.sync_interval"] = cfg.OIDC.SyncInterval
 	kv["image.name"] = cfg.Image.Name
 	kv["image.tag"] = cfg.Image.Tag
 	kv["image.timezone"] = cfg.Image.Timezone
@@ -789,6 +856,13 @@ func DefaultGlobalConfig() *GlobalConfig {
 			BaseDN:            "ou=users,dc=example,dc=com",
 			Filter:            "(objectClass=inetOrgPerson)",
 			UsernameAttribute: "uid",
+			SyncInterval:      "24h",
+		},
+		OIDC: OIDCConfig{
+			Scopes:        "openid profile email",
+			UsernameClaim: "preferred_username",
+			GroupsClaim:   "groups",
+			SyncInterval:  "0",
 		},
 		Image: ImageConfig{
 			Name:     "ghcr.io/picoaide/picoaide",
@@ -961,6 +1035,7 @@ func buildNested(flat map[string]string) map[string]interface{} {
 		"web.ldap_enabled":       true,
 		"web.tls.enabled":        true,
 		"ldap.whitelist_enabled": true,
+		"oidc.whitelist_enabled": true,
 	}
 
 	result := make(map[string]interface{})

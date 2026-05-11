@@ -149,6 +149,22 @@ func TestGlobalConfigUnifiedAuthEnabled(t *testing.T) {
 	})
 }
 
+func TestGlobalConfigWhitelistEnabledForProvider(t *testing.T) {
+	cfg := GlobalConfig{
+		LDAP: LDAPConfig{WhitelistEnabled: true},
+		OIDC: OIDCConfig{WhitelistEnabled: false},
+	}
+	if !cfg.WhitelistEnabledForProvider("ldap") {
+		t.Fatal("LDAP whitelist should be enabled")
+	}
+	if cfg.WhitelistEnabledForProvider("oidc") {
+		t.Fatal("OIDC whitelist should be disabled")
+	}
+	if cfg.WhitelistEnabledForProvider("local") {
+		t.Fatal("local auth should not use whitelist")
+	}
+}
+
 func TestGlobalConfigSyncIntervalDuration(t *testing.T) {
 	tests := []struct {
 		interval string

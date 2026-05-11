@@ -12,9 +12,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/picoaide/picoaide/internal/auth"
+	"github.com/picoaide/picoaide/internal/authsource"
 	"github.com/picoaide/picoaide/internal/config"
 	dockerpkg "github.com/picoaide/picoaide/internal/docker"
-	"github.com/picoaide/picoaide/internal/ldap"
 	"github.com/picoaide/picoaide/internal/logger"
 	"github.com/picoaide/picoaide/internal/user"
 )
@@ -107,7 +107,14 @@ func (s *Server) handleHealth(c *gin.Context) {
 // 认证 Handler
 // ============================================================
 
-// handleLogin 处理登录请求（先本地认证，再 LDAP）
+func (s *Server) handleLoginMode(c *gin.Context) {
+	writeJSON(c, http.StatusOK, struct {
+		Success  bool   `json:"success"`
+		AuthMode string `json:"auth_mode"`
+	}{true, s.cfg.AuthMode()})
+}
+
+// handleLogin 处理用户名密码登录请求（本地超管或 LDAP）
 func (s *Server) handleLogin(c *gin.Context) {
 	username := c.PostForm("username")
 	password := c.PostForm("password")
@@ -148,8 +155,8 @@ func (s *Server) handleLogin(c *gin.Context) {
 		}
 	}
 
-	// 2. LDAP 认证（如果启用）
-	if !s.cfg.LDAPEnabled() {
+	// 2. 外部用户名密码认证只支持 LDAP；OIDC 走浏览器授权码流程。
+	if s.cfg.AuthMode() != "ldap" {
 		logger.Audit("user.login_failed", "username", username, "reason", "invalid_credentials")
 		writeError(c, http.StatusUnauthorized, "用户名或密码错误")
 		return
@@ -161,13 +168,12 @@ func (s *Server) handleLogin(c *gin.Context) {
 		return
 	}
 
-	if !ldap.Authenticate(s.cfg, username, password) {
+	if !authsource.LDAPAuthenticate(s.cfg, username, password) {
 		writeError(c, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
 
-	whitelist, _ := user.LoadWhitelist()
-	if !user.IsWhitelisted(whitelist, username) {
+	if !user.AllowedByWhitelist(s.cfg, "ldap", username) {
 		writeError(c, http.StatusForbidden, "请联系管理员添加白名单")
 		return
 	}
@@ -192,7 +198,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 	// 异步同步用户的 LDAP 组
 	if s.cfg.LDAP.GroupSearchMode != "" {
 		go func() {
-			if groups, err := ldap.FetchUserGroups(s.cfg, username); err == nil && len(groups) > 0 {
+			if groups, err := authsource.LDAPFetchUserGroups(s.cfg, username); err == nil && len(groups) > 0 {
 				auth.SyncUserGroups(username, groups)
 			}
 		}()
@@ -617,6 +623,15 @@ func (s *Server) handleConfigSave(c *gin.Context) {
 		return
 	}
 
+	oldMode := s.cfg.AuthMode()
+	oldCfg := *s.cfg
+	newMode := authModeFromRaw(raw, oldMode)
+	if !validAuthMode(newMode) {
+		writeError(c, http.StatusBadRequest, "不支持的认证方式: "+newMode)
+		return
+	}
+	normalizeAuthModeInRaw(raw, newMode)
+
 	changedBy := s.getSessionUser(c)
 	if changedBy == "" {
 		changedBy = "admin"
@@ -631,6 +646,68 @@ func (s *Server) handleConfigSave(c *gin.Context) {
 		s.cfg = newCfg
 	}
 
-	writeSuccess(c, "配置已保存")
+	var cleanup *authProviderSwitchCleanupResult
+	if oldMode != newMode {
+		var err error
+		cleanup, err = s.purgeOrdinaryAuthProviderStateForConfig(&oldCfg)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "认证方式已保存，但清理旧认证数据失败: "+err.Error())
+			return
+		}
+		logger.Audit("auth.provider_switch", "operator", changedBy, "old_mode", oldMode, "new_mode", newMode, "users_removed", cleanup.UsersRemoved, "container_records", cleanup.ContainerRecords)
+	}
+
+	if cleanup != nil {
+		writeJSON(c, http.StatusOK, struct {
+			Success bool                             `json:"success"`
+			Message string                           `json:"message"`
+			Cleanup *authProviderSwitchCleanupResult `json:"cleanup"`
+		}{true, "配置已保存，认证方式已切换并清空旧认证数据", cleanup})
+	} else {
+		writeSuccess(c, "配置已保存")
+	}
 	logger.Audit("config.save", "operator", changedBy)
+}
+
+func authModeFromRaw(raw map[string]interface{}, fallback string) string {
+	web, ok := raw["web"].(map[string]interface{})
+	if !ok {
+		return fallback
+	}
+	if mode, ok := web["auth_mode"].(string); ok && strings.TrimSpace(mode) != "" {
+		return strings.ToLower(strings.TrimSpace(mode))
+	}
+	if enabled, ok := web["ldap_enabled"].(bool); ok {
+		if enabled {
+			return "ldap"
+		}
+		return "local"
+	}
+	if enabled, ok := web["ldap_enabled"].(string); ok {
+		b, _ := strconv.ParseBool(enabled)
+		if b {
+			return "ldap"
+		}
+		return "local"
+	}
+	return fallback
+}
+
+func validAuthMode(mode string) bool {
+	switch mode {
+	case "local", "ldap", "oidc":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeAuthModeInRaw(raw map[string]interface{}, mode string) {
+	web, ok := raw["web"].(map[string]interface{})
+	if !ok {
+		web = map[string]interface{}{}
+		raw["web"] = web
+	}
+	web["auth_mode"] = mode
+	web["ldap_enabled"] = mode == "ldap"
 }

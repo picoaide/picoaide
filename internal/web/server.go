@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"log/slog"
 	"net"
 	"net/http"
@@ -18,12 +19,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
-
 	"github.com/picoaide/picoaide/internal/auth"
+	"github.com/picoaide/picoaide/internal/authsource"
 	"github.com/picoaide/picoaide/internal/config"
 	dockerpkg "github.com/picoaide/picoaide/internal/docker"
-	"github.com/picoaide/picoaide/internal/ldap"
 	"github.com/picoaide/picoaide/internal/logger"
 	"github.com/picoaide/picoaide/internal/user"
 )
@@ -110,45 +109,23 @@ func (s *Server) syncLDAPGroups() {
 	if s.cfg.LDAP.GroupSearchMode == "" {
 		return
 	}
-	groupMap, err := ldap.FetchAllGroupsWithHierarchy(s.cfg)
+	result, err := authsource.SyncLDAPGroups(s.cfg, func(username string) error {
+		if rec, _ := auth.GetContainerByUsername(username); rec == nil {
+			return s.initLDAPUser(username)
+		}
+		return nil
+	})
 	if err != nil {
 		slog.Error("LDAP 定时同步失败", "error", err)
 		return
 	}
-	whitelist, _ := user.LoadWhitelist()
-	groupCount := 0
-	groupMembers := make(map[string][]string, len(groupMap))
-	for groupName, group := range groupMap {
-		auth.CreateGroup(groupName, "ldap", "", nil)
-		groupCount++
-		var filtered []string
-		for _, m := range group.Members {
-			if whitelist == nil || whitelist[m] {
-				if err := auth.EnsureExternalUser(m, "user", "ldap"); err != nil {
-					slog.Warn("同步 LDAP 用户失败", "username", m, "error", err)
-					continue
-				}
-				if rec, _ := auth.GetContainerByUsername(m); rec == nil {
-					if err := s.initLDAPUser(m); err != nil {
-						slog.Warn("初始化 LDAP 用户失败", "username", m, "error", err)
-						continue
-					}
-				}
-				filtered = append(filtered, m)
-			}
-		}
-		groupMembers[groupName] = filtered
-	}
-	if err := auth.ReplaceLDAPGroupMembers(groupMembers); err != nil {
-		slog.Error("LDAP 组成员同步失败", "error", err)
-	}
 	if s.cfg.LDAP.GroupSearchMode == "group_search" {
-		s.syncLDAPGroupParents(groupMap)
+		s.syncLDAPGroupParents(result.Hierarchy)
 	}
-	slog.Info("LDAP 定时同步完成", "groups", groupCount)
+	slog.Info("LDAP 定时同步完成", "groups", result.GroupCount)
 }
 
-func (s *Server) syncLDAPGroupParents(groupMap map[string]ldap.GroupHierarchy) {
+func (s *Server) syncLDAPGroupParents(groupMap map[string]authsource.GroupHierarchy) {
 	for groupName := range groupMap {
 		if err := auth.SetGroupParent(groupName, nil); err != nil {
 			slog.Warn("清空 LDAP 组父级失败", "group", groupName, "error", err)
@@ -215,18 +192,98 @@ func (s *Server) sessionUserAllowed(username string) bool {
 	if !s.cfg.UnifiedAuthEnabled() {
 		return auth.UserExists(username)
 	}
-	if !s.cfg.LDAPEnabled() {
+	if s.cfg.AuthMode() == "local" {
 		return false
 	}
 	if auth.UserExists(username) && !auth.IsExternalUser(username) {
 		return false
 	}
-	whitelist, _ := user.LoadWhitelist()
-	if !user.IsWhitelisted(whitelist, username) {
+	if !user.AllowedByWhitelist(s.cfg, s.cfg.AuthMode(), username) {
 		return false
 	}
 	rec, _ := auth.GetContainerByUsername(username)
 	return rec != nil
+}
+
+func (s *Server) oidcStateCookieName() string {
+	return "oidc_state"
+}
+
+func (s *Server) handleOIDCLoginStart(c *gin.Context) {
+	if s.cfg.AuthMode() != "oidc" {
+		writeError(c, http.StatusBadRequest, "OIDC 未启用")
+		return
+	}
+	state, err := randomHex(16)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "生成 OIDC state 失败")
+		return
+	}
+	authURL, err := authsource.OIDCAuthURL(s.cfg, state)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     s.oidcStateCookieName(),
+		Value:    state,
+		Path:     "/api/login/oidc",
+		MaxAge:   600,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	c.Redirect(http.StatusFound, authURL)
+}
+
+func (s *Server) handleOIDCCallback(c *gin.Context) {
+	if s.cfg.AuthMode() != "oidc" {
+		writeError(c, http.StatusBadRequest, "OIDC 未启用")
+		return
+	}
+	stateCookie, err := c.Cookie(s.oidcStateCookieName())
+	if err != nil || stateCookie == "" || stateCookie != c.Query("state") {
+		writeError(c, http.StatusForbidden, "OIDC state 无效")
+		return
+	}
+	http.SetCookie(c.Writer, &http.Cookie{Name: s.oidcStateCookieName(), Value: "", Path: "/api/login/oidc", MaxAge: -1, HttpOnly: true})
+
+	identity, err := authsource.OIDCCompleteLogin(c.Request.Context(), s.cfg, c.Query("code"))
+	if err != nil {
+		writeError(c, http.StatusUnauthorized, err.Error())
+		return
+	}
+	if err := user.ValidateUsername(identity.Username); err != nil {
+		writeError(c, http.StatusBadRequest, "OIDC 用户名不合法: "+err.Error())
+		return
+	}
+	if !user.AllowedByWhitelist(s.cfg, "oidc", identity.Username) {
+		writeError(c, http.StatusForbidden, "请联系管理员添加白名单")
+		return
+	}
+	if err := auth.EnsureExternalUser(identity.Username, "user", "oidc"); err != nil {
+		writeError(c, http.StatusInternalServerError, "同步 OIDC 用户失败: "+err.Error())
+		return
+	}
+	if len(identity.Groups) > 0 {
+		_ = auth.SyncUserGroups(identity.Username, identity.Groups)
+	}
+	initializing := false
+	if rec, _ := auth.GetContainerByUsername(identity.Username); rec == nil {
+		initializing = true
+		if err := s.initExternalUser(identity.Username); err != nil {
+			writeError(c, http.StatusInternalServerError, "OIDC 登录成功，但初始化账号失败: "+err.Error())
+			return
+		}
+	} else if !s.userEnvironmentReady(identity.Username) {
+		initializing = true
+	}
+	s.setSessionCookie(c, s.createSessionToken(identity.Username), 86400)
+	logger.Audit("user.login", "username", identity.Username, "method", "oidc")
+	if initializing {
+		c.Redirect(http.StatusFound, "/initializing")
+		return
+	}
+	c.Redirect(http.StatusFound, "/manage")
 }
 
 // getSessionUser 从请求的 cookie 中提取已登录的用户名
@@ -332,6 +389,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	login := r.Group("/api/login")
 	login.Use(s.rateLimitLogin())
 	login.POST("", s.handleLogin)
+	login.GET("/oidc", s.handleOIDCLoginStart)
+	login.GET("/oidc/callback", s.handleOIDCCallback)
+	r.GET("/api/login/mode", s.handleLoginMode)
 
 	r.POST("/api/logout", s.handleLogout)
 	r.GET("/api/user/info", s.handleUserInfo)

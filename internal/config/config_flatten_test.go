@@ -133,8 +133,10 @@ func TestBuildNestedJsonBlobs(t *testing.T) {
 
 func TestBuildNestedBoolKeys(t *testing.T) {
 	flat := map[string]string{
-		"web.ldap_enabled": "true",
-		"web.tls.enabled":  "false",
+		"web.ldap_enabled":       "true",
+		"web.tls.enabled":        "false",
+		"ldap.whitelist_enabled": "true",
+		"oidc.whitelist_enabled": "false",
 	}
 
 	result := buildNested(flat)
@@ -146,6 +148,14 @@ func TestBuildNestedBoolKeys(t *testing.T) {
 	tls := web["tls"].(map[string]interface{})
 	if tls["enabled"] != false {
 		t.Errorf("web.tls.enabled should be bool false, got %v", tls["enabled"])
+	}
+	ldap := result["ldap"].(map[string]interface{})
+	if ldap["whitelist_enabled"] != true {
+		t.Errorf("ldap.whitelist_enabled should be bool true, got %v", ldap["whitelist_enabled"])
+	}
+	oidc := result["oidc"].(map[string]interface{})
+	if oidc["whitelist_enabled"] != false {
+		t.Errorf("oidc.whitelist_enabled should be bool false, got %v", oidc["whitelist_enabled"])
 	}
 }
 

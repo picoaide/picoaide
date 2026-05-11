@@ -22,9 +22,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/picoaide/picoaide/internal/auth"
+	"github.com/picoaide/picoaide/internal/authsource"
 	"github.com/picoaide/picoaide/internal/config"
 	dockerpkg "github.com/picoaide/picoaide/internal/docker"
-	"github.com/picoaide/picoaide/internal/ldap"
 	"github.com/picoaide/picoaide/internal/logger"
 	"github.com/picoaide/picoaide/internal/user"
 	"github.com/picoaide/picoaide/internal/util"
@@ -49,6 +49,15 @@ type skillRepoInput struct {
 	RefType     string                     `json:"ref_type"`
 	Public      bool                       `json:"public"`
 	Credentials []skillRepoCredentialInput `json:"credentials"`
+}
+
+type authProviderSwitchCleanupResult struct {
+	ContainersRemoved int   `json:"containers_removed"`
+	ContainerRecords  int64 `json:"container_records"`
+	UsersRemoved      int64 `json:"users_removed"`
+	UsersScanned      int   `json:"users_scanned"`
+	GroupsCleared     bool  `json:"groups_cleared"`
+	DirectoriesPurged bool  `json:"directories_purged"`
 }
 
 func normalizeSkillRepoCredentialInput(input skillRepoCredentialInput, fallbackName string) config.SkillRepoCredential {
@@ -706,6 +715,10 @@ func (s *Server) defaultUserImageTag(ctx context.Context) (string, error) {
 }
 
 func (s *Server) initLDAPUser(username string) error {
+	return s.initExternalUser(username)
+}
+
+func (s *Server) initExternalUser(username string) error {
 	if err := user.ValidateUsername(username); err != nil {
 		return err
 	}
@@ -726,6 +739,53 @@ func (s *Server) initLDAPUser(username string) error {
 	return nil
 }
 
+func (s *Server) purgeOrdinaryAuthProviderState() (*authProviderSwitchCleanupResult, error) {
+	return s.purgeOrdinaryAuthProviderStateForConfig(s.cfg)
+}
+
+func (s *Server) purgeOrdinaryAuthProviderStateForConfig(cfg *config.GlobalConfig) (*authProviderSwitchCleanupResult, error) {
+	result := &authProviderSwitchCleanupResult{}
+
+	containers, err := auth.GetAllContainers()
+	if err != nil {
+		return result, err
+	}
+	result.UsersScanned = len(containers)
+	if s.dockerAvailable {
+		ctx := context.Background()
+		for _, rec := range containers {
+			if rec.ContainerID != "" {
+				_ = dockerpkg.Remove(ctx, rec.ContainerID)
+				result.ContainersRemoved++
+			}
+			_ = dockerpkg.RemoveByUsername(ctx, rec.Username)
+		}
+	}
+	records, err := auth.ClearAllContainers()
+	if err != nil {
+		return result, err
+	}
+	result.ContainerRecords = records
+
+	usersRemoved, err := auth.DeleteAllRegularUsers()
+	if err != nil {
+		return result, err
+	}
+	result.UsersRemoved = usersRemoved
+
+	if err := auth.ClearAllGroups(); err != nil {
+		return result, err
+	}
+	result.GroupsCleared = true
+
+	if err := user.RemoveAllUserData(cfg); err != nil {
+		return result, err
+	}
+	result.DirectoriesPurged = true
+
+	return result, nil
+}
+
 type ldapUserSyncResult struct {
 	LDAPUserCount        int
 	AllowedUserCount     int
@@ -743,30 +803,18 @@ func (s *Server) syncLDAPUsersFromDirectory(cleanupStaleUsers bool) (*ldapUserSy
 		return nil, fmt.Errorf("LDAP 未启用")
 	}
 
-	ldapUsers, err := ldap.FetchUsers(s.cfg)
+	userResult, err := authsource.SyncLDAPUserDirectory(s.cfg)
 	if err != nil {
 		return nil, err
 	}
-
-	whitelist, _ := user.LoadWhitelist()
-	result := &ldapUserSyncResult{LDAPUserCount: len(ldapUsers)}
-	allowedSet := make(map[string]bool)
-	var allowedUsers []string
-	for _, username := range ldapUsers {
-		username = strings.TrimSpace(username)
-		if username == "" || !user.IsWhitelisted(whitelist, username) {
-			continue
-		}
-		if err := user.ValidateUsername(username); err != nil {
-			result.InvalidUsernameCount++
-			continue
-		}
-		if !allowedSet[username] {
-			allowedSet[username] = true
-			allowedUsers = append(allowedUsers, username)
-		}
+	result := &ldapUserSyncResult{
+		LDAPUserCount:        userResult.ProviderUserCount,
+		AllowedUserCount:     userResult.AllowedUserCount,
+		LocalUserSynced:      userResult.LocalUserSynced,
+		DeletedLocalAuth:     userResult.DeletedLocalAuth,
+		InvalidUsernameCount: userResult.InvalidUsernameCount,
+		GroupMemberCount:     userResult.GroupMemberCount,
 	}
-	result.AllowedUserCount = len(allowedUsers)
 
 	ctx := contextWithTimeout(10)
 	imageTag, err := s.defaultUserImageTag(ctx)
@@ -778,12 +826,7 @@ func (s *Server) syncLDAPUsersFromDirectory(cleanupStaleUsers bool) (*ldapUserSy
 		defaultImageRef = s.cfg.Image.Name + ":" + imageTag
 	}
 
-	for _, username := range allowedUsers {
-		if err := auth.EnsureExternalUser(username, "user", "ldap"); err != nil {
-			return nil, err
-		}
-		result.LocalUserSynced++
-
+	for _, username := range userResult.AllowedUsers {
 		rec, err := auth.GetContainerByUsername(username)
 		if err != nil {
 			return nil, err
@@ -810,30 +853,6 @@ func (s *Server) syncLDAPUsersFromDirectory(cleanupStaleUsers bool) (*ldapUserSy
 		} else if rec.Image == "" {
 			return nil, fmt.Errorf("用户 %s 缺少镜像，但未找到可用镜像，请先在镜像管理中拉取镜像", username)
 		}
-
-		if s.cfg.LDAP.GroupSearchMode != "" {
-			if groups, err := ldap.FetchUserGroups(s.cfg, username); err == nil {
-				if err := auth.SyncUserGroups(username, groups); err == nil {
-					result.GroupMemberCount += len(groups)
-				}
-			}
-		}
-	}
-
-	localUsers, err := auth.GetAllLocalUsers()
-	if err != nil {
-		return nil, err
-	}
-	for _, localUser := range localUsers {
-		if localUser.Role == "superadmin" {
-			continue
-		}
-		if localUser.Source != "" && localUser.Source != "local" {
-			continue
-		}
-		if err := auth.DeleteUser(localUser.Username); err == nil {
-			result.DeletedLocalAuth++
-		}
 	}
 
 	if cleanupStaleUsers {
@@ -842,7 +861,7 @@ func (s *Server) syncLDAPUsersFromDirectory(cleanupStaleUsers bool) (*ldapUserSy
 			return nil, err
 		}
 		for _, rec := range containers {
-			if allowedSet[rec.Username] || auth.IsSuperadmin(rec.Username) {
+			if userResult.AllowedSet[rec.Username] || auth.IsSuperadmin(rec.Username) {
 				continue
 			}
 			if rec.ContainerID != "" && s.dockerAvailable {
@@ -853,6 +872,10 @@ func (s *Server) syncLDAPUsersFromDirectory(cleanupStaleUsers bool) (*ldapUserSy
 				result.ArchivedStaleUsers++
 			}
 		}
+	}
+
+	if err := user.RemoveAllUserData(s.cfg); err != nil {
+		return nil, fmt.Errorf("清空用户目录和归档目录失败: %w", err)
 	}
 
 	return result, nil
@@ -1007,10 +1030,8 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	if s.cfg.UnifiedAuthEnabled() {
-		writeError(c, http.StatusForbidden, "统一认证模式下不允许手动创建用户")
-		return
-	}
+	writeError(c, http.StatusForbidden, "普通用户由当前认证源同步，不允许手动创建")
+	return
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -1080,10 +1101,8 @@ func (s *Server) handleAdminUserDelete(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	if s.cfg.UnifiedAuthEnabled() {
-		writeError(c, http.StatusForbidden, "统一认证模式下不允许删除用户")
-		return
-	}
+	writeError(c, http.StatusForbidden, "普通用户由当前认证源同步，不允许手动删除")
+	return
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -1705,7 +1724,7 @@ func (s *Server) handleAdminAuthTestLDAP(c *gin.Context) {
 		return
 	}
 
-	users, err := ldap.TestConnection(host, bindDN, bindPassword, baseDN, filter, usernameAttr)
+	users, err := authsource.LDAPTestConnection(host, bindDN, bindPassword, baseDN, filter, usernameAttr)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err.Error())
 		return
@@ -1713,21 +1732,21 @@ func (s *Server) handleAdminAuthTestLDAP(c *gin.Context) {
 
 	// 测试组查询（失败不影响用户测试结果）
 	var groupError string
-	groups, gerr := ldap.TestGroups(host, bindDN, bindPassword, baseDN, groupSearchMode, groupBaseDN, groupFilter, groupMemberAttr, usernameAttr)
+	groups, gerr := authsource.LDAPTestGroups(host, bindDN, bindPassword, baseDN, groupSearchMode, groupBaseDN, groupFilter, groupMemberAttr, usernameAttr)
 	if gerr != nil {
 		groupError = gerr.Error()
 	}
 	if groups == nil {
-		groups = []ldap.GroupPreview{}
+		groups = []authsource.GroupPreview{}
 	}
 
 	writeJSON(c, http.StatusOK, struct {
-		Success    bool                `json:"success"`
-		Message    string              `json:"message"`
-		UserCount  int                 `json:"user_count"`
-		Users      []string            `json:"users"`
-		Groups     []ldap.GroupPreview `json:"groups"`
-		GroupError string              `json:"group_error"`
+		Success    bool                      `json:"success"`
+		Message    string                    `json:"message"`
+		UserCount  int                       `json:"user_count"`
+		Users      []string                  `json:"users"`
+		Groups     []authsource.GroupPreview `json:"groups"`
+		GroupError string                    `json:"group_error"`
 	}{true, fmt.Sprintf("连接成功，找到 %d 个用户", len(users)), len(users), users, groups, groupError})
 }
 
@@ -1744,7 +1763,7 @@ func (s *Server) handleAdminAuthLDAPUsers(c *gin.Context) {
 	source := strings.ToLower(strings.TrimSpace(c.Query("source")))
 	if source == "directory" || source == "remote" || !s.cfg.UnifiedAuthEnabled() {
 		var err error
-		users, err = ldap.FetchUsers(s.cfg)
+		users, err = authsource.LDAPFetchUsers(s.cfg)
 		if err != nil {
 			writeError(c, http.StatusInternalServerError, err.Error())
 			return
@@ -1803,6 +1822,10 @@ func (s *Server) handleAdminAuthSyncUsers(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "LDAP 未启用")
 		return
 	}
+	if s.cfg.AuthMode() != "ldap" {
+		writeError(c, http.StatusBadRequest, "当前认证方式不是 LDAP")
+		return
+	}
 
 	cleanupStaleUsers := c.PostForm("cleanup") == "true"
 	result, err := s.syncLDAPUsersFromDirectory(cleanupStaleUsers)
@@ -1820,7 +1843,7 @@ func (s *Server) handleAdminAuthSyncUsers(c *gin.Context) {
 		result.DeletedLocalAuth,
 	)
 	if cleanupStaleUsers {
-		message += fmt.Sprintf("，归档过期账号 %d 个", result.ArchivedStaleUsers)
+		message += fmt.Sprintf("，清理过期账号 %d 个", result.ArchivedStaleUsers)
 	}
 	if result.InvalidUsernameCount > 0 {
 		message += fmt.Sprintf("，跳过非法用户名 %d 个", result.InvalidUsernameCount)
@@ -2677,10 +2700,8 @@ func (s *Server) handleAdminGroupCreate(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	if s.cfg.UnifiedAuthEnabled() {
-		writeError(c, http.StatusForbidden, "统一认证模式下不允许手动创建组，请通过 LDAP 同步")
-		return
-	}
+	writeError(c, http.StatusForbidden, "用户组由当前认证源同步，不允许手动创建")
+	return
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -2716,10 +2737,8 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	if s.cfg.UnifiedAuthEnabled() {
-		writeError(c, http.StatusForbidden, "统一认证模式下不允许手动删除组，请通过 LDAP 同步")
-		return
-	}
+	writeError(c, http.StatusForbidden, "用户组由当前认证源同步，不允许手动删除")
+	return
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -2744,10 +2763,8 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	if s.cfg.UnifiedAuthEnabled() {
-		writeError(c, http.StatusForbidden, "统一认证模式下不允许手动修改组成员，请通过 LDAP 同步")
-		return
-	}
+	writeError(c, http.StatusForbidden, "用户组成员由当前认证源同步，不允许手动修改")
+	return
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -2785,10 +2802,8 @@ func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	if s.cfg.UnifiedAuthEnabled() {
-		writeError(c, http.StatusForbidden, "统一认证模式下不允许手动修改组成员，请通过 LDAP 同步")
-		return
-	}
+	writeError(c, http.StatusForbidden, "用户组成员由当前认证源同步，不允许手动修改")
+	return
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -2976,45 +2991,20 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
 	groupCount := 0
 	userCount := 0
 	if s.cfg.LDAP.GroupSearchMode != "" {
-		groupMap, err := ldap.FetchAllGroupsWithHierarchy(s.cfg)
-		if err != nil {
-			writeError(c, http.StatusInternalServerError, "获取 LDAP 组失败: "+err.Error())
-			return
-		}
-
-		// 获取白名单
-		whitelist, _ := user.LoadWhitelist()
-		groupMembers := make(map[string][]string, len(groupMap))
-
-		for groupName, group := range groupMap {
-			// 创建组（如果不存在）
-			auth.CreateGroup(groupName, "ldap", "", nil)
-			groupCount++
-
-			// 过滤白名单用户
-			var filtered []string
-			for _, m := range group.Members {
-				if whitelist == nil || whitelist[m] {
-					if err := auth.EnsureExternalUser(m, "user", "ldap"); err != nil {
-						continue
-					}
-					if rec, _ := auth.GetContainerByUsername(m); rec == nil {
-						if err := s.initLDAPUser(m); err != nil {
-							continue
-						}
-					}
-					filtered = append(filtered, m)
-				}
+		groupResult, err := authsource.SyncLDAPGroups(s.cfg, func(username string) error {
+			if rec, _ := auth.GetContainerByUsername(username); rec == nil {
+				return s.initLDAPUser(username)
 			}
-			groupMembers[groupName] = filtered
-			userCount += len(filtered)
-		}
-		if err := auth.ReplaceLDAPGroupMembers(groupMembers); err != nil {
-			writeError(c, http.StatusInternalServerError, "同步 LDAP 组成员失败: "+err.Error())
+			return nil
+		})
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "同步 LDAP 组失败: "+err.Error())
 			return
 		}
+		groupCount = groupResult.GroupCount
+		userCount = groupResult.MemberCount
 		if s.cfg.LDAP.GroupSearchMode == "group_search" {
-			s.syncLDAPGroupParents(groupMap)
+			s.syncLDAPGroupParents(groupResult.Hierarchy)
 		}
 	}
 

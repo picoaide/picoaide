@@ -68,6 +68,14 @@ func IsWhitelisted(whitelist map[string]bool, username string) bool {
 	return whitelist[username]
 }
 
+func AllowedByWhitelist(cfg *config.GlobalConfig, provider, username string) bool {
+	if cfg == nil || !cfg.WhitelistEnabledForProvider(provider) {
+		return true
+	}
+	whitelist, _ := LoadWhitelist()
+	return IsWhitelisted(whitelist, username)
+}
+
 // ResolveUsersRoot 解析用户根目录路径
 func ResolveUsersRoot(cfg *config.GlobalConfig) string {
 	if filepath.IsAbs(cfg.UsersRoot) {
@@ -208,6 +216,24 @@ func ArchiveUser(cfg *config.GlobalConfig, username string) error {
 
 	if err := os.Rename(srcDir, dstDir); err != nil {
 		return fmt.Errorf("归档 %s 失败: %w", username, err)
+	}
+	return nil
+}
+
+// RemoveAllUserData removes ordinary user workspace and archive data. It is
+// used when switching authentication providers to prevent identity data from
+// one provider from leaking into the next provider's users.
+func RemoveAllUserData(cfg *config.GlobalConfig) error {
+	for _, dir := range []string{ResolveUsersRoot(cfg), ResolveArchiveRoot(cfg)} {
+		if dir == "" || dir == "." || dir == string(filepath.Separator) {
+			return fmt.Errorf("拒绝清空危险目录: %s", dir)
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
 	}
 	return nil
 }

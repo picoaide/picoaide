@@ -5,6 +5,24 @@ var loginUser = document.getElementById('login-user');
 var loginPass = document.getElementById('login-pass');
 var loginMsg = document.getElementById('login-msg');
 var loginBtn = document.getElementById('login-btn');
+var loginHeading = document.querySelector('.login-heading p');
+var oidcButton;
+
+async function setupLoginMode() {
+  try {
+    var info = await apiJSON('GET', '/api/login/mode');
+    if (info.auth_mode === 'oidc') {
+      if (loginHeading) loginHeading.textContent = '普通用户使用企业统一认证，管理员可继续使用本地超管密码。';
+      oidcButton = document.createElement('button');
+      oidcButton.className = 'btn btn-primary login-submit';
+      oidcButton.type = 'button';
+      oidcButton.textContent = '企业统一登录';
+      oidcButton.addEventListener('click', function() { window.location.href = '/api/login/oidc'; });
+      loginForm.parentNode.insertBefore(oidcButton, loginForm);
+      loginBtn.textContent = '管理员登录';
+    }
+  } catch {}
+}
 
 function redirectByRole(info) {
   if (info.role === 'superadmin') {
@@ -59,4 +77,7 @@ loginForm.addEventListener('submit', async function(e) {
   }
 });
 
-document.addEventListener('DOMContentLoaded', checkExistingSession);
+document.addEventListener('DOMContentLoaded', function() {
+  setupLoginMode();
+  checkExistingSession();
+});

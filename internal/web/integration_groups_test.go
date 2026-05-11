@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/picoaide/picoaide/internal/auth"
-	"github.com/picoaide/picoaide/internal/ldap"
+	"github.com/picoaide/picoaide/internal/authsource"
 )
 
 func TestWhitelist_GetEmpty(t *testing.T) {
@@ -30,63 +30,42 @@ func TestGroups_ListEmpty(t *testing.T) {
 	assertStatus(t, resp, 200)
 }
 
-func TestGroupCreate_Success(t *testing.T) {
+func TestGroupCreate_Forbidden(t *testing.T) {
 	env := setupTestServer(t)
-	// 设置为本地模式以允许手动创建组
-	env.Cfg.Web.AuthMode = "local"
 	form := url.Values{
 		"name":        {"dev-team"},
 		"description": {"Developers"},
 	}
 	resp := env.postForm(t, "/api/admin/groups/create", "testadmin", form)
-	assertStatus(t, resp, 200)
+	assertStatus(t, resp, 403)
 }
 
-func TestGroupCreate_Duplicate(t *testing.T) {
-	env := setupTestServer(t)
-	env.Cfg.Web.AuthMode = "local"
-	form := url.Values{"name": {"dev-team"}}
-	env.postForm(t, "/api/admin/groups/create", "testadmin", form)
-	resp := env.postForm(t, "/api/admin/groups/create", "testadmin", form)
-	if resp.StatusCode != 400 && resp.StatusCode != 500 {
-		t.Errorf("duplicate create status=%d", resp.StatusCode)
-	}
-}
-
-func TestGroupDelete_Success(t *testing.T) {
+func TestGroupDelete_Forbidden(t *testing.T) {
 	env := setupTestServer(t)
 	if err := auth.CreateGroup("to-delete", "local", "", nil); err != nil {
 		t.Fatalf("CreateGroup: %v", err)
 	}
 	form := url.Values{"name": {"to-delete"}}
 	resp := env.postForm(t, "/api/admin/groups/delete", "testadmin", form)
-	assertStatus(t, resp, 200)
+	assertStatus(t, resp, 403)
 }
 
-func TestGroupDelete_Nonexistent(t *testing.T) {
-	env := setupTestServer(t)
-	form := url.Values{"name": {"no-such-group"}}
-	resp := env.postForm(t, "/api/admin/groups/delete", "testadmin", form)
-	if resp.StatusCode != 400 && resp.StatusCode != 404 {
-		t.Errorf("status=%d", resp.StatusCode)
-	}
-}
-
-func TestGroupMembers_AddListRemove(t *testing.T) {
+func TestGroupMembers_ListAndMutationForbidden(t *testing.T) {
 	env := setupTestServer(t)
 	if err := auth.CreateGroup("team-a", "local", "", nil); err != nil {
 		t.Fatalf("CreateGroup: %v", err)
 	}
+	if err := auth.AddUsersToGroup("team-a", []string{"testuser"}); err != nil {
+		t.Fatalf("AddUsersToGroup: %v", err)
+	}
 
-	// 添加成员
 	form := url.Values{
 		"group_name": {"team-a"},
-		"usernames":  {"testuser"},
+		"usernames":  {"another-user"},
 	}
 	resp := env.postForm(t, "/api/admin/groups/members/add", "testadmin", form)
-	assertStatus(t, resp, 200)
+	assertStatus(t, resp, 403)
 
-	// 列出成员
 	resp = env.get(t, "/api/admin/groups/members?name=team-a", "testadmin")
 	assertStatus(t, resp, 200)
 	var result struct {
@@ -103,13 +82,12 @@ func TestGroupMembers_AddListRemove(t *testing.T) {
 		t.Error("testuser should be in team-a members")
 	}
 
-	// 移除成员
 	form = url.Values{
 		"group_name": {"team-a"},
 		"username":   {"testuser"},
 	}
 	resp = env.postForm(t, "/api/admin/groups/members/remove", "testadmin", form)
-	assertStatus(t, resp, 200)
+	assertStatus(t, resp, 403)
 }
 
 func TestGroupMutations_ForbiddenInUnifiedAuthExceptWhitelist(t *testing.T) {
@@ -188,7 +166,7 @@ func TestSyncLDAPGroupParentsUpdatesListHierarchy(t *testing.T) {
 		t.Fatalf("CreateGroup child: %v", err)
 	}
 
-	env.Server.syncLDAPGroupParents(map[string]ldap.GroupHierarchy{
+	env.Server.syncLDAPGroupParents(map[string]authsource.GroupHierarchy{
 		"ldap-parent": {SubGroups: []string{"ldap-child"}},
 		"ldap-child":  {},
 	})

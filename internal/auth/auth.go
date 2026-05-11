@@ -726,6 +726,84 @@ func DeleteUser(username string) error {
 	return nil
 }
 
+// DeleteAllRegularUsers removes all non-superadmin user records and related
+// user-scoped database state. Local superadmin accounts are intentionally kept.
+func DeleteAllRegularUsers() (int64, error) {
+	if err := ensureDB(); err != nil {
+		return 0, err
+	}
+	session := engine.NewSession()
+	defer session.Close()
+	if err := session.Begin(); err != nil {
+		return 0, err
+	}
+
+	users := make([]LocalUser, 0)
+	if err := session.Where("role != ?", "superadmin").Find(&users); err != nil {
+		_ = session.Rollback()
+		return 0, err
+	}
+	usernames := make([]string, 0, len(users))
+	for _, u := range users {
+		usernames = append(usernames, u.Username)
+	}
+
+	for _, username := range usernames {
+		if _, err := session.Where("username = ?", username).Delete(&UserGroup{}); err != nil {
+			_ = session.Rollback()
+			return 0, err
+		}
+		if _, err := session.Where("username = ?", username).Delete(&UserChannel{}); err != nil {
+			_ = session.Rollback()
+			return 0, err
+		}
+	}
+	affected, err := session.Where("role != ?", "superadmin").Delete(&LocalUser{})
+	if err != nil {
+		_ = session.Rollback()
+		return 0, err
+	}
+	return affected, session.Commit()
+}
+
+// ClearAllGroups removes all groups and their bindings. Group membership is
+// source-owned and must be rehydrated by the active authentication provider.
+func ClearAllGroups() error {
+	if err := ensureDB(); err != nil {
+		return err
+	}
+	session := engine.NewSession()
+	defer session.Close()
+	if err := session.Begin(); err != nil {
+		return err
+	}
+	if _, err := session.Exec("DELETE FROM user_groups"); err != nil {
+		_ = session.Rollback()
+		return err
+	}
+	if _, err := session.Exec("DELETE FROM group_skills"); err != nil {
+		_ = session.Rollback()
+		return err
+	}
+	if _, err := session.Exec("DELETE FROM groups"); err != nil {
+		_ = session.Rollback()
+		return err
+	}
+	return session.Commit()
+}
+
+// ClearAllContainers removes all ordinary user container records.
+func ClearAllContainers() (int64, error) {
+	if err := ensureDB(); err != nil {
+		return 0, err
+	}
+	res, err := engine.Exec("DELETE FROM containers")
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // ============================================================
 // 容器记录管理
 // ============================================================
@@ -1094,8 +1172,7 @@ func SyncUserGroups(username string, groupNames []string) error {
 	return session.Commit()
 }
 
-// ReplaceLDAPGroupMembers 用 LDAP 当前结果整体替换 LDAP 组成员关系。
-func ReplaceLDAPGroupMembers(groupMembers map[string][]string) error {
+func ReplaceGroupMembersBySource(source string, groupMembers map[string][]string) error {
 	if err := ensureDB(); err != nil {
 		return err
 	}
@@ -1107,13 +1184,13 @@ func ReplaceLDAPGroupMembers(groupMembers map[string][]string) error {
 	}
 
 	for groupName := range groupMembers {
-		if _, err := session.Exec("INSERT OR IGNORE INTO groups (name, source) VALUES (?, 'ldap')", groupName); err != nil {
+		if _, err := session.Exec("INSERT OR IGNORE INTO groups (name, source) VALUES (?, ?)", groupName, source); err != nil {
 			_ = session.Rollback()
 			return err
 		}
 	}
 
-	if _, err := session.Exec("DELETE FROM user_groups WHERE group_id IN (SELECT id FROM groups WHERE source = 'ldap')"); err != nil {
+	if _, err := session.Exec("DELETE FROM user_groups WHERE group_id IN (SELECT id FROM groups WHERE source = ?)", source); err != nil {
 		_ = session.Rollback()
 		return err
 	}
@@ -1137,6 +1214,11 @@ func ReplaceLDAPGroupMembers(groupMembers map[string][]string) error {
 	}
 
 	return session.Commit()
+}
+
+// ReplaceLDAPGroupMembers 用 LDAP 当前结果整体替换 LDAP 组成员关系。
+func ReplaceLDAPGroupMembers(groupMembers map[string][]string) error {
+	return ReplaceGroupMembersBySource("ldap", groupMembers)
 }
 
 // BindSkillToGroup 绑定技能到组

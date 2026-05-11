@@ -168,6 +168,12 @@ func Remove(ctx context.Context, containerID string) error {
 	return cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
 }
 
+// RemoveByUsername removes a PicoAide user container even when the database no
+// longer has a valid container ID.
+func RemoveByUsername(ctx context.Context, username string) error {
+	return cli.ContainerRemove(ctx, "picoaide-"+username, container.RemoveOptions{Force: true})
+}
+
 // ContainerStatus 返回容器状态字符串（running / exited / ...）
 func ContainerStatus(ctx context.Context, containerID string) string {
 	if containerID == "" {

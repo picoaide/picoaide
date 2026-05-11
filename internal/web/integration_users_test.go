@@ -122,24 +122,11 @@ func TestAdminAuthLDAPUsers_DirectorySourceUsesLDAP(t *testing.T) {
 	}
 }
 
-func TestAdminUserCreate_InvalidUsername(t *testing.T) {
+func TestAdminUserCreate_Forbidden(t *testing.T) {
 	env := setupTestServer(t)
-	// 设置为本地模式，否则统一认证会先拒绝
-	env.Cfg.Web.AuthMode = "local"
 	form := url.Values{"username": {"bad/user"}}
 	resp := env.postForm(t, "/api/admin/users/create", "testadmin", form)
-	assertStatus(t, resp, 400)
-}
-
-func TestAdminUserCreate_Duplicate(t *testing.T) {
-	env := setupTestServer(t)
-	env.Cfg.Web.AuthMode = "local"
-	form := url.Values{"username": {"testuser"}}
-	resp := env.postForm(t, "/api/admin/users/create", "testadmin", form)
-	// 用户已存在，应该失败
-	if resp.StatusCode != 400 && resp.StatusCode != 500 {
-		t.Errorf("status=%d, want 400 or 500", resp.StatusCode)
-	}
+	assertStatus(t, resp, 403)
 }
 
 func TestSuperadmins_List(t *testing.T) {

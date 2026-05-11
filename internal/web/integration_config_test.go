@@ -9,8 +9,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/picoaide/picoaide/internal/auth"
+	"github.com/picoaide/picoaide/internal/user"
 )
 
 func TestConfig_Get_Superadmin(t *testing.T) {
@@ -61,6 +66,54 @@ func TestConfig_SaveAndGet(t *testing.T) {
 	}
 	if cfg["users_root"] != "./custom-users" {
 		t.Errorf("users_root=%v", cfg["users_root"])
+	}
+}
+
+func TestConfig_AuthModeSwitchPurgesOrdinaryUserState(t *testing.T) {
+	env := setupTestServer(t)
+	userFile := filepath.Join(user.UserDir(env.Cfg, "testuser"), "leftover.txt")
+	archiveFile := filepath.Join(user.ResolveArchiveRoot(env.Cfg), "old", "leftover.txt")
+	if err := os.WriteFile(userFile, []byte("user"), 0644); err != nil {
+		t.Fatalf("write user leftover: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(archiveFile), 0755); err != nil {
+		t.Fatalf("mkdir archive leftover: %v", err)
+	}
+	if err := os.WriteFile(archiveFile, []byte("archive"), 0644); err != nil {
+		t.Fatalf("write archive leftover: %v", err)
+	}
+
+	resp := env.get(t, "/api/config", "testadmin")
+	assertStatus(t, resp, 200)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+	cfg["web"].(map[string]interface{})["auth_mode"] = "oidc"
+	configJSON, _ := json.Marshal(cfg)
+	resp = env.postForm(t, "/api/config", "testadmin", url.Values{"config": {string(configJSON)}})
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(body))
+	}
+	assertStatus(t, resp, 200)
+
+	if auth.UserExists("testuser") {
+		t.Fatal("ordinary local user should be removed")
+	}
+	if rec, _ := auth.GetContainerByUsername("testuser"); rec != nil {
+		t.Fatal("container record should be removed")
+	}
+	if _, err := os.Stat(userFile); !os.IsNotExist(err) {
+		t.Fatalf("user leftover should be removed, err=%v", err)
+	}
+	if _, err := os.Stat(archiveFile); !os.IsNotExist(err) {
+		t.Fatalf("archive leftover should be removed, err=%v", err)
+	}
+	if !auth.IsSuperadmin("testadmin") {
+		t.Fatal("local superadmin should be kept")
 	}
 }
 
