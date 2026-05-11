@@ -82,11 +82,21 @@ func ensureSessionSecret() (string, error) {
 	return secret, nil
 }
 
-// syncLDAPGroups 执行 LDAP 组同步
-func (s *Server) syncLDAPGroups() {
+// syncLDAPAuto 执行 LDAP 自动同步（用户目录 + 组）
+func (s *Server) syncLDAPAuto() {
 	if !s.cfg.LDAPEnabled() {
 		return
 	}
+
+	// 同步用户目录
+	userResult, err := authsource.SyncLDAPUserDirectory(s.cfg)
+	if err != nil {
+		slog.Error("LDAP 自动同步用户失败", "error", err)
+	} else {
+		slog.Info("LDAP 自动同步用户完成", "synced", userResult.LocalUserSynced, "allowed", userResult.AllowedUserCount)
+	}
+
+	// 同步组
 	if s.cfg.LDAP.GroupSearchMode == "" {
 		return
 	}
@@ -97,13 +107,13 @@ func (s *Server) syncLDAPGroups() {
 		return nil
 	})
 	if err != nil {
-		slog.Error("LDAP 定时同步失败", "error", err)
+		slog.Error("LDAP 自动同步组失败", "error", err)
 		return
 	}
 	if s.cfg.LDAP.GroupSearchMode == "group_search" {
 		s.syncLDAPGroupParents(result.Hierarchy)
 	}
-	slog.Info("LDAP 定时同步完成", "groups", result.GroupCount)
+	slog.Info("LDAP 自动同步组完成", "groups", result.GroupCount, "members", result.MemberCount)
 }
 
 func (s *Server) syncLDAPGroupParents(groupMap map[string]authsource.GroupHierarchy) {
@@ -578,10 +588,12 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			slog.Info("LDAP 定时同步已启动", "interval", interval)
+			// 启动时立即执行首次同步
+			s.syncLDAPAuto()
 			for {
 				select {
 				case <-ticker.C:
-					s.syncLDAPGroups()
+					s.syncLDAPAuto()
 				case <-ldapStop:
 					slog.Info("LDAP 定时同步已停止")
 					return
