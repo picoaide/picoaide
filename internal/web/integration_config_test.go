@@ -69,6 +69,67 @@ func TestConfig_SaveAndGet(t *testing.T) {
 	}
 }
 
+func TestConfig_DoesNotExposeOrPersistSessionSecretConfig(t *testing.T) {
+	env := setupTestServer(t)
+	engine, err := auth.GetEngine()
+	if err != nil {
+		t.Fatalf("GetEngine: %v", err)
+	}
+	if _, err := engine.Exec(
+		"INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
+		"internal.session_secret",
+		"server-secret",
+	); err != nil {
+		t.Fatalf("insert internal session secret: %v", err)
+	}
+	if _, err := engine.Exec(
+		"INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
+		"web.password",
+		"legacy-secret",
+	); err != nil {
+		t.Fatalf("insert legacy web.password: %v", err)
+	}
+
+	resp := env.get(t, "/api/config", "testadmin")
+	assertStatus(t, resp, 200)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+	if _, ok := cfg["internal"]; ok {
+		t.Fatal("internal settings should not be exposed")
+	}
+	if web, ok := cfg["web"].(map[string]interface{}); ok {
+		if _, ok := web["password"]; ok {
+			t.Fatal("web.password should not be exposed")
+		}
+	}
+
+	cfg["internal"] = map[string]interface{}{"session_secret": "client-secret"}
+	cfg["web"].(map[string]interface{})["password"] = "client-secret"
+	configJSON, _ := json.Marshal(cfg)
+	resp = env.postForm(t, "/api/config", "testadmin", url.Values{"config": {string(configJSON)}})
+	assertStatus(t, resp, 200)
+
+	var setting auth.Setting
+	has, err := engine.Where("key = ?", "internal.session_secret").Get(&setting)
+	if err != nil {
+		t.Fatalf("query internal session secret: %v", err)
+	}
+	if !has || setting.Value != "server-secret" {
+		t.Fatalf("internal session secret should be unchanged, has=%v value=%q", has, setting.Value)
+	}
+	has, err = engine.Where("key = ?", "web.password").Get(&setting)
+	if err != nil {
+		t.Fatalf("query legacy web.password: %v", err)
+	}
+	if has {
+		t.Fatal("legacy web.password should be deleted on config save")
+	}
+}
+
 func TestConfig_AuthModeSwitchPurgesOrdinaryUserState(t *testing.T) {
 	env := setupTestServer(t)
 	userFile := filepath.Join(user.UserDir(env.Cfg, "testuser"), "leftover.txt")

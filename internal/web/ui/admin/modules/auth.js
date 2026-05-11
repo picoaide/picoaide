@@ -45,8 +45,6 @@ export async function init(ctx) {
     $('#auth-mode').value = mode;
     updateProviderVisibility(mode);
 
-    $('#session-secret').value = rawConfig.web?.password || '';
-
     $('#ldap-host').value = rawConfig.ldap?.host || '';
     $('#ldap-bind-dn').value = rawConfig.ldap?.bind_dn || '';
     $('#ldap-bind-password').value = rawConfig.ldap?.bind_password || '';
@@ -117,7 +115,7 @@ export async function init(ctx) {
     if (!rawConfig.web) rawConfig.web = {};
     rawConfig.web.ldap_enabled = mode === 'ldap';
     rawConfig.web.auth_mode = mode;
-    rawConfig.web.password = $('#session-secret').value;
+    delete rawConfig.web.password;
 
     if (!rawConfig.ldap) rawConfig.ldap = {};
     rawConfig.ldap.host = $('#ldap-host').value;

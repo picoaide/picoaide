@@ -54,7 +54,6 @@ picoclaw_adapter_remote_base_url: https://raw.githubusercontent.com/picoaide/pic
 | --- | --- |
 | `web.listen` | 服务监听地址，默认 `:80` |
 | `web.container_base_url` | 容器访问服务端时使用的基础地址 |
-| `web.password` | 兼容旧版本的会话密钥来源 |
 | `web.ldap_enabled` | 兼容旧版本的 LDAP 开关 |
 | `web.auth_mode` | `local` 或 `ldap` |
 | `web.log_retention` | 访问日志保留周期 |

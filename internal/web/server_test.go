@@ -267,12 +267,11 @@ func TestEnsureSessionSecretPersistsGeneratedSecret(t *testing.T) {
 		t.Fatalf("InitDB: %v", err)
 	}
 
-	cfg := &config.GlobalConfig{}
-	first, err := ensureSessionSecret(cfg)
+	first, err := ensureSessionSecret()
 	if err != nil {
 		t.Fatalf("ensureSessionSecret first: %v", err)
 	}
-	second, err := ensureSessionSecret(cfg)
+	second, err := ensureSessionSecret()
 	if err != nil {
 		t.Fatalf("ensureSessionSecret second: %v", err)
 	}
@@ -282,8 +281,43 @@ func TestEnsureSessionSecretPersistsGeneratedSecret(t *testing.T) {
 	if first != second {
 		t.Fatal("generated session secret should persist")
 	}
-	if first == config.SessionSecret {
-		t.Fatal("generated session secret must not use legacy default")
+	if len(first) != 64 {
+		t.Fatalf("generated session secret should be 32 random bytes encoded as hex, got length %d", len(first))
+	}
+}
+
+func TestEnsureSessionSecretDeletesLegacyWebPassword(t *testing.T) {
+	auth.ResetDB()
+	tmpDir := t.TempDir()
+	if err := auth.InitDB(tmpDir); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	engine, err := auth.GetEngine()
+	if err != nil {
+		t.Fatalf("GetEngine: %v", err)
+	}
+	if _, err := engine.Exec(
+		"INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
+		"web.password",
+		"legacy-secret",
+	); err != nil {
+		t.Fatalf("insert legacy web.password: %v", err)
+	}
+
+	secret, err := ensureSessionSecret()
+	if err != nil {
+		t.Fatalf("ensureSessionSecret: %v", err)
+	}
+	if secret == "" || secret == "legacy-secret" {
+		t.Fatalf("ensureSessionSecret should generate a new secret, got %q", secret)
+	}
+	var setting auth.Setting
+	has, err := engine.Where("key = ?", "web.password").Get(&setting)
+	if err != nil {
+		t.Fatalf("query legacy web.password: %v", err)
+	}
+	if has {
+		t.Fatal("legacy web.password should be deleted")
 	}
 }
 

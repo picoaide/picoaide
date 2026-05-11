@@ -198,9 +198,13 @@ func TestFlattenBuildRoundTrip(t *testing.T) {
 
 func TestRemoveFixedConfigFields(t *testing.T) {
 	input := map[string]interface{}{
+		"internal": map[string]interface{}{
+			"session_secret": "secret",
+		},
 		"web": map[string]interface{}{
 			"listen":             ":80",
 			"container_base_url": "http://172.17.0.1:8080",
+			"password":           "legacy-secret",
 		},
 	}
 
@@ -209,6 +213,12 @@ func TestRemoveFixedConfigFields(t *testing.T) {
 	web := input["web"].(map[string]interface{})
 	if _, ok := web["container_base_url"]; ok {
 		t.Fatal("container_base_url should be removed from raw config")
+	}
+	if _, ok := web["password"]; ok {
+		t.Fatal("password should be removed from raw config")
+	}
+	if _, ok := input["internal"]; ok {
+		t.Fatal("internal settings should be removed from raw config")
 	}
 	if web["listen"] != ":80" {
 		t.Fatalf("listen should be preserved, got %v", web["listen"])

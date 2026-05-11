@@ -56,6 +56,9 @@ func TestDefaultGlobalConfigToKV(t *testing.T) {
 	if kv["web.listen"] != ":80" {
 		t.Fatalf("web.listen = %q", kv["web.listen"])
 	}
+	if _, ok := kv["web.password"]; ok {
+		t.Fatal("web.password should not be stored in global config")
+	}
 	if kv["image.registry"] != "github" {
 		t.Fatalf("image.registry = %q", kv["image.registry"])
 	}

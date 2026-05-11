@@ -50,13 +50,12 @@ func randomHex(bytesLen int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func ensureSessionSecret(cfg *config.GlobalConfig) (string, error) {
-	if cfg.Web.Password != "" {
-		return cfg.Web.Password, nil
-	}
-
+func ensureSessionSecret() (string, error) {
 	engine, err := auth.GetEngine()
 	if err != nil {
+		return "", err
+	}
+	if _, err := engine.Exec("DELETE FROM settings WHERE key = ?", "web.password"); err != nil {
 		return "", err
 	}
 	var setting auth.Setting
@@ -562,7 +561,7 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 		}
 	}
 
-	secret, err := ensureSessionSecret(cfg)
+	secret, err := ensureSessionSecret()
 	if err != nil {
 		return err
 	}

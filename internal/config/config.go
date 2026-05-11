@@ -25,7 +25,6 @@ const AppName = "picoaide"
 
 var Version = "dev"
 
-const SessionSecret = "picoaide-session-key-change-me"
 const SessionMaxAge = 86400 // 24 hours
 
 // ============================================================
@@ -107,7 +106,6 @@ type TLSConfig struct {
 type WebConfig struct {
 	Listen           string    `yaml:"listen"`
 	ContainerBaseURL string    `yaml:"container_base_url"`
-	Password         string    `yaml:"password"`
 	LDAPEnabled      *bool     `yaml:"ldap_enabled"`
 	AuthMode         string    `yaml:"auth_mode"`     // "ldap" | "oidc" | "local"
 	LogRetention     string    `yaml:"log_retention"` // "1m","3m","6m","1y","3y","5y","forever"
@@ -560,6 +558,9 @@ func LoadFromDB() (*GlobalConfig, error) {
 	// 读取所有键值对
 	kv := make(map[string]string)
 	for _, s := range settings {
+		if isInternalSettingKey(s.Key) || s.Key == "web.password" {
+			continue
+		}
 		kv[s.Key] = s.Value
 	}
 
@@ -593,7 +594,6 @@ func LoadFromDB() (*GlobalConfig, error) {
 	cfg.ArchiveRoot = kv["archive_root"]
 	cfg.PicoClawAdapterRemoteBaseURL = kv["picoclaw_adapter_remote_base_url"]
 	cfg.Web.Listen = kv["web.listen"]
-	cfg.Web.Password = kv["web.password"]
 	cfg.Web.AuthMode = kv["web.auth_mode"]
 	cfg.Web.LogRetention = kv["web.log_retention"]
 	cfg.Web.LogLevel = kv["web.log_level"]
@@ -666,7 +666,6 @@ func configToKV(cfg *GlobalConfig) (map[string]string, error) {
 	kv["users_root"] = cfg.UsersRoot
 	kv["archive_root"] = cfg.ArchiveRoot
 	kv["web.listen"] = cfg.Web.Listen
-	kv["web.password"] = cfg.Web.Password
 	kv["web.auth_mode"] = cfg.Web.AuthMode
 	kv["web.log_retention"] = cfg.Web.LogRetention
 	kv["web.log_level"] = cfg.Web.LogLevel
@@ -761,6 +760,10 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
 		}
 	}
 
+	if _, err := session.Exec("DELETE FROM settings WHERE key = ?", "web.password"); err != nil {
+		return fmt.Errorf("删除废弃配置失败: %w", err)
+	}
+
 	return session.Commit()
 }
 
@@ -778,6 +781,9 @@ func LoadRawFromDB() (map[string]interface{}, error) {
 
 	kv := make(map[string]string)
 	for _, s := range settings {
+		if isInternalSettingKey(s.Key) || s.Key == "web.password" {
+			continue
+		}
 		kv[s.Key] = s.Value
 	}
 
@@ -802,6 +808,9 @@ func SaveRawToDB(data map[string]interface{}, changedBy string) error {
 	}
 
 	for key, newValue := range flat {
+		if isInternalSettingKey(key) || key == "web.password" {
+			continue
+		}
 		// 查询当前值
 		var existing auth.Setting
 		has, err := session.Where("key = ?", key).Get(&existing)
@@ -836,15 +845,25 @@ func SaveRawToDB(data map[string]interface{}, changedBy string) error {
 		}
 	}
 
+	if _, err := session.Exec("DELETE FROM settings WHERE key = ?", "web.password"); err != nil {
+		return fmt.Errorf("删除废弃配置失败: %w", err)
+	}
+
 	return session.Commit()
 }
 
 func removeFixedConfigFields(data map[string]interface{}) {
+	delete(data, "internal")
 	web, ok := data["web"].(map[string]interface{})
 	if !ok {
 		return
 	}
 	delete(web, "container_base_url")
+	delete(web, "password")
+}
+
+func isInternalSettingKey(key string) bool {
+	return key == "internal" || strings.HasPrefix(key, "internal.")
 }
 
 func DefaultGlobalConfig() *GlobalConfig {
@@ -873,7 +892,6 @@ func DefaultGlobalConfig() *GlobalConfig {
 		ArchiveRoot: "./archive",
 		Web: WebConfig{
 			Listen:       ":80",
-			Password:     "change-me-to-a-random-secret",
 			LogRetention: "6m",
 		},
 		PicoClaw: map[string]interface{}{
