@@ -1051,6 +1051,9 @@ func (s *Server) handleAdminImageUpgradeCandidates(c *gin.Context) {
 			Groups:   groupStr,
 		})
 	}
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].Username < users[j].Username
+	})
 
 	allGroups, _ := auth.ListGroups()
 	type groupInfo struct {
@@ -1074,12 +1077,34 @@ func (s *Server) handleAdminImageUpgradeCandidates(c *gin.Context) {
 			groups = append(groups, groupInfo{Name: g.Name, Count: groupCount[g.Name]})
 		}
 	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].Name < groups[j].Name
+	})
+
+	pager := parsePagination(c, 50, 500)
+	if pager.Search != "" {
+		filtered := users[:0]
+		for _, u := range users {
+			if strings.Contains(strings.ToLower(u.Username), pager.Search) ||
+				strings.Contains(strings.ToLower(u.Groups), pager.Search) ||
+				strings.Contains(strings.ToLower(u.Image), pager.Search) ||
+				strings.Contains(strings.ToLower(u.Status), pager.Search) {
+				filtered = append(filtered, u)
+			}
+		}
+		users = filtered
+	}
+	users, total, totalPages, page, pageSize := paginateSlice(users, pager)
 
 	writeJSON(c, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"target":  newImage,
-		"users":   users,
-		"groups":  groups,
+		"success":     true,
+		"target":      newImage,
+		"users":       users,
+		"groups":      groups,
+		"page":        page,
+		"page_size":   pageSize,
+		"total":       total,
+		"total_pages": totalPages,
 	})
 }
 
@@ -1405,13 +1430,29 @@ func (s *Server) handleAdminImageUsers(c *gin.Context) {
 			users = append(users, ctr.Username)
 		}
 	}
+	sort.Strings(users)
 	if users == nil {
 		users = []string{}
 	}
+	pager := parsePagination(c, 50, 200)
+	if pager.Search != "" {
+		filtered := users[:0]
+		for _, username := range users {
+			if strings.Contains(strings.ToLower(username), pager.Search) {
+				filtered = append(filtered, username)
+			}
+		}
+		users = filtered
+	}
+	users, total, totalPages, page, pageSize := paginateSlice(users, pager)
 
 	writeJSON(c, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"users":   users,
+		"success":     true,
+		"users":       users,
+		"page":        page,
+		"page_size":   pageSize,
+		"total":       total,
+		"total_pages": totalPages,
 	})
 }
 

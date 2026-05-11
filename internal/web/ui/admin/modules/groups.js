@@ -3,9 +3,42 @@ export async function init(ctx) {
 
   let currentGroups = [];
   let isUnifiedAuth = false;
+  let page = 1;
+  let pageSize = 50;
+  let totalPages = 1;
+  let search = '';
 
   ctx.$('#refresh-groups').addEventListener('click', loadGroups);
   ctx.$('#create-group-btn').addEventListener('click', () => openCreateGroupModal(currentGroups));
+  ctx.$('#groups-search-btn')?.addEventListener('click', () => {
+    search = ctx.$('#groups-search').value.trim();
+    page = 1;
+    loadGroups();
+  });
+  ctx.$('#groups-search')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      search = e.target.value.trim();
+      page = 1;
+      loadGroups();
+    }
+  });
+  ctx.$('#groups-page-size')?.addEventListener('change', e => {
+    pageSize = Number(e.target.value) || 50;
+    page = 1;
+    loadGroups();
+  });
+  ctx.$('#groups-prev')?.addEventListener('click', () => {
+    if (page > 1) {
+      page--;
+      loadGroups();
+    }
+  });
+  ctx.$('#groups-next')?.addEventListener('click', () => {
+    if (page < totalPages) {
+      page++;
+      loadGroups();
+    }
+  });
 
   // 统一认证模式下隐藏新建组按钮
   try {
@@ -24,10 +57,16 @@ export async function init(ctx) {
     tbody.innerHTML = '<tr><td colspan="5" class="text-center">加载中...</td></tr>';
     ctx.$('#groups-empty').classList.add('hidden');
 
-    const data = await Api.get('/api/admin/groups');
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (search) params.set('search', search);
+    const data = await Api.get('/api/admin/groups?' + params.toString());
     if (!data.success) { tbody.innerHTML = ''; return; }
+    page = data.page || page;
+    pageSize = data.page_size || pageSize;
+    totalPages = data.total_pages || 1;
     const groups = data.groups || [];
     currentGroups = groups;
+    updatePager(data);
 
     if (groups.length === 0) { tbody.innerHTML = ''; ctx.$('#groups-empty').classList.remove('hidden'); return; }
 
@@ -85,6 +124,17 @@ export async function init(ctx) {
     });
   }
 
+  function updatePager(data) {
+    const info = ctx.$('#groups-page-info');
+    if (info) info.textContent = '第 ' + (data.page || 1) + ' / ' + (data.total_pages || 1) + ' 页，共 ' + (data.total || 0) + ' 个组';
+    const sizeSel = ctx.$('#groups-page-size');
+    if (sizeSel) sizeSel.value = String(pageSize);
+    const prev = ctx.$('#groups-prev');
+    const next = ctx.$('#groups-next');
+    if (prev) prev.disabled = page <= 1;
+    if (next) next.disabled = page >= totalPages;
+  }
+
   function openCreateGroupModal(currentGroups) {
     ctx.$('#group-modal')?.remove();
     const overlay = document.createElement('div');
@@ -140,6 +190,10 @@ export async function init(ctx) {
     const overlay = document.createElement('div');
     overlay.id = 'group-modal';
     overlay.className = 'modal-overlay';
+    let memberPage = 1;
+    let memberPageSize = 50;
+    let memberTotalPages = 1;
+    let memberSearch = '';
     overlay.innerHTML =
       '<div class="modal" style="max-width:600px">' +
         '<div class="modal-header">组: ' + esc(groupName) + '<button id="modal-close">&times;</button></div>' +
@@ -149,7 +203,16 @@ export async function init(ctx) {
             '<button class="segment" data-group-panel="skills" type="button">绑定技能</button>' +
           '</div>' +
           '<div data-group-panel-body="members">' +
+            '<div class="list-search mb-1">' +
+              '<input type="search" id="gd-member-search" placeholder="搜索成员用户名">' +
+              '<button class="btn btn-sm btn-outline" id="gd-member-search-btn">搜索</button>' +
+            '</div>' +
             '<div id="gd-members" class="mb-1"></div>' +
+            '<div class="pager" id="gd-members-pager">' +
+              '<span class="pager-info" id="gd-members-info"></span>' +
+              '<button class="btn btn-sm btn-outline" id="gd-members-prev">上一页</button>' +
+              '<button class="btn btn-sm btn-outline" id="gd-members-next">下一页</button>' +
+            '</div>' +
             (isUnifiedAuth ? '<small class="text-muted">统一认证模式下成员由 LDAP 同步</small>' :
               '<div class="row mb-1">' +
                 '<input type="text" id="gd-add-member" placeholder="用户名，多个用逗号分隔" style="flex:1">' +
@@ -176,10 +239,10 @@ export async function init(ctx) {
       });
     });
 
-    const detail = await Api.get('/api/admin/groups/members?name=' + encodeURIComponent(groupName));
-    const members = (detail.success ? detail.members : []) || [];
-    const inheritedMembers = (detail.success ? detail.inherited_members : []) || [];
-    const skills = (detail.success ? detail.skills : []) || [];
+    let members = [];
+    let inheritedMembers = [];
+    const skillsDetail = await Api.get('/api/admin/groups/members?name=' + encodeURIComponent(groupName) + '&page=1&page_size=1');
+    const skills = (skillsDetail.success ? skillsDetail.skills : []) || [];
 
     const skillData = await Api.get('/api/admin/skills');
     const allSkills = (skillData.success ? skillData.skills : []) || [];
@@ -209,6 +272,25 @@ export async function init(ctx) {
       });
     }
 
+    async function loadMembers() {
+      const params = new URLSearchParams({
+        name: groupName,
+        page: String(memberPage),
+        page_size: String(memberPageSize),
+      });
+      if (memberSearch) params.set('search', memberSearch);
+      const detail = await Api.get('/api/admin/groups/members?' + params.toString());
+      members = (detail.success ? detail.members : []) || [];
+      inheritedMembers = (detail.success ? detail.inherited_members : []) || [];
+      memberPage = detail.page || memberPage;
+      memberTotalPages = detail.total_pages || 1;
+      const info = overlay.querySelector('#gd-members-info');
+      if (info) info.textContent = '第 ' + memberPage + ' / ' + memberTotalPages + ' 页，共 ' + (detail.total || 0) + ' 个直接成员';
+      overlay.querySelector('#gd-members-prev').disabled = memberPage <= 1;
+      overlay.querySelector('#gd-members-next').disabled = memberPage >= memberTotalPages;
+      renderMembers();
+    }
+
     function renderSkills() {
       const el = overlay.querySelector('#gd-skills');
       if (skills.length === 0) { el.innerHTML = '<small class="text-muted">暂无绑定技能</small>'; return; }
@@ -222,15 +304,40 @@ export async function init(ctx) {
       });
     }
 
-    renderMembers();
+    await loadMembers();
     renderSkills();
+
+    overlay.querySelector('#gd-member-search-btn')?.addEventListener('click', async () => {
+      memberSearch = overlay.querySelector('#gd-member-search').value.trim();
+      memberPage = 1;
+      await loadMembers();
+    });
+    overlay.querySelector('#gd-member-search')?.addEventListener('keydown', async e => {
+      if (e.key === 'Enter') {
+        memberSearch = e.target.value.trim();
+        memberPage = 1;
+        await loadMembers();
+      }
+    });
+    overlay.querySelector('#gd-members-prev')?.addEventListener('click', async () => {
+      if (memberPage > 1) {
+        memberPage--;
+        await loadMembers();
+      }
+    });
+    overlay.querySelector('#gd-members-next')?.addEventListener('click', async () => {
+      if (memberPage < memberTotalPages) {
+        memberPage++;
+        await loadMembers();
+      }
+    });
 
     overlay.querySelector('#gd-add-btn')?.addEventListener('click', async () => {
       const input = overlay.querySelector('#gd-add-member');
       const names = input.value.split(',').map(s => s.trim()).filter(Boolean);
       if (names.length === 0) return;
       const res = await Api.post('/api/admin/groups/members/add', { group_name: groupName, usernames: names.join(',') });
-      if (res.success) { input.value = ''; names.forEach(n => { if (!members.includes(n)) members.push(n); }); renderMembers(); loadGroups(); }
+      if (res.success) { input.value = ''; await loadMembers(); loadGroups(); }
       else alert(res.error);
     });
 

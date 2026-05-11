@@ -199,7 +199,7 @@ export async function init(ctx) {
   async function loadWhitelist() {
     var tags = $('#wl-tags');
     tags.innerHTML = '';
-    var data = await Api.get('/api/admin/whitelist');
+    var data = await Api.get('/api/admin/whitelist?page=1&page_size=100');
     if (!data.success) return;
 
     var users = data.users || [];
@@ -214,6 +214,11 @@ export async function init(ctx) {
       tag.innerHTML = ctx.esc(users[i]) + ' <button data-remove="' + ctx.esc(users[i]) + '">&times;</button>';
       tags.appendChild(tag);
     }
+    if ((data.total || users.length) > users.length) {
+      var more = document.createElement('small');
+      more.textContent = '已显示前 ' + users.length + ' 个，共 ' + data.total + ' 个；可在白名单管理页搜索和翻页。';
+      tags.appendChild(more);
+    }
 
     tags.querySelectorAll('[data-remove]').forEach(function(btn) {
       btn.addEventListener('click', function() { removeWhitelistUser(btn.dataset.remove); });
@@ -222,9 +227,7 @@ export async function init(ctx) {
 
   async function removeWhitelistUser(username) {
     if (!confirm('移除 ' + username + '？')) return;
-    var data = await Api.get('/api/admin/whitelist');
-    var users = (data.users || []).filter(function(u) { return u !== username; });
-    var res = await Api.post('/api/admin/whitelist', { users: users.join(',') });
+    var res = await Api.post('/api/admin/whitelist', { remove: username });
     showMsg('#wl-msg', res.message || res.error, res.success);
     if (res.success) loadWhitelist();
   }
@@ -234,12 +237,7 @@ export async function init(ctx) {
     var newUsers = input.value.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
     if (newUsers.length === 0) return;
 
-    var data = await Api.get('/api/admin/whitelist');
-    var existing = data.users || [];
-    var merged = existing.concat(newUsers);
-    merged = merged.filter(function(v, i, a) { return a.indexOf(v) === i; });
-
-    var res = await Api.post('/api/admin/whitelist', { users: merged.join(',') });
+    var res = await Api.post('/api/admin/whitelist', { add: newUsers.join(',') });
     showMsg('#wl-msg', res.message || res.error, res.success);
     if (res.success) { input.value = ''; loadWhitelist(); }
   }
@@ -251,20 +249,21 @@ export async function init(ctx) {
     container.innerHTML = '<small>搜索中...</small>';
 
     try {
-      var data = await Api.get('/api/admin/auth/ldap-users');
+      var url = '/api/admin/auth/ldap-users?source=directory&page=1&page_size=50';
+      if (query) url += '&search=' + encodeURIComponent(query);
+      var data = await Api.get(url);
       if (!data.success) { container.innerHTML = '<small>' + ctx.esc(data.error) + '</small>'; return; }
 
       var users = data.users || [];
-      if (query) {
-        users = users.filter(function(u) { return u.toLowerCase().indexOf(query) !== -1; });
-      }
 
       if (users.length === 0) {
         container.innerHTML = '<small>未找到用户</small>';
         return;
       }
 
-      var wlData = await Api.get('/api/admin/whitelist');
+      var wlUrl = '/api/admin/whitelist?page=1&page_size=200';
+      if (query) wlUrl += '&search=' + encodeURIComponent(query);
+      var wlData = await Api.get(wlUrl);
       var wlUsers = wlData.users || [];
 
       container.innerHTML = '';
@@ -281,9 +280,9 @@ export async function init(ctx) {
         list.appendChild(tag);
       });
 
-      if (users.length > 50) {
+      if ((data.total || users.length) > users.length) {
         var more = document.createElement('small');
-        more.textContent = '还有 ' + (users.length - 50) + ' 个用户...';
+        more.textContent = '还有 ' + ((data.total || users.length) - users.length) + ' 个用户，请输入更精确的关键字';
         list.appendChild(more);
       }
 
@@ -292,10 +291,7 @@ export async function init(ctx) {
       container.querySelectorAll('[data-wl-add]').forEach(function(btn) {
         btn.addEventListener('click', async function() {
           var username = btn.dataset.wlAdd;
-          var wlD = await Api.get('/api/admin/whitelist');
-          var ex = wlD.users || [];
-          ex.push(username);
-          var r = await Api.post('/api/admin/whitelist', { users: ex.join(',') });
+          var r = await Api.post('/api/admin/whitelist', { add: username });
           showMsg('#wl-msg', r.message || r.error, r.success);
           if (r.success) { loadWhitelist(); searchLDAPUsers(); }
         });

@@ -7,11 +7,27 @@
 </section>
 
 <h3>已安装技能</h3>
+<div class="list-controls">
+  <div class="list-search">
+    <input type="search" id="skills-search" placeholder="搜索技能名称">
+    <button class="btn btn-outline btn-sm" id="skills-search-btn">搜索</button>
+  </div>
+</div>
 <div class="table-wrap">
   <table>
     <thead><tr><th>技能名称</th><th>文件数</th><th>大小</th><th>更新时间</th><th class="actions-cell">操作</th></tr></thead>
     <tbody id="skills-tbody"></tbody>
   </table>
+</div>
+<div class="pager" id="skills-pager">
+  <span class="pager-info" id="skills-page-info"></span>
+  <select id="skills-page-size">
+    <option value="50">50 / 页</option>
+    <option value="100">100 / 页</option>
+    <option value="200">200 / 页</option>
+  </select>
+  <button class="btn btn-outline btn-sm" id="skills-prev">上一页</button>
+  <button class="btn btn-outline btn-sm" id="skills-next">下一页</button>
 </div>
 <p id="skills-empty" class="text-muted text-center mt-1 hidden">暂无已安装技能</p>
 <div id="skills-msg" class="msg"></div>
@@ -32,11 +48,21 @@
         <select id="deploy-skill"><option value="">所有技能</option></select>
       </div>
       <div class="field">
-        <label>目标</label>
+        <label>目标类型</label>
+        <select id="deploy-target-type">
+          <option value="all">所有用户</option>
+          <option value="user">按用户</option>
+          <option value="group">按组</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>搜索目标</label>
+        <div class="row">
+          <input type="search" id="deploy-target-search" placeholder="输入用户名或组名" style="flex:1">
+          <button class="btn btn-sm btn-outline" id="deploy-target-search-btn">搜索</button>
+        </div>
         <select id="deploy-target">
           <option value="all">所有用户</option>
-          <optgroup label="按用户" id="deploy-user-group"></optgroup>
-          <optgroup label="按组" id="deploy-group-group"></optgroup>
         </select>
       </div>
     </div>

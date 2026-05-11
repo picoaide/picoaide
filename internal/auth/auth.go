@@ -607,6 +607,26 @@ func GetAllLocalUsers() ([]LocalUser, error) {
 	return result, nil
 }
 
+// GetExternalUsers 返回已同步到本地的统一认证用户。
+func GetExternalUsers(source string) ([]LocalUser, error) {
+	if err := ensureDB(); err != nil {
+		return nil, err
+	}
+	var users []LocalUser
+	query := engine.Where("source != '' AND source != ?", "local")
+	if source != "" {
+		query = engine.Where("source = ?", source)
+	}
+	if err := query.OrderBy("username").Find(&users); err != nil {
+		return nil, err
+	}
+	result := make([]LocalUser, 0, len(users))
+	for _, u := range users {
+		result = append(result, LocalUser{Username: u.Username, Role: u.Role, Source: u.Source})
+	}
+	return result, nil
+}
+
 // GetSuperadmins 返回所有超管列表
 func GetSuperadmins() ([]string, error) {
 	if err := ensureDB(); err != nil {

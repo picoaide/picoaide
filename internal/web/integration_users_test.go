@@ -48,6 +48,80 @@ func TestLocalUserSessionInvalidatedInLDAPMode(t *testing.T) {
 	assertStatus(t, resp, 401)
 }
 
+func TestAdminUsers_LDAPModeUsesSyncedLocalUsers(t *testing.T) {
+	env := setupTestServer(t)
+	env.Cfg.Web.AuthMode = "ldap"
+	env.Cfg.LDAP.Host = ""
+
+	if err := auth.EnsureExternalUser("ldapuser", "user", "ldap"); err != nil {
+		t.Fatalf("EnsureExternalUser: %v", err)
+	}
+
+	resp := env.get(t, "/api/admin/users", "testadmin")
+	assertStatus(t, resp, 200)
+
+	var result struct {
+		Success bool `json:"success"`
+		Users   []struct {
+			Username string `json:"username"`
+			Source   string `json:"source"`
+			Status   string `json:"status"`
+		} `json:"users"`
+	}
+	parseJSON(t, resp, &result)
+	if !result.Success {
+		t.Fatal("should succeed")
+	}
+	for _, u := range result.Users {
+		if u.Username == "ldapuser" {
+			if u.Source != "ldap" {
+				t.Fatalf("ldapuser source = %q, want ldap", u.Source)
+			}
+			if u.Status != "未初始化" {
+				t.Fatalf("ldapuser status = %q, want 未初始化", u.Status)
+			}
+			return
+		}
+	}
+	t.Fatal("synced LDAP user not listed")
+}
+
+func TestAdminAuthLDAPUsers_UnifiedModeUsesSyncedLocalUsers(t *testing.T) {
+	env := setupTestServer(t)
+	env.Cfg.Web.AuthMode = "ldap"
+	env.Cfg.LDAP.Host = ""
+
+	if err := auth.EnsureExternalUser("ldapuser", "user", "ldap"); err != nil {
+		t.Fatalf("EnsureExternalUser: %v", err)
+	}
+
+	resp := env.get(t, "/api/admin/auth/ldap-users", "testadmin")
+	assertStatus(t, resp, 200)
+
+	var result struct {
+		Success bool     `json:"success"`
+		Users   []string `json:"users"`
+	}
+	parseJSON(t, resp, &result)
+	if !result.Success {
+		t.Fatal("should succeed")
+	}
+	if len(result.Users) != 1 || result.Users[0] != "ldapuser" {
+		t.Fatalf("users = %v, want [ldapuser]", result.Users)
+	}
+}
+
+func TestAdminAuthLDAPUsers_DirectorySourceUsesLDAP(t *testing.T) {
+	env := setupTestServer(t)
+	env.Cfg.Web.AuthMode = "ldap"
+	env.Cfg.LDAP.Host = ""
+
+	resp := env.get(t, "/api/admin/auth/ldap-users?source=directory", "testadmin")
+	if resp.StatusCode == 200 {
+		t.Fatalf("status=200, want LDAP connection error when source=directory")
+	}
+}
+
 func TestAdminUserCreate_InvalidUsername(t *testing.T) {
 	env := setupTestServer(t)
 	// 设置为本地模式，否则统一认证会先拒绝

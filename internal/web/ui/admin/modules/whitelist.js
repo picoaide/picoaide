@@ -1,8 +1,12 @@
 export async function init(ctx) {
   const { Api, esc, showMsg } = ctx;
+  let page = 1;
+  let pageSize = 50;
+  let totalPages = 1;
+  let search = '';
 
   // 获取认证模式
-  const usersData = await Api.get('/api/admin/users').catch(() => ({}));
+  const usersData = await Api.get('/api/admin/users?runtime=false&page=1&page_size=1').catch(() => ({}));
   const isUnifiedAuth = usersData.unified_auth || false;
 
   if (!isUnifiedAuth) {
@@ -16,12 +20,47 @@ export async function init(ctx) {
 
   await loadWhitelist();
   ctx.$('#wl-add-btn')?.addEventListener('click', addUsers);
+  ctx.$('#wl-search-btn')?.addEventListener('click', () => {
+    search = ctx.$('#wl-search-input').value.trim();
+    page = 1;
+    loadWhitelist();
+  });
+  ctx.$('#wl-search-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      search = e.target.value.trim();
+      page = 1;
+      loadWhitelist();
+    }
+  });
+  ctx.$('#wl-page-size')?.addEventListener('change', e => {
+    pageSize = Number(e.target.value) || 50;
+    page = 1;
+    loadWhitelist();
+  });
+  ctx.$('#wl-prev')?.addEventListener('click', () => {
+    if (page > 1) {
+      page--;
+      loadWhitelist();
+    }
+  });
+  ctx.$('#wl-next')?.addEventListener('click', () => {
+    if (page < totalPages) {
+      page++;
+      loadWhitelist();
+    }
+  });
 
   async function loadWhitelist() {
     const tags = ctx.$('#wl-tags');
     tags.innerHTML = '';
-    const data = await Api.get('/api/admin/whitelist');
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (search) params.set('search', search);
+    const data = await Api.get('/api/admin/whitelist?' + params.toString());
     if (!data.success) return;
+    page = data.page || page;
+    pageSize = data.page_size || pageSize;
+    totalPages = data.total_pages || 1;
+    updatePager(data);
 
     const users = data.users || [];
     if (users.length === 0) { tags.innerHTML = '<small>白名单为空（所有用户均可使用）</small>'; return; }
@@ -38,11 +77,20 @@ export async function init(ctx) {
     });
   }
 
+  function updatePager(data) {
+    const info = ctx.$('#wl-page-info');
+    if (info) info.textContent = '第 ' + (data.page || 1) + ' / ' + (data.total_pages || 1) + ' 页，共 ' + (data.total || 0) + ' 个用户';
+    const sizeSel = ctx.$('#wl-page-size');
+    if (sizeSel) sizeSel.value = String(pageSize);
+    const prev = ctx.$('#wl-prev');
+    const next = ctx.$('#wl-next');
+    if (prev) prev.disabled = page <= 1;
+    if (next) next.disabled = page >= totalPages;
+  }
+
   async function removeUser(username) {
     if (!confirm('移除 ' + username + '？')) return;
-    const data = await Api.get('/api/admin/whitelist');
-    const users = (data.users || []).filter(u => u !== username);
-    const res = await Api.post('/api/admin/whitelist', { users: users.join(',') });
+    const res = await Api.post('/api/admin/whitelist', { remove: username });
     showMsg('#wl-msg', res.message || res.error, res.success);
     if (res.success) loadWhitelist();
   }
@@ -52,11 +100,7 @@ export async function init(ctx) {
     const newUsers = input.value.split(',').map(s => s.trim()).filter(Boolean);
     if (newUsers.length === 0) return;
 
-    const data = await Api.get('/api/admin/whitelist');
-    const existing = data.users || [];
-    const merged = [...new Set([...existing, ...newUsers])];
-
-    const res = await Api.post('/api/admin/whitelist', { users: merged.join(',') });
+    const res = await Api.post('/api/admin/whitelist', { add: newUsers.join(',') });
     showMsg('#wl-msg', res.message || res.error, res.success);
     if (res.success) { input.value = ''; loadWhitelist(); }
   }

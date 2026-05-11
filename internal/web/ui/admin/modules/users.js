@@ -4,37 +4,62 @@ export async function init(ctx) {
   const { Api, esc, showMsg } = ctx;
 
   let isUnifiedAuth = false;
-  let groupMap = {};
+  let page = 1;
+  let pageSize = 20;
+  let totalPages = 1;
+  let search = '';
 
-  ctx.$('#refresh-users').addEventListener('click', () => { loadGroups().then(loadUsers); });
+  ctx.$('#refresh-users').addEventListener('click', () => loadUsers());
   ctx.$('#new-user-btn')?.addEventListener('click', openCreateModal);
-
-  await loadGroups().then(loadUsers);
-
-  async function loadGroups() {
-    groupMap = {};
-    const data = await Api.get('/api/admin/groups');
-    if (!data.success) return;
-    for (const g of (data.groups || [])) {
-      const members = await Api.get('/api/admin/groups/members?name=' + encodeURIComponent(g.name));
-      if (members.success) {
-        for (const u of (members.members || [])) {
-          if (!groupMap[u]) groupMap[u] = [];
-          groupMap[u].push(g.name);
-        }
-      }
+  ctx.$('#users-search-btn')?.addEventListener('click', () => {
+    search = ctx.$('#users-search').value.trim();
+    page = 1;
+    loadUsers();
+  });
+  ctx.$('#users-search')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      search = e.target.value.trim();
+      page = 1;
+      loadUsers();
     }
-  }
+  });
+  ctx.$('#users-page-size')?.addEventListener('change', e => {
+    pageSize = Number(e.target.value) || 20;
+    page = 1;
+    loadUsers();
+  });
+  ctx.$('#users-prev')?.addEventListener('click', () => {
+    if (page > 1) {
+      page--;
+      loadUsers();
+    }
+  });
+  ctx.$('#users-next')?.addEventListener('click', () => {
+    if (page < totalPages) {
+      page++;
+      loadUsers();
+    }
+  });
+
+  await loadUsers();
 
   async function loadUsers() {
     const tbody = ctx.$('#users-tbody');
     tbody.innerHTML = '<tr><td colspan="7" class="text-center">加载中...</td></tr>';
     ctx.$('#users-empty').classList.add('hidden');
 
-    const data = await Api.get('/api/admin/users');
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+    });
+    if (search) params.set('search', search);
+    const data = await Api.get('/api/admin/users?' + params.toString());
     if (!data.success) { tbody.innerHTML = ''; return; }
 
     isUnifiedAuth = data.unified_auth || false;
+    page = data.page || page;
+    pageSize = data.page_size || pageSize;
+    totalPages = data.total_pages || 1;
 
     const newBtn = ctx.$('#new-user-btn');
     const tip = ctx.$('#unified-auth-tip');
@@ -47,6 +72,7 @@ export async function init(ctx) {
     }
 
     const users = data.users || [];
+    updatePager(data);
     if (users.length === 0) { tbody.innerHTML = ''; ctx.$('#users-empty').classList.remove('hidden'); return; }
 
     tbody.innerHTML = '';
@@ -59,7 +85,7 @@ export async function init(ctx) {
         : '<span class="badge badge-danger">' + (hasImage ? '未拉取' : '未绑定') + '</span>';
       const noImg = !u.image_ready ? ' disabled title="' + (hasImage ? '镜像未拉取' : '未绑定镜像，请先在认证配置中同步 LDAP 账号') + '"' : '';
       const imageText = hasImage ? esc(u.image_tag) : '<small class="text-muted">未绑定镜像</small>';
-      const groups = groupMap[u.username] || [];
+      const groups = u.groups || [];
       const groupTags = renderGroupTags(groups);
       const tr = document.createElement('tr');
       let actions = '<div class="btn-group">';
@@ -124,6 +150,20 @@ export async function init(ctx) {
         btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
       });
     });
+  }
+
+  function updatePager(data) {
+    const info = ctx.$('#users-page-info');
+    if (info) {
+      const total = data.total || 0;
+      info.textContent = '第 ' + (data.page || 1) + ' / ' + (data.total_pages || 1) + ' 页，共 ' + total + ' 个用户';
+    }
+    const sizeSel = ctx.$('#users-page-size');
+    if (sizeSel) sizeSel.value = String(pageSize);
+    const prev = ctx.$('#users-prev');
+    const next = ctx.$('#users-next');
+    if (prev) prev.disabled = page <= 1;
+    if (next) next.disabled = page >= totalPages;
   }
 
   function renderGroupTags(groups) {

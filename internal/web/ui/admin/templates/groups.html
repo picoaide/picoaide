@@ -10,11 +10,28 @@
   </div>
 </section>
 
+<div class="list-controls">
+  <div class="list-search">
+    <input type="search" id="groups-search" placeholder="搜索组名、来源或描述">
+    <button class="btn btn-outline btn-sm" id="groups-search-btn">搜索</button>
+  </div>
+</div>
+
 <div class="table-wrap">
   <table>
     <thead><tr><th>组名</th><th>来源</th><th>成员数</th><th>绑定技能</th><th class="actions-cell">操作</th></tr></thead>
     <tbody id="groups-tbody"></tbody>
   </table>
+</div>
+<div class="pager" id="groups-pager">
+  <span class="pager-info" id="groups-page-info"></span>
+  <select id="groups-page-size">
+    <option value="50">50 / 页</option>
+    <option value="100">100 / 页</option>
+    <option value="200">200 / 页</option>
+  </select>
+  <button class="btn btn-outline btn-sm" id="groups-prev">上一页</button>
+  <button class="btn btn-outline btn-sm" id="groups-next">下一页</button>
 </div>
 <p id="groups-empty" class="text-muted text-center mt-1 hidden">暂无用户组</p>
 <div id="groups-msg" class="msg"></div>

@@ -2,6 +2,10 @@ export async function init(ctx) {
   const { Api, esc, showMsg, $ } = ctx;
 
   let localImages = [];
+  let imageUsersTag = '';
+  let imageUsersPage = 1;
+  let imageUsersSearch = '';
+  let imageUsersTotalPages = 1;
 
   await loadLocalImages();
   loadRegistryTags();
@@ -13,6 +17,30 @@ export async function init(ctx) {
   $('#migrate-cancel-btn')?.addEventListener('click', closeMigrateModal);
   $('#image-users-close')?.addEventListener('click', closeUsersModal);
   $('#image-users-close-btn')?.addEventListener('click', closeUsersModal);
+  $('#image-users-search-btn')?.addEventListener('click', () => {
+    imageUsersSearch = $('#image-users-search').value.trim();
+    imageUsersPage = 1;
+    loadImageUsers();
+  });
+  $('#image-users-search')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      imageUsersSearch = e.target.value.trim();
+      imageUsersPage = 1;
+      loadImageUsers();
+    }
+  });
+  $('#image-users-prev')?.addEventListener('click', () => {
+    if (imageUsersPage > 1) {
+      imageUsersPage--;
+      loadImageUsers();
+    }
+  });
+  $('#image-users-next')?.addEventListener('click', () => {
+    if (imageUsersPage < imageUsersTotalPages) {
+      imageUsersPage++;
+      loadImageUsers();
+    }
+  });
   $('#upgrade-modal-close')?.addEventListener('click', closeUpgradeModal);
   $('#upgrade-cancel-btn')?.addEventListener('click', closeUpgradeModal);
   $('#upgrade-select-all')?.addEventListener('click', () => {
@@ -314,20 +342,40 @@ export async function init(ctx) {
   async function showImageUsers(imageTag) {
     const modal = $('#image-users-modal');
     const title = $('#image-users-title');
-    const list = $('#image-users-list');
 
+    imageUsersTag = imageTag;
+    imageUsersPage = 1;
+    imageUsersSearch = '';
+    $('#image-users-search').value = '';
     title.textContent = imageTag;
-    list.innerHTML = '<small>加载中...</small>';
     modal.classList.remove('hidden');
+    loadImageUsers();
+  }
+
+  async function loadImageUsers() {
+    const list = $('#image-users-list');
+    list.innerHTML = '<small>加载中...</small>';
 
     try {
-      const data = await Api.get('/api/admin/images/users?image=' + encodeURIComponent(imageTag));
+      const params = new URLSearchParams({
+        image: imageUsersTag,
+        page: String(imageUsersPage),
+        page_size: '50',
+      });
+      if (imageUsersSearch) params.set('search', imageUsersSearch);
+      const data = await Api.get('/api/admin/images/users?' + params.toString());
+      imageUsersPage = data.page || imageUsersPage;
+      imageUsersTotalPages = data.total_pages || 1;
       const users = data.users || [];
       if (users.length === 0) {
         list.innerHTML = '<small class="text-muted">无依赖用户</small>';
       } else {
         list.innerHTML = users.map(u => '<span class="tag">' + esc(u) + '</span>').join('');
       }
+      const info = $('#image-users-page-info');
+      if (info) info.textContent = '第 ' + imageUsersPage + ' / ' + imageUsersTotalPages + ' 页，共 ' + (data.total || 0) + ' 个用户';
+      $('#image-users-prev').disabled = imageUsersPage <= 1;
+      $('#image-users-next').disabled = imageUsersPage >= imageUsersTotalPages;
     } catch (e) {
       list.innerHTML = '<small style="color:var(--err)">加载失败: ' + esc(e.message) + '</small>';
     }
@@ -341,10 +389,17 @@ export async function init(ctx) {
   let upgradeUsersData = [];
   let upgradeGroupsData = [];
   let upgradeSelectedGroups = new Set();
+  let upgradeSelectedUsers = new Set();
+  let upgradePage = 1;
+  let upgradeTotalPages = 1;
+  let upgradeSearch = '';
 
   async function openUpgradeModal(tag) {
     upgradeTag = tag;
     upgradeSelectedGroups = new Set();
+    upgradeSelectedUsers = new Set();
+    upgradePage = 1;
+    upgradeSearch = '';
     const modal = $('#image-upgrade-modal');
     const targetEl = $('#upgrade-target');
     const usersDiv = $('#upgrade-users');
@@ -365,7 +420,7 @@ export async function init(ctx) {
     modal.classList.remove('hidden');
 
     try {
-      const data = await Api.get('/api/admin/images/upgrade-candidates?tag=' + encodeURIComponent(tag));
+      const data = await loadUpgradeCandidates();
       upgradeUsersData = data.users || [];
       upgradeGroupsData = data.groups || [];
 
@@ -392,11 +447,9 @@ export async function init(ctx) {
     const newSearch = searchInput.cloneNode(true);
     searchInput.parentNode.replaceChild(newSearch, searchInput);
     newSearch.addEventListener('input', () => {
-      const q = newSearch.value.toLowerCase().trim();
-      const filtered = q ? upgradeUsersData.filter(u =>
-        u.username.toLowerCase().includes(q) || (u.groups && u.groups.toLowerCase().includes(q))
-      ) : upgradeUsersData;
-      renderUpgradeTable(filtered);
+      upgradeSearch = newSearch.value.trim();
+      upgradePage = 1;
+      refreshUpgradeUsers();
     });
 
     // 绑定添加分组按钮
@@ -417,6 +470,7 @@ export async function init(ctx) {
     allBtn.parentNode.replaceChild(newAllBtn, allBtn);
     newAllBtn.addEventListener('click', () => {
       document.querySelectorAll('#upgrade-users tbody input[type=checkbox]').forEach(cb => cb.checked = true);
+      upgradeUsersData.forEach(u => upgradeSelectedUsers.add(u.username));
       updateUpgradeCount();
     });
 
@@ -426,6 +480,7 @@ export async function init(ctx) {
     selectAllBtn.parentNode.replaceChild(newSelectAll, selectAllBtn);
     newSelectAll.addEventListener('click', () => {
       document.querySelectorAll('#upgrade-users input[type=checkbox]').forEach(cb => cb.checked = true);
+      upgradeUsersData.forEach(u => upgradeSelectedUsers.add(u.username));
       updateUpgradeCount();
     });
 
@@ -435,6 +490,7 @@ export async function init(ctx) {
     newDeselectAll.addEventListener('click', () => {
       document.querySelectorAll('#upgrade-users input[type=checkbox]').forEach(cb => cb.checked = false);
       upgradeSelectedGroups.clear();
+      upgradeSelectedUsers.clear();
       renderSelectedGroups();
       updateUpgradeCount();
     });
@@ -444,6 +500,57 @@ export async function init(ctx) {
     const newBtn = confirmBtn.cloneNode(true);
     confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
     newBtn.addEventListener('click', () => confirmUpgrade());
+    bindUpgradePager();
+  }
+
+  async function loadUpgradeCandidates() {
+    const params = new URLSearchParams({
+      tag: upgradeTag,
+      page: String(upgradePage),
+      page_size: '50',
+    });
+    if (upgradeSearch) params.set('search', upgradeSearch);
+    const data = await Api.get('/api/admin/images/upgrade-candidates?' + params.toString());
+    upgradePage = data.page || upgradePage;
+    upgradeTotalPages = data.total_pages || 1;
+    const info = $('#upgrade-page-info');
+    if (info) info.textContent = '第 ' + upgradePage + ' / ' + upgradeTotalPages + ' 页，共 ' + (data.total || 0) + ' 个候选用户';
+    $('#upgrade-prev').disabled = upgradePage <= 1;
+    $('#upgrade-next').disabled = upgradePage >= upgradeTotalPages;
+    return data;
+  }
+
+  async function refreshUpgradeUsers() {
+    const usersDiv = $('#upgrade-users');
+    usersDiv.innerHTML = '<small style="color:#666">加载中...</small>';
+    try {
+      const data = await loadUpgradeCandidates();
+      upgradeUsersData = data.users || [];
+      renderUpgradeTable(upgradeUsersData);
+    } catch (e) {
+      usersDiv.innerHTML = '<small style="color:var(--err)">加载失败: ' + esc(e.message) + '</small>';
+    }
+  }
+
+  function bindUpgradePager() {
+    const prev = $('#upgrade-prev');
+    const next = $('#upgrade-next');
+    const newPrev = prev.cloneNode(true);
+    const newNext = next.cloneNode(true);
+    prev.parentNode.replaceChild(newPrev, prev);
+    next.parentNode.replaceChild(newNext, next);
+    newPrev.addEventListener('click', () => {
+      if (upgradePage > 1) {
+        upgradePage--;
+        refreshUpgradeUsers();
+      }
+    });
+    newNext.addEventListener('click', () => {
+      if (upgradePage < upgradeTotalPages) {
+        upgradePage++;
+        refreshUpgradeUsers();
+      }
+    });
   }
 
   function renderUpgradeTable(users) {
@@ -473,7 +580,7 @@ export async function init(ctx) {
       const tr = document.createElement('tr');
       tr.style.cssText = 'border-bottom:1px solid #eee;background:#fff';
       tr.innerHTML =
-        '<td style="padding:4px 8px"><label class="toggle-switch toggle-switch-compact"><input type="checkbox" value="' + esc(u.username) + '"><span class="toggle-switch-control" aria-hidden="true"></span></label></td>' +
+        '<td style="padding:4px 8px"><label class="toggle-switch toggle-switch-compact"><input type="checkbox" value="' + esc(u.username) + '"' + (upgradeSelectedUsers.has(u.username) ? ' checked' : '') + '><span class="toggle-switch-control" aria-hidden="true"></span></label></td>' +
         '<td style="padding:4px 8px;color:#333">' + esc(u.username) + '</td>' +
         '<td style="padding:4px 8px;color:#666;font-family:monospace;font-size:11px">' + esc(u.image.split(':').pop()) + '</td>' +
         '<td style="padding:4px 8px">' + (u.status === 'running' ? '<span style="color:#27ae60">运行中</span>' : '<span style="color:#999">' + esc(u.status) + '</span>') + '</td>' +
@@ -494,7 +601,11 @@ export async function init(ctx) {
 
     // 单个变更时更新计数
     tbody.querySelectorAll('input[type=checkbox]').forEach(cb => {
-      cb.addEventListener('change', updateUpgradeCount);
+      cb.addEventListener('change', () => {
+        if (cb.checked) upgradeSelectedUsers.add(cb.value);
+        else upgradeSelectedUsers.delete(cb.value);
+        updateUpgradeCount();
+      });
     });
 
     updateUpgradeCount();
@@ -503,7 +614,7 @@ export async function init(ctx) {
   function updateUpgradeCount() {
     const all = document.querySelectorAll('#upgrade-users tbody input[type=checkbox]').length;
     const checked = document.querySelectorAll('#upgrade-users tbody input[type=checkbox]:checked').length;
-    $('#upgrade-count').textContent = checked + ' / ' + all + ' 人已选';
+    $('#upgrade-count').textContent = '本页 ' + checked + ' / ' + all + '，已选 ' + upgradeSelectedUsers.size + ' 人';
   }
 
   function selectGroupUsers(groupName, checked) {
@@ -514,6 +625,8 @@ export async function init(ctx) {
       const user = upgradeUsersData.find(u => u.username === cb.value);
       if (user && user.groups && user.groups.split(', ').includes(groupName)) {
         cb.checked = checked;
+        if (checked) upgradeSelectedUsers.add(cb.value);
+        else upgradeSelectedUsers.delete(cb.value);
       }
     });
     updateUpgradeCount();
@@ -540,8 +653,7 @@ export async function init(ctx) {
   }
 
   async function confirmUpgrade() {
-    const checkboxes = document.querySelectorAll('#upgrade-users tbody input[type=checkbox]:checked');
-    const selectedUsers = Array.from(checkboxes).map(cb => cb.value);
+    const selectedUsers = Array.from(upgradeSelectedUsers);
     if (selectedUsers.length === 0) {
       showMsg('#upgrade-msg', '请选择要升级的用户', false);
       return;

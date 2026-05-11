@@ -871,6 +871,8 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
 		return
 	}
 
+	pager := parsePagination(c, 20, 100)
+
 	containers, err := auth.GetAllContainers()
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err.Error())
@@ -885,16 +887,15 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
 	}
 
 	type UserInfo struct {
-		Username   string `json:"username"`
-		Source     string `json:"source"`
-		Status     string `json:"status"`
-		ImageTag   string `json:"image_tag"`
-		ImageReady bool   `json:"image_ready"`
-		IP         string `json:"ip"`
-		Role       string `json:"role"`
+		Username   string   `json:"username"`
+		Source     string   `json:"source"`
+		Status     string   `json:"status"`
+		ImageTag   string   `json:"image_tag"`
+		ImageReady bool     `json:"image_ready"`
+		IP         string   `json:"ip"`
+		Role       string   `json:"role"`
+		Groups     []string `json:"groups,omitempty"`
 	}
-
-	ctx := context.Background()
 
 	// 按 username 索引容器记录
 	containerMap := make(map[string]*auth.ContainerRecord)
@@ -902,19 +903,13 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
 		containerMap[containers[i].Username] = &containers[i]
 	}
 
-	var list []UserInfo
+	var candidates []UserInfo
 
 	// 先输出所有有容器记录的用户
 	seen := make(map[string]bool)
 	for _, c := range containers {
 		seen[c.Username] = true
-		status := c.Status
-		if c.ContainerID != "" {
-			status = dockerpkg.ContainerStatus(ctx, c.ContainerID)
-		}
-
 		imageRef := c.Image
-		imageReady := imageRef != "" && dockerpkg.ImageExists(ctx, imageRef)
 		imageTag := imageRef
 		if parts := strings.SplitN(imageRef, ":", 2); len(parts) == 2 {
 			imageTag = parts[1]
@@ -926,12 +921,12 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
 			source = "unknown"
 		}
 
-		list = append(list, UserInfo{
+		candidates = append(candidates, UserInfo{
 			Username:   c.Username,
 			Source:     source,
-			Status:     status,
+			Status:     c.Status,
 			ImageTag:   imageTag,
-			ImageReady: imageReady,
+			ImageReady: imageRef != "",
 			IP:         c.IP,
 			Role:       role,
 		})
@@ -944,12 +939,47 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
 			if source == "" {
 				source = "local"
 			}
-			list = append(list, UserInfo{
+			candidates = append(candidates, UserInfo{
 				Username: u.Username,
 				Source:   source,
 				Status:   "未初始化",
 				Role:     u.Role,
 			})
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].Username < candidates[j].Username
+	})
+	if pager.Search != "" {
+		filtered := candidates[:0]
+		for _, u := range candidates {
+			if strings.Contains(strings.ToLower(u.Username), pager.Search) ||
+				strings.Contains(strings.ToLower(u.Source), pager.Search) ||
+				strings.Contains(strings.ToLower(u.Role), pager.Search) {
+				filtered = append(filtered, u)
+			}
+		}
+		candidates = filtered
+	}
+
+	list, total, totalPages, page, pageSize := paginateSlice(candidates, pager)
+
+	includeRuntime := c.Query("runtime") != "false"
+	var ctx context.Context
+	if includeRuntime {
+		ctx = context.Background()
+	}
+	for i := range list {
+		rec := containerMap[list[i].Username]
+		if rec != nil && includeRuntime {
+			if rec.ContainerID != "" {
+				list[i].Status = dockerpkg.ContainerStatus(ctx, rec.ContainerID)
+			}
+			list[i].ImageReady = rec.Image != "" && dockerpkg.ImageExists(ctx, rec.Image)
+		}
+		if groups, err := auth.GetGroupsForUser(list[i].Username); err == nil && len(groups) > 0 {
+			list[i].Groups = groups
 		}
 	}
 
@@ -962,7 +992,11 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
 		Users       []UserInfo `json:"users"`
 		AuthMode    string     `json:"auth_mode"`
 		UnifiedAuth bool       `json:"unified_auth"`
-	}{true, list, s.cfg.AuthMode(), s.cfg.UnifiedAuthEnabled()})
+		Page        int        `json:"page,omitempty"`
+		PageSize    int        `json:"page_size,omitempty"`
+		Total       int        `json:"total,omitempty"`
+		TotalPages  int        `json:"total_pages,omitempty"`
+	}{true, list, s.cfg.AuthMode(), s.cfg.UnifiedAuthEnabled(), page, pageSize, total, totalPages})
 }
 
 // ============================================================
@@ -1706,19 +1740,51 @@ func (s *Server) handleAdminAuthLDAPUsers(c *gin.Context) {
 		return
 	}
 
-	users, err := ldap.FetchUsers(s.cfg)
-	if err != nil {
-		writeError(c, http.StatusInternalServerError, err.Error())
-		return
+	var users []string
+	source := strings.ToLower(strings.TrimSpace(c.Query("source")))
+	if source == "directory" || source == "remote" || !s.cfg.UnifiedAuthEnabled() {
+		var err error
+		users, err = ldap.FetchUsers(s.cfg)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else {
+		localUsers, err := auth.GetExternalUsers("ldap")
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		users = make([]string, 0, len(localUsers))
+		for _, u := range localUsers {
+			if u.Role != "superadmin" {
+				users = append(users, u.Username)
+			}
+		}
 	}
 
 	if users == nil {
 		users = []string{}
 	}
+	pager := parsePagination(c, 50, 200)
+	if pager.Search != "" {
+		filtered := users[:0]
+		for _, username := range users {
+			if strings.Contains(strings.ToLower(username), pager.Search) {
+				filtered = append(filtered, username)
+			}
+		}
+		users = filtered
+	}
+	users, total, totalPages, page, pageSize := paginateSlice(users, pager)
 	writeJSON(c, http.StatusOK, struct {
-		Success bool     `json:"success"`
-		Users   []string `json:"users"`
-	}{true, users})
+		Success    bool     `json:"success"`
+		Users      []string `json:"users"`
+		Page       int      `json:"page,omitempty"`
+		PageSize   int      `json:"page_size,omitempty"`
+		Total      int      `json:"total,omitempty"`
+		TotalPages int      `json:"total_pages,omitempty"`
+	}{true, users, page, pageSize, total, totalPages})
 }
 
 func (s *Server) handleAdminAuthSyncUsers(c *gin.Context) {
@@ -1792,10 +1858,25 @@ func (s *Server) handleAdminWhitelistGet(c *gin.Context) {
 	if users == nil {
 		users = []string{}
 	}
+	pager := parsePagination(c, 50, 200)
+	if pager.Search != "" {
+		filtered := users[:0]
+		for _, username := range users {
+			if strings.Contains(strings.ToLower(username), pager.Search) {
+				filtered = append(filtered, username)
+			}
+		}
+		users = filtered
+	}
+	users, total, totalPages, page, pageSize := paginateSlice(users, pager)
 	writeJSON(c, http.StatusOK, struct {
-		Success bool     `json:"success"`
-		Users   []string `json:"users"`
-	}{true, users})
+		Success    bool     `json:"success"`
+		Users      []string `json:"users"`
+		Page       int      `json:"page,omitempty"`
+		PageSize   int      `json:"page_size,omitempty"`
+		Total      int      `json:"total,omitempty"`
+		TotalPages int      `json:"total_pages,omitempty"`
+	}{true, users, page, pageSize, total, totalPages})
 }
 
 // handleAdminWhitelistPost 更新白名单
@@ -1807,6 +1888,8 @@ func (s *Server) handleAdminWhitelistPost(c *gin.Context) {
 		writeError(c, http.StatusForbidden, "无效请求")
 		return
 	}
+	addStr := strings.TrimSpace(c.PostForm("add"))
+	removeStr := strings.TrimSpace(c.PostForm("remove"))
 	usersStr := c.PostForm("users")
 	var users []string
 	if usersStr != "" {
@@ -1832,16 +1915,34 @@ func (s *Server) handleAdminWhitelistPost(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	session.Exec("DELETE FROM whitelist")
-	for _, u := range users {
-		session.Exec("INSERT OR IGNORE INTO whitelist (username, added_by) VALUES (?, ?)", u, operator)
+	changedCount := len(users)
+	if addStr != "" || removeStr != "" {
+		for _, u := range strings.Split(addStr, ",") {
+			u = strings.TrimSpace(u)
+			if u != "" {
+				session.Exec("INSERT OR IGNORE INTO whitelist (username, added_by) VALUES (?, ?)", u, operator)
+				changedCount++
+			}
+		}
+		for _, u := range strings.Split(removeStr, ",") {
+			u = strings.TrimSpace(u)
+			if u != "" {
+				session.Exec("DELETE FROM whitelist WHERE username = ?", u)
+				changedCount++
+			}
+		}
+	} else {
+		session.Exec("DELETE FROM whitelist")
+		for _, u := range users {
+			session.Exec("INSERT OR IGNORE INTO whitelist (username, added_by) VALUES (?, ?)", u, operator)
+		}
 	}
 	if err := session.Commit(); err != nil {
 		writeError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeSuccess(c, "白名单已更新")
-	logger.Audit("whitelist.update", "count", len(users), "operator", operator)
+	logger.Audit("whitelist.update", "count", changedCount, "operator", operator)
 }
 
 // ============================================================
@@ -1910,12 +2011,30 @@ func (s *Server) handleAdminSkills(c *gin.Context) {
 	if skills == nil {
 		skills = []SkillInfo{}
 	}
+	sort.Slice(skills, func(i, j int) bool {
+		return skills[i].Name < skills[j].Name
+	})
+	pager := parsePagination(c, 50, 200)
+	if pager.Search != "" {
+		filtered := skills[:0]
+		for _, sk := range skills {
+			if strings.Contains(strings.ToLower(sk.Name), pager.Search) {
+				filtered = append(filtered, sk)
+			}
+		}
+		skills = filtered
+	}
+	skills, total, totalPages, page, pageSize := paginateSlice(skills, pager)
 
 	writeJSON(c, http.StatusOK, struct {
-		Success bool               `json:"success"`
-		Skills  []SkillInfo        `json:"skills"`
-		Repos   []config.SkillRepo `json:"repos"`
-	}{true, skills, s.cfg.Skills.Repos})
+		Success    bool               `json:"success"`
+		Skills     []SkillInfo        `json:"skills"`
+		Repos      []config.SkillRepo `json:"repos"`
+		Page       int                `json:"page,omitempty"`
+		PageSize   int                `json:"page_size,omitempty"`
+		Total      int                `json:"total,omitempty"`
+		TotalPages int                `json:"total_pages,omitempty"`
+	}{true, skills, s.cfg.Skills.Repos, page, pageSize, total, totalPages})
 }
 
 func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
@@ -2531,10 +2650,27 @@ func (s *Server) handleAdminGroups(c *gin.Context) {
 	if groups == nil {
 		groups = []auth.GroupInfo{}
 	}
+	pager := parsePagination(c, 50, 200)
+	if pager.Search != "" {
+		filtered := groups[:0]
+		for _, g := range groups {
+			if strings.Contains(strings.ToLower(g.Name), pager.Search) ||
+				strings.Contains(strings.ToLower(g.Source), pager.Search) ||
+				strings.Contains(strings.ToLower(g.Description), pager.Search) {
+				filtered = append(filtered, g)
+			}
+		}
+		groups = filtered
+	}
+	groups, total, totalPages, page, pageSize := paginateSlice(groups, pager)
 	writeJSON(c, http.StatusOK, struct {
-		Success bool             `json:"success"`
-		Groups  []auth.GroupInfo `json:"groups"`
-	}{true, groups})
+		Success    bool             `json:"success"`
+		Groups     []auth.GroupInfo `json:"groups"`
+		Page       int              `json:"page,omitempty"`
+		PageSize   int              `json:"page_size,omitempty"`
+		Total      int              `json:"total,omitempty"`
+		TotalPages int              `json:"total_pages,omitempty"`
+	}{true, groups, page, pageSize, total, totalPages})
 }
 
 func (s *Server) handleAdminGroupCreate(c *gin.Context) {
@@ -2783,6 +2919,21 @@ func (s *Server) handleAdminGroupMembers(c *gin.Context) {
 	if inheritedMembers == nil {
 		inheritedMembers = []string{}
 	}
+	pager := parsePagination(c, 50, 200)
+	if pager.Search != "" {
+		filterMembers := func(input []string) []string {
+			filtered := input[:0]
+			for _, username := range input {
+				if strings.Contains(strings.ToLower(username), pager.Search) {
+					filtered = append(filtered, username)
+				}
+			}
+			return filtered
+		}
+		members = filterMembers(members)
+		inheritedMembers = filterMembers(inheritedMembers)
+	}
+	members, memberTotal, memberTotalPages, memberPage, memberPageSize := paginateSlice(members, pager)
 	if skills == nil {
 		skills = []string{}
 	}
@@ -2791,7 +2942,11 @@ func (s *Server) handleAdminGroupMembers(c *gin.Context) {
 		Members          []string `json:"members"`
 		InheritedMembers []string `json:"inherited_members"`
 		Skills           []string `json:"skills"`
-	}{true, members, inheritedMembers, skills})
+		Page             int      `json:"page,omitempty"`
+		PageSize         int      `json:"page_size,omitempty"`
+		Total            int      `json:"total,omitempty"`
+		TotalPages       int      `json:"total_pages,omitempty"`
+	}{true, members, inheritedMembers, skills, memberPage, memberPageSize, memberTotal, memberTotalPages})
 }
 
 // handleAdminAuthSyncGroups 手动触发 LDAP 组同步

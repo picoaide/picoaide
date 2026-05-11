@@ -311,6 +311,41 @@ label.toggle-switch,
 }
 .toolbar-title { font-weight: 800; color: var(--text); }
 .toolbar-subtitle { color: var(--text-muted); font-size: .84rem; margin-top: .1rem; }
+.list-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  flex-wrap: wrap;
+  margin-bottom: .85rem;
+}
+.list-search {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex: 1 1 280px;
+  min-width: min(100%, 260px);
+}
+.list-search input { min-width: 0; }
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-top: .85rem;
+}
+.pager select {
+  width: auto;
+  min-width: 86px;
+  padding: .34rem .5rem;
+}
+.pager-info {
+  color: var(--text-muted);
+  font-size: .84rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
 .segmented {
   display: inline-flex;
   align-items: center;

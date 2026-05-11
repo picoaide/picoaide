@@ -66,7 +66,16 @@
     <div class="modal-header">依赖用户<button id="image-users-close">&times;</button></div>
     <div class="modal-body">
       <p id="image-users-title" style="font-family:monospace;font-size:13px;word-break:break-all"></p>
+      <div class="list-search mb-1">
+        <input type="search" id="image-users-search" placeholder="搜索用户名">
+        <button class="btn btn-outline btn-sm" id="image-users-search-btn">搜索</button>
+      </div>
       <div id="image-users-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      <div class="pager" id="image-users-pager">
+        <span class="pager-info" id="image-users-page-info"></span>
+        <button class="btn btn-outline btn-sm" id="image-users-prev">上一页</button>
+        <button class="btn btn-outline btn-sm" id="image-users-next">下一页</button>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" id="image-users-close-btn">关闭</button>
@@ -99,6 +108,11 @@
           <button class="btn btn-sm btn-outline" id="upgrade-deselect-all">清空</button>
         </div>
         <div id="upgrade-users" style="max-height:300px;overflow-y:auto;border:1px solid #ddd;border-radius:6px;background:#fff"></div>
+        <div class="pager" id="upgrade-pager">
+          <span class="pager-info" id="upgrade-page-info"></span>
+          <button class="btn btn-outline btn-sm" id="upgrade-prev">上一页</button>
+          <button class="btn btn-outline btn-sm" id="upgrade-next">下一页</button>
+        </div>
       </div>
 
       <div id="upgrade-progress" style="background:#1a1a2e;border-radius:4px;padding:8px;max-height:200px;overflow-y:auto;font-family:monospace;font-size:12px;color:#aaa;display:none"></div>

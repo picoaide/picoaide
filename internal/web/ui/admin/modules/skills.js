@@ -131,9 +131,48 @@ function readRepoCard(card) {
 
 export async function init(ctx) {
   const { Api, esc, showMsg } = ctx;
+  let skillsPage = 1;
+  let skillsPageSize = 50;
+  let skillsTotalPages = 1;
+  let skillsSearch = '';
+
   await loadSkills();
   await loadRepos();
   ctx.$('#deploy-btn').addEventListener('click', deploySkills);
+  ctx.$('#skills-search-btn')?.addEventListener('click', () => {
+    skillsSearch = ctx.$('#skills-search').value.trim();
+    skillsPage = 1;
+    loadSkills();
+  });
+  ctx.$('#skills-search')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      skillsSearch = e.target.value.trim();
+      skillsPage = 1;
+      loadSkills();
+    }
+  });
+  ctx.$('#skills-page-size')?.addEventListener('change', e => {
+    skillsPageSize = Number(e.target.value) || 50;
+    skillsPage = 1;
+    loadSkills();
+  });
+  ctx.$('#skills-prev')?.addEventListener('click', () => {
+    if (skillsPage > 1) {
+      skillsPage--;
+      loadSkills();
+    }
+  });
+  ctx.$('#skills-next')?.addEventListener('click', () => {
+    if (skillsPage < skillsTotalPages) {
+      skillsPage++;
+      loadSkills();
+    }
+  });
+  ctx.$('#deploy-target-type')?.addEventListener('change', loadDeployTargets);
+  ctx.$('#deploy-target-search-btn')?.addEventListener('click', loadDeployTargets);
+  ctx.$('#deploy-target-search')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') loadDeployTargets();
+  });
   ctx.$('#skill-add-btn')?.addEventListener('click', addSkill);
   ctx.$('[data-skill-source="zip"]')?.addEventListener('click', () => setSkillSource('zip'));
   ctx.$('[data-skill-source="git"]')?.addEventListener('click', () => setSkillSource('git'));
@@ -171,8 +210,14 @@ export async function init(ctx) {
     tbody.innerHTML = '';
     empty.classList.add('hidden');
 
-    const data = await Api.get('/api/admin/skills');
+    const params = new URLSearchParams({ page: String(skillsPage), page_size: String(skillsPageSize) });
+    if (skillsSearch) params.set('search', skillsSearch);
+    const data = await Api.get('/api/admin/skills?' + params.toString());
     if (!data.success) return;
+    skillsPage = data.page || skillsPage;
+    skillsPageSize = data.page_size || skillsPageSize;
+    skillsTotalPages = data.total_pages || 1;
+    updateSkillsPager(data);
 
     const skills = data.skills || [];
     if (skills.length === 0) { empty.classList.remove('hidden'); }
@@ -203,42 +248,47 @@ export async function init(ctx) {
     skillSel.innerHTML = '<option value="">所有技能</option>';
     for (const sk of skills) skillSel.innerHTML += '<option value="' + esc(sk.name) + '">' + esc(sk.name) + '</option>';
 
-    try {
-      const uData = await Api.get('/api/admin/users');
-      const userGroup = ctx.$('#deploy-user-group');
-      userGroup.innerHTML = '';
+    await loadDeployTargets();
+  }
+
+  function updateSkillsPager(data) {
+    const info = ctx.$('#skills-page-info');
+    if (info) info.textContent = '第 ' + (data.page || 1) + ' / ' + (data.total_pages || 1) + ' 页，共 ' + (data.total || 0) + ' 个技能';
+    const sizeSel = ctx.$('#skills-page-size');
+    if (sizeSel) sizeSel.value = String(skillsPageSize);
+    const prev = ctx.$('#skills-prev');
+    const next = ctx.$('#skills-next');
+    if (prev) prev.disabled = skillsPage <= 1;
+    if (next) next.disabled = skillsPage >= skillsTotalPages;
+  }
+
+  async function loadDeployTargets() {
+    const select = ctx.$('#deploy-target');
+    const type = ctx.$('#deploy-target-type')?.value || 'all';
+    const q = ctx.$('#deploy-target-search')?.value.trim() || '';
+    select.innerHTML = '<option value="all">所有用户</option>';
+    if (type === 'all') return;
+    const params = new URLSearchParams({ page: '1', page_size: '100' });
+    if (q) params.set('search', q);
+    if (type === 'user') {
+      params.set('runtime', 'false');
+      const uData = await Api.get('/api/admin/users?' + params.toString()).catch(() => ({}));
       for (const u of (uData.users || [])) {
         if (u.role === 'superadmin') continue;
         const opt = document.createElement('option');
         opt.value = 'user:' + u.username;
         opt.textContent = u.username;
-        userGroup.appendChild(opt);
+        select.appendChild(opt);
       }
-    } catch {}
-
-    try {
-      const gData = await Api.get('/api/admin/groups');
-      const groupGroup = ctx.$('#deploy-group-group');
-      groupGroup.innerHTML = '';
-      const groups = gData.groups || [];
-      const byParent = {};
-      for (const g of groups) {
-        const pid = g.parent_id || 'root';
-        if (!byParent[pid]) byParent[pid] = [];
-        byParent[pid].push(g);
+    } else if (type === 'group') {
+      const gData = await Api.get('/api/admin/groups?' + params.toString()).catch(() => ({}));
+      for (const g of (gData.groups || [])) {
+        const opt = document.createElement('option');
+        opt.value = 'group:' + g.name;
+        opt.textContent = g.name + ' (' + g.member_count + '人)';
+        select.appendChild(opt);
       }
-      function addTreeOptions(parentId, depth) {
-        const children = byParent[parentId] || [];
-        for (const g of children) {
-          const opt = document.createElement('option');
-          opt.value = 'group:' + g.name;
-          opt.textContent = '\u00A0\u00A0'.repeat(depth) + (depth > 0 ? '└ ' : '') + g.name + ' (' + g.member_count + '人)';
-          groupGroup.appendChild(opt);
-          addTreeOptions(g.id, depth + 1);
-        }
-      }
-      addTreeOptions('root', 0);
-    } catch {}
+    }
   }
 
   async function uploadSkillZip(name) {
