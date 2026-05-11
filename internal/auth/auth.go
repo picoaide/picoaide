@@ -54,6 +54,7 @@ type LocalUser struct {
 	Username     string `xorm:"unique notnull 'username'"`
 	PasswordHash string `xorm:"notnull 'password_hash'"`
 	Role         string `xorm:"notnull 'role'"`
+	Source       string `xorm:"notnull 'source'"`
 	CreatedAt    string `xorm:"notnull 'created_at'"`
 }
 
@@ -276,11 +277,14 @@ func syncSchema() error {
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'user',
+    source TEXT NOT NULL DEFAULT 'local',
     created_at DATETIME NOT NULL DEFAULT (datetime('now', 'localtime'))
   )`)
 	if err != nil {
 		return err
 	}
+	// 迁移：旧数据库 local_users 表没有 source 列
+	engine.Exec(`ALTER TABLE local_users ADD COLUMN source TEXT NOT NULL DEFAULT 'local'`)
 	_, err = engine.Exec(`CREATE TABLE IF NOT EXISTS containers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
@@ -465,10 +469,61 @@ func CreateUser(username, password, role string) error {
 		Username:     username,
 		PasswordHash: string(hash),
 		Role:         role,
+		Source:       "local",
 	}
 	_, err = engine.Insert(user)
 	if err != nil {
 		return fmt.Errorf("创建用户失败: %w", err)
+	}
+	return nil
+}
+
+// EnsureExternalUser 确保统一认证用户在本地用户表存在。
+// 密码写入随机不可知值；统一认证模式下登录仍只走外部认证。
+func EnsureExternalUser(username, role, source string) error {
+	if err := ensureDB(); err != nil {
+		return err
+	}
+	if role == "" {
+		role = "user"
+	}
+	if source == "" {
+		source = "external"
+	}
+
+	var existing LocalUser
+	has, err := engine.Where("username = ?", username).Get(&existing)
+	if err != nil {
+		return fmt.Errorf("查询用户失败: %w", err)
+	}
+	if has && existing.Role == "superadmin" {
+		return fmt.Errorf("用户 %s 是本地超管，不能转换为统一认证用户", username)
+	}
+
+	randomPassword := GenerateRandomPassword(32)
+	hash, err := hashPassword(randomPassword)
+	if err != nil {
+		return fmt.Errorf("密码哈希失败: %w", err)
+	}
+
+	if has {
+		_, err = engine.Where("username = ?", username).
+			Cols("password_hash", "role", "source").
+			Update(&LocalUser{PasswordHash: hash, Role: role, Source: source})
+		if err != nil {
+			return fmt.Errorf("更新统一认证用户失败: %w", err)
+		}
+		return nil
+	}
+
+	_, err = engine.Insert(&LocalUser{
+		Username:     username,
+		PasswordHash: hash,
+		Role:         role,
+		Source:       source,
+	})
+	if err != nil {
+		return fmt.Errorf("创建统一认证用户失败: %w", err)
 	}
 	return nil
 }
@@ -512,6 +567,28 @@ func UserExists(username string) bool {
 	return has
 }
 
+// GetUserSource 返回用户来源：local、ldap 或其他外部认证来源。
+func GetUserSource(username string) string {
+	if ensureDB() != nil {
+		return ""
+	}
+	var user LocalUser
+	has, err := engine.Where("username = ?", username).Get(&user)
+	if err != nil || !has {
+		return ""
+	}
+	if user.Source == "" {
+		return "local"
+	}
+	return user.Source
+}
+
+// IsExternalUser 检查用户是否来自统一认证源。
+func IsExternalUser(username string) bool {
+	source := GetUserSource(username)
+	return source != "" && source != "local"
+}
+
 // GetAllLocalUsers 返回所有本地用户
 func GetAllLocalUsers() ([]LocalUser, error) {
 	if err := ensureDB(); err != nil {
@@ -525,7 +602,7 @@ func GetAllLocalUsers() ([]LocalUser, error) {
 	// 转换为只含 Username/Role 的结构（保持原返回类型）
 	result := make([]LocalUser, 0, len(users))
 	for _, u := range users {
-		result = append(result, LocalUser{Username: u.Username, Role: u.Role})
+		result = append(result, LocalUser{Username: u.Username, Role: u.Role, Source: u.Source})
 	}
 	return result, nil
 }
@@ -992,6 +1069,51 @@ func SyncUserGroups(username string, groupNames []string) error {
 			continue
 		}
 		session.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", username, group.ID)
+	}
+
+	return session.Commit()
+}
+
+// ReplaceLDAPGroupMembers 用 LDAP 当前结果整体替换 LDAP 组成员关系。
+func ReplaceLDAPGroupMembers(groupMembers map[string][]string) error {
+	if err := ensureDB(); err != nil {
+		return err
+	}
+	session := engine.NewSession()
+	defer session.Close()
+
+	if err := session.Begin(); err != nil {
+		return err
+	}
+
+	for groupName := range groupMembers {
+		if _, err := session.Exec("INSERT OR IGNORE INTO groups (name, source) VALUES (?, 'ldap')", groupName); err != nil {
+			_ = session.Rollback()
+			return err
+		}
+	}
+
+	if _, err := session.Exec("DELETE FROM user_groups WHERE group_id IN (SELECT id FROM groups WHERE source = 'ldap')"); err != nil {
+		_ = session.Rollback()
+		return err
+	}
+
+	for groupName, members := range groupMembers {
+		var group Group
+		has, err := session.Where("name = ?", groupName).Get(&group)
+		if err != nil {
+			_ = session.Rollback()
+			return err
+		}
+		if !has {
+			continue
+		}
+		for _, username := range members {
+			if _, err := session.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", username, group.ID); err != nil {
+				_ = session.Rollback()
+				return err
+			}
+		}
 	}
 
 	return session.Commit()

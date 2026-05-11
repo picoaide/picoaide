@@ -53,6 +53,40 @@ func TestCreateAndAuthenticate(t *testing.T) {
 	}
 }
 
+func TestEnsureExternalUserStoresSourceAndRotatesLocalPassword(t *testing.T) {
+	testInitDB(t)
+
+	if err := EnsureExternalUser("ldapuser", "user", "ldap"); err != nil {
+		t.Fatalf("EnsureExternalUser: %v", err)
+	}
+	if !UserExists("ldapuser") {
+		t.Fatal("external user should exist locally")
+	}
+	if got := GetUserSource("ldapuser"); got != "ldap" {
+		t.Fatalf("source = %q, want ldap", got)
+	}
+	if !IsExternalUser("ldapuser") {
+		t.Fatal("ldapuser should be external")
+	}
+	if ok, _, err := AuthenticateLocal("ldapuser", "password123"); err != nil || ok {
+		t.Fatalf("AuthenticateLocal external user ok=%v err=%v, want false nil", ok, err)
+	}
+
+	if err := EnsureExternalUser("ldapuser", "user", "ldap"); err != nil {
+		t.Fatalf("EnsureExternalUser second call: %v", err)
+	}
+	users, err := GetAllLocalUsers()
+	if err != nil {
+		t.Fatalf("GetAllLocalUsers: %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("local user count = %d, want 1", len(users))
+	}
+	if users[0].Source != "ldap" {
+		t.Fatalf("listed source = %q, want ldap", users[0].Source)
+	}
+}
+
 func TestAuthenticateLocalUpgradesBcryptHash(t *testing.T) {
 	testInitDB(t)
 
@@ -225,6 +259,42 @@ func TestSyncUserGroups(t *testing.T) {
 		if g == "group1" {
 			t.Error("group1 should have been removed")
 		}
+	}
+}
+
+func TestReplaceLDAPGroupMembersRemovesStaleRelations(t *testing.T) {
+	testInitDB(t)
+
+	if err := CreateGroup("local-team", "local", "", nil); err != nil {
+		t.Fatalf("CreateGroup local: %v", err)
+	}
+	if err := AddUsersToGroup("local-team", []string{"local-user"}); err != nil {
+		t.Fatalf("AddUsersToGroup local: %v", err)
+	}
+	if err := ReplaceLDAPGroupMembers(map[string][]string{
+		"ldap-team": {"alice", "bob"},
+	}); err != nil {
+		t.Fatalf("ReplaceLDAPGroupMembers first: %v", err)
+	}
+	if err := ReplaceLDAPGroupMembers(map[string][]string{
+		"ldap-team": {"bob"},
+	}); err != nil {
+		t.Fatalf("ReplaceLDAPGroupMembers second: %v", err)
+	}
+
+	ldapMembers, err := GetGroupMembers("ldap-team")
+	if err != nil {
+		t.Fatalf("GetGroupMembers ldap-team: %v", err)
+	}
+	if len(ldapMembers) != 1 || ldapMembers[0] != "bob" {
+		t.Fatalf("ldap-team members = %v, want [bob]", ldapMembers)
+	}
+	localMembers, err := GetGroupMembers("local-team")
+	if err != nil {
+		t.Fatalf("GetGroupMembers local-team: %v", err)
+	}
+	if len(localMembers) != 1 || localMembers[0] != "local-user" {
+		t.Fatalf("local-team members = %v, want [local-user]", localMembers)
 	}
 }
 

@@ -28,7 +28,7 @@ export async function init(ctx) {
 
   async function loadUsers() {
     const tbody = ctx.$('#users-tbody');
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center">加载中...</td></tr>';
     ctx.$('#users-empty').classList.add('hidden');
 
     const data = await Api.get('/api/admin/users');
@@ -73,7 +73,7 @@ export async function init(ctx) {
       actions += '<button class="btn btn-sm btn-danger" data-action="delete" data-user="' + esc(u.username) + '">删除用户</button>';
       actions += '</span></span>';
       actions += '</div>';
-      tr.innerHTML = '<td><strong>' + esc(u.username) + '</strong></td><td>' + (groupTags || '<small class="text-muted">-</small>') + '</td><td><span class="badge ' + statusCls + '">' + esc(u.status) + '</span></td><td>' + imageText + ' ' + imgBadge + '</td><td>' + esc(u.ip || '-') + '</td><td class="actions-cell">' + actions + '</td>';
+      tr.innerHTML = '<td><strong>' + esc(u.username) + '</strong></td><td>' + renderSource(u.source) + '</td><td>' + (groupTags || '<small class="text-muted">-</small>') + '</td><td><span class="badge ' + statusCls + '">' + esc(u.status) + '</span></td><td>' + imageText + ' ' + imgBadge + '</td><td>' + esc(u.ip || '-') + '</td><td class="actions-cell">' + actions + '</td>';
       tbody.appendChild(tr);
     }
 
@@ -138,6 +138,13 @@ export async function init(ctx) {
     return '<div class="group-tags" data-groups-wrap data-expanded="false">' + html +
       '<button type="button" class="tag group-tag-toggle" data-groups-toggle data-remaining="' + remaining + '" aria-expanded="false">+' + remaining + '</button>' +
       '</div>';
+  }
+
+  function renderSource(source) {
+    if (source === 'ldap') return '<span class="badge badge-ok">LDAP</span>';
+    if (source === 'local') return '<span class="badge badge-muted">本地</span>';
+    if (!source || source === 'unknown') return '<span class="badge badge-muted">未知</span>';
+    return '<span class="badge badge-muted">' + esc(source) + '</span>';
   }
 
   if (!actionMenuCloseBound) {

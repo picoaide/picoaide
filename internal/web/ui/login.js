@@ -11,6 +11,10 @@ function redirectByRole(info) {
     window.location.replace('/admin/dashboard');
     return;
   }
+  if (info.initializing) {
+    window.location.replace('/initializing');
+    return;
+  }
   window.location.replace('/manage');
 }
 
@@ -37,6 +41,10 @@ loginForm.addEventListener('submit', async function(e) {
       return;
     }
     loginPass.value = '';
+    if (res.initializing) {
+      window.location.replace('/initializing');
+      return;
+    }
     var info = await apiJSON('GET', '/api/user/info');
     if (!info.success) {
       showMsg(loginMsg, '无法获取用户信息', false);

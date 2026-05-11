@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PicoAide 初始化中</title>
+  <link rel="stylesheet" href="css/common.css">
+</head>
+<body>
+  <main class="login-shell">
+    <section class="login-panel init-panel">
+      <div class="login-brand">
+        <img class="login-logo" src="images/logo-mark.svg" alt="">
+        <div>
+          <div class="login-product">PicoAide</div>
+          <div class="login-subtitle">用户环境初始化</div>
+        </div>
+      </div>
+
+      <div class="login-heading">
+        <h1>正在初始化环境</h1>
+        <p>正在准备你的用户目录、配置和运行容器，请稍后。</p>
+      </div>
+
+      <div class="init-status">
+        <div class="init-spinner" aria-hidden="true"></div>
+        <div>
+          <div id="init-title" class="init-title">检查初始化状态...</div>
+          <div id="init-detail" class="text-muted">完成后将自动进入个人后台。</div>
+        </div>
+      </div>
+
+      <div id="init-msg" class="msg"></div>
+      <button class="btn btn-outline login-submit" id="logout-btn" type="button">退出登录</button>
+    </section>
+  </main>
+
+  <script src="js/common.js"></script>
+  <script src="initializing.js"></script>
+</body>
+</html>

@@ -84,14 +84,22 @@ func ensureSessionSecret(cfg *config.GlobalConfig) (string, error) {
 	return secret, nil
 }
 
-// startLDAPSyncScheduler 定时同步 LDAP 组
+// startLDAPSyncScheduler 定时同步 LDAP 用户和组
 func (s *Server) startLDAPSyncScheduler(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	slog.Info("LDAP 定时同步已启动", "interval", interval)
 	for range ticker.C {
-		s.syncLDAPGroups()
+		s.syncLDAPDirectory()
 	}
+}
+
+// syncLDAPDirectory 执行 LDAP 账号和组同步。
+func (s *Server) syncLDAPDirectory() {
+	if _, err := s.syncLDAPUsersFromDirectory(false); err != nil {
+		slog.Error("LDAP 用户定时同步失败", "error", err)
+	}
+	s.syncLDAPGroups()
 }
 
 // syncLDAPGroups 执行 LDAP 组同步
@@ -109,18 +117,30 @@ func (s *Server) syncLDAPGroups() {
 	}
 	whitelist, _ := user.LoadWhitelist()
 	groupCount := 0
+	groupMembers := make(map[string][]string, len(groupMap))
 	for groupName, group := range groupMap {
 		auth.CreateGroup(groupName, "ldap", "", nil)
 		groupCount++
 		var filtered []string
 		for _, m := range group.Members {
 			if whitelist == nil || whitelist[m] {
+				if err := auth.EnsureExternalUser(m, "user", "ldap"); err != nil {
+					slog.Warn("同步 LDAP 用户失败", "username", m, "error", err)
+					continue
+				}
+				if rec, _ := auth.GetContainerByUsername(m); rec == nil {
+					if err := s.initLDAPUser(m); err != nil {
+						slog.Warn("初始化 LDAP 用户失败", "username", m, "error", err)
+						continue
+					}
+				}
 				filtered = append(filtered, m)
 			}
 		}
-		if len(filtered) > 0 {
-			auth.AddUsersToGroup(groupName, filtered)
-		}
+		groupMembers[groupName] = filtered
+	}
+	if err := auth.ReplaceLDAPGroupMembers(groupMembers); err != nil {
+		slog.Error("LDAP 组成员同步失败", "error", err)
 	}
 	if s.cfg.LDAP.GroupSearchMode == "group_search" {
 		s.syncLDAPGroupParents(groupMap)
@@ -198,7 +218,7 @@ func (s *Server) sessionUserAllowed(username string) bool {
 	if !s.cfg.LDAPEnabled() {
 		return false
 	}
-	if auth.UserExists(username) {
+	if auth.UserExists(username) && !auth.IsExternalUser(username) {
 		return false
 	}
 	whitelist, _ := user.LoadWhitelist()
@@ -315,6 +335,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 
 	r.POST("/api/logout", s.handleLogout)
 	r.GET("/api/user/info", s.handleUserInfo)
+	r.GET("/api/user/init-status", s.handleUserInitStatus)
 	r.POST("/api/user/password", s.handleChangePassword)
 	// 钉钉配置
 	r.GET("/api/dingtalk", s.handleDingTalkGet)

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -163,26 +165,28 @@ func (s *Server) handleLogin(c *gin.Context) {
 		writeError(c, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
-	if auth.UserExists(username) {
-		if err := auth.DeleteUser(username); err != nil {
-			writeError(c, http.StatusInternalServerError, "清理本地账号失败: "+err.Error())
-			return
-		}
-	}
 
 	whitelist, _ := user.LoadWhitelist()
 	if !user.IsWhitelisted(whitelist, username) {
 		writeError(c, http.StatusForbidden, "请联系管理员添加白名单")
 		return
 	}
+	if err := auth.EnsureExternalUser(username, "user", "ldap"); err != nil {
+		writeError(c, http.StatusInternalServerError, "同步本地用户失败: "+err.Error())
+		return
+	}
 
 	// 首次登录自动初始化（创建容器记录，分配 IP）
+	initializing := false
 	if rec, _ := auth.GetContainerByUsername(username); rec == nil {
+		initializing = true
 		if err := s.initLDAPUser(username); err != nil {
 			logger.Audit("user.init_failed", "username", username, "method", "ldap", "error", err.Error())
 			writeError(c, http.StatusInternalServerError, "LDAP 登录成功，但初始化账号失败: "+err.Error())
 			return
 		}
+	} else if !s.userEnvironmentReady(username) {
+		initializing = true
 	}
 
 	// 异步同步用户的 LDAP 组
@@ -197,11 +201,13 @@ func (s *Server) handleLogin(c *gin.Context) {
 	s.setSessionCookie(c, s.createSessionToken(username), 86400)
 	logger.Audit("user.login", "username", username, "method", "ldap")
 	writeJSON(c, http.StatusOK, struct {
-		Success  bool   `json:"success"`
-		Username string `json:"username"`
+		Success      bool   `json:"success"`
+		Username     string `json:"username"`
+		Initializing bool   `json:"initializing"`
 	}{
-		Success:  true,
-		Username: username,
+		Success:      true,
+		Username:     username,
+		Initializing: initializing,
 	})
 }
 
@@ -428,17 +434,73 @@ func (s *Server) handleUserInfo(c *gin.Context) {
 	}
 
 	writeJSON(c, http.StatusOK, struct {
-		Success     bool   `json:"success"`
-		Username    string `json:"username"`
-		Role        string `json:"role"`
-		AuthMode    string `json:"auth_mode"`
-		UnifiedAuth bool   `json:"unified_auth"`
+		Success      bool   `json:"success"`
+		Username     string `json:"username"`
+		Role         string `json:"role"`
+		AuthMode     string `json:"auth_mode"`
+		UnifiedAuth  bool   `json:"unified_auth"`
+		Initializing bool   `json:"initializing"`
 	}{
-		Success:     true,
-		Username:    username,
-		Role:        role,
-		AuthMode:    s.cfg.AuthMode(),
-		UnifiedAuth: s.cfg.UnifiedAuthEnabled(),
+		Success:      true,
+		Username:     username,
+		Role:         role,
+		AuthMode:     s.cfg.AuthMode(),
+		UnifiedAuth:  s.cfg.UnifiedAuthEnabled(),
+		Initializing: role != "superadmin" && auth.IsExternalUser(username) && !s.userEnvironmentReady(username),
+	})
+}
+
+func (s *Server) userEnvironmentReady(username string) bool {
+	rec, _ := auth.GetContainerByUsername(username)
+	if rec == nil || rec.Image == "" {
+		return false
+	}
+	configPath := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "config.json")
+	if _, err := os.Stat(configPath); err != nil {
+		return false
+	}
+	if !s.dockerAvailable {
+		return true
+	}
+	if rec.ContainerID == "" {
+		return false
+	}
+	return dockerpkg.ContainerStatus(contextWithTimeout(5), rec.ContainerID) == "running"
+}
+
+func (s *Server) handleUserInitStatus(c *gin.Context) {
+	username := s.requireRegularUser(c)
+	if username == "" {
+		return
+	}
+
+	rec, _ := auth.GetContainerByUsername(username)
+	status := "未初始化"
+	imageReady := false
+	hasConfig := false
+	if rec != nil {
+		status = rec.Status
+		if s.dockerAvailable && rec.ContainerID != "" {
+			status = dockerpkg.ContainerStatus(contextWithTimeout(5), rec.ContainerID)
+		}
+		imageReady = rec.Image != ""
+		configPath := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "config.json")
+		_, err := os.Stat(configPath)
+		hasConfig = err == nil
+	}
+
+	writeJSON(c, http.StatusOK, struct {
+		Success    bool   `json:"success"`
+		Ready      bool   `json:"ready"`
+		Status     string `json:"status"`
+		ImageReady bool   `json:"image_ready"`
+		HasConfig  bool   `json:"has_config"`
+	}{
+		Success:    true,
+		Ready:      s.userEnvironmentReady(username),
+		Status:     status,
+		ImageReady: imageReady,
+		HasConfig:  hasConfig,
 	})
 }
 

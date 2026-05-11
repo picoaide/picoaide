@@ -729,6 +729,7 @@ func (s *Server) initLDAPUser(username string) error {
 type ldapUserSyncResult struct {
 	LDAPUserCount        int
 	AllowedUserCount     int
+	LocalUserSynced      int
 	InitializedCount     int
 	ImageUpdatedCount    int
 	DeletedLocalAuth     int
@@ -778,6 +779,11 @@ func (s *Server) syncLDAPUsersFromDirectory(cleanupStaleUsers bool) (*ldapUserSy
 	}
 
 	for _, username := range allowedUsers {
+		if err := auth.EnsureExternalUser(username, "user", "ldap"); err != nil {
+			return nil, err
+		}
+		result.LocalUserSynced++
+
 		rec, err := auth.GetContainerByUsername(username)
 		if err != nil {
 			return nil, err
@@ -820,6 +826,9 @@ func (s *Server) syncLDAPUsersFromDirectory(cleanupStaleUsers bool) (*ldapUserSy
 	}
 	for _, localUser := range localUsers {
 		if localUser.Role == "superadmin" {
+			continue
+		}
+		if localUser.Source != "" && localUser.Source != "local" {
 			continue
 		}
 		if err := auth.DeleteUser(localUser.Username); err == nil {
@@ -877,6 +886,7 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
 
 	type UserInfo struct {
 		Username   string `json:"username"`
+		Source     string `json:"source"`
 		Status     string `json:"status"`
 		ImageTag   string `json:"image_tag"`
 		ImageReady bool   `json:"image_ready"`
@@ -911,9 +921,14 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
 		}
 
 		role := localRoleMap[c.Username]
+		source := auth.GetUserSource(c.Username)
+		if source == "" {
+			source = "unknown"
+		}
 
 		list = append(list, UserInfo{
 			Username:   c.Username,
+			Source:     source,
 			Status:     status,
 			ImageTag:   imageTag,
 			ImageReady: imageReady,
@@ -925,8 +940,13 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
 	// 补上本地用户中没有容器记录的（如超管）
 	for _, u := range localUsers {
 		if !seen[u.Username] {
+			source := u.Source
+			if source == "" {
+				source = "local"
+			}
 			list = append(list, UserInfo{
 				Username: u.Username,
+				Source:   source,
 				Status:   "未初始化",
 				Role:     u.Role,
 			})
@@ -1725,9 +1745,10 @@ func (s *Server) handleAdminAuthSyncUsers(c *gin.Context) {
 		return
 	}
 
-	message := fmt.Sprintf("同步完成，LDAP %d 个账号，允许 %d 个，新初始化 %d 个，补齐镜像 %d 个，移除本地普通登录凭据 %d 个",
+	message := fmt.Sprintf("同步完成，LDAP %d 个账号，允许 %d 个，写入本地用户 %d 个，新初始化 %d 个，补齐镜像 %d 个，移除本地普通登录凭据 %d 个",
 		result.LDAPUserCount,
 		result.AllowedUserCount,
+		result.LocalUserSynced,
 		result.InitializedCount,
 		result.ImageUpdatedCount,
 		result.DeletedLocalAuth,
@@ -2786,7 +2807,7 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
 	}
 
 	groupCount := 0
-	userCount := result.GroupMemberCount
+	userCount := 0
 	if s.cfg.LDAP.GroupSearchMode != "" {
 		groupMap, err := ldap.FetchAllGroupsWithHierarchy(s.cfg)
 		if err != nil {
@@ -2796,6 +2817,7 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
 
 		// 获取白名单
 		whitelist, _ := user.LoadWhitelist()
+		groupMembers := make(map[string][]string, len(groupMap))
 
 		for groupName, group := range groupMap {
 			// 创建组（如果不存在）
@@ -2806,14 +2828,23 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
 			var filtered []string
 			for _, m := range group.Members {
 				if whitelist == nil || whitelist[m] {
+					if err := auth.EnsureExternalUser(m, "user", "ldap"); err != nil {
+						continue
+					}
+					if rec, _ := auth.GetContainerByUsername(m); rec == nil {
+						if err := s.initLDAPUser(m); err != nil {
+							continue
+						}
+					}
 					filtered = append(filtered, m)
 				}
 			}
-
-			if len(filtered) > 0 {
-				auth.AddUsersToGroup(groupName, filtered)
-				userCount += len(filtered)
-			}
+			groupMembers[groupName] = filtered
+			userCount += len(filtered)
+		}
+		if err := auth.ReplaceLDAPGroupMembers(groupMembers); err != nil {
+			writeError(c, http.StatusInternalServerError, "同步 LDAP 组成员失败: "+err.Error())
+			return
 		}
 		if s.cfg.LDAP.GroupSearchMode == "group_search" {
 			s.syncLDAPGroupParents(groupMap)

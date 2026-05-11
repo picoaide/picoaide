@@ -69,8 +69,19 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
 	r.GET("/login", func(c *gin.Context) {
 		serveHTML(c, "login.html")
 	})
+	r.GET("/initializing", func(c *gin.Context) {
+		if !requireManageUser(c) {
+			return
+		}
+		serveHTML(c, "initializing.html")
+	})
 	r.GET("/manage", func(c *gin.Context) {
 		if !requireManageUser(c) {
+			return
+		}
+		username := s.getSessionUser(c)
+		if username != "" && auth.IsExternalUser(username) && !s.userEnvironmentReady(username) {
+			c.Redirect(http.StatusFound, "/initializing")
 			return
 		}
 		serveHTML(c, "manage.html")
@@ -105,5 +116,6 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
 	}
 	r.GET("/manage.js", serveFile)
 	r.GET("/login.js", serveFile)
+	r.GET("/initializing.js", serveFile)
 	r.GET("/admin/admin.js", serveFile)
 }

@@ -571,6 +571,11 @@ tbody tr:hover { background: #f8fbff; }
 .login-highlights strong { display: block; margin-bottom: .35rem; color: #fff; font-size: .98rem; }
 .login-highlights span { display: block; color: rgba(255,255,255,.66); font-size: .84rem; line-height: 1.6; }
 .login-metrics { display: none; }
+.init-panel { max-width: 520px; margin-left: auto; }
+.init-status { display: flex; align-items: center; gap: .9rem; max-width: 360px; padding: 1rem; margin-bottom: 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: #f8fafc; }
+.init-spinner { width: 28px; height: 28px; flex: 0 0 auto; border: 3px solid #dbeafe; border-top-color: var(--primary); border-radius: 50%; animation: init-spin 1s linear infinite; }
+.init-title { margin-bottom: .2rem; color: var(--text); font-weight: 800; }
+@keyframes init-spin { to { transform: rotate(360deg); } }
 
 /* ===== Admin Sidebar ===== */
 .admin-layout { min-height: 100vh; width: 100%; overflow-x: hidden; }
