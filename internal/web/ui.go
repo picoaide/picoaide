@@ -106,7 +106,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
 		})
 	}
 
-	staticPrefixes := []string{"/css/", "/js/", "/admin/modules/", "/admin/templates/"}
+	staticPrefixes := []string{"/css/", "/js/", "/images/", "/admin/modules/", "/admin/templates/"}
 	for _, prefix := range staticPrefixes {
 		r.GET(prefix+"*filepath", func(c *gin.Context) {
 			cleanPath := strings.TrimPrefix(c.Request.URL.Path, "/")

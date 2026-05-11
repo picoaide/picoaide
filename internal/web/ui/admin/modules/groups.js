@@ -2,6 +2,7 @@ export async function init(ctx) {
   const { Api, esc, showMsg } = ctx;
 
   let currentGroups = [];
+  let isUnifiedAuth = false;
 
   ctx.$('#refresh-groups').addEventListener('click', loadGroups);
   ctx.$('#create-group-btn').addEventListener('click', () => openCreateGroupModal(currentGroups));
@@ -9,8 +10,9 @@ export async function init(ctx) {
   // 统一认证模式下隐藏新建组按钮
   try {
     const cfgData = await Api.get('/api/config');
-    const isUnified = cfgData.web?.auth_mode === 'ldap';
-    if (isUnified) {
+    const authMode = cfgData.web?.auth_mode || (cfgData.ldap?.enabled ? 'ldap' : 'local');
+    isUnifiedAuth = authMode !== 'local';
+    if (isUnifiedAuth) {
       ctx.$('#create-group-btn').classList.add('hidden');
     }
   } catch {}
@@ -48,7 +50,8 @@ export async function init(ctx) {
         const srcBadge = g.source === 'ldap' ? '<span class="badge badge-ok">LDAP</span>' : '<span class="badge badge-muted">本地</span>';
         const subCount = (byParent[g.id] || []).length;
         const subInfo = subCount > 0 ? ' <small class="text-muted">(' + subCount + ' 个子组)</small>' : '';
-        tr.innerHTML = '<td><strong>' + indent + esc(g.name) + '</strong>' + subInfo + '</td><td>' + srcBadge + '</td><td>' + g.member_count + '</td><td>' + g.skill_count + '</td><td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline" data-group-detail="' + esc(g.name) + '">详情</button><button class="btn btn-sm btn-outline" data-group-apply="' + esc(g.name) + '">下发配置</button><button class="btn btn-sm btn-danger" data-group-del="' + esc(g.name) + '">删除</button></div></td>';
+        const deleteBtn = isUnifiedAuth ? '' : '<button class="btn btn-sm btn-danger" data-group-del="' + esc(g.name) + '">删除</button>';
+        tr.innerHTML = '<td><strong>' + indent + esc(g.name) + '</strong>' + subInfo + '</td><td>' + srcBadge + '</td><td>' + g.member_count + '</td><td>' + g.skill_count + '</td><td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline" data-group-detail="' + esc(g.name) + '">详情</button><button class="btn btn-sm btn-outline" data-group-apply="' + esc(g.name) + '">下发配置</button>' + deleteBtn + '</div></td>';
         tbody.appendChild(tr);
         renderTree(g.id, depth + 1);
       }
@@ -147,10 +150,11 @@ export async function init(ctx) {
           '</div>' +
           '<div data-group-panel-body="members">' +
             '<div id="gd-members" class="mb-1"></div>' +
-            '<div class="row mb-1">' +
-              '<input type="text" id="gd-add-member" placeholder="用户名，多个用逗号分隔" style="flex:1">' +
-              '<button class="btn btn-sm btn-primary" id="gd-add-btn">添加成员</button>' +
-            '</div>' +
+            (isUnifiedAuth ? '<small class="text-muted">统一认证模式下成员由 LDAP 同步</small>' :
+              '<div class="row mb-1">' +
+                '<input type="text" id="gd-add-member" placeholder="用户名，多个用逗号分隔" style="flex:1">' +
+                '<button class="btn btn-sm btn-primary" id="gd-add-btn">添加成员</button>' +
+              '</div>') +
           '</div>' +
           '<div data-group-panel-body="skills" class="hidden">' +
             '<div id="gd-skills" class="mb-1"></div>' +
@@ -189,7 +193,7 @@ export async function init(ctx) {
       const el = overlay.querySelector('#gd-members');
       let html = '';
       if (members.length === 0) html += '<small class="text-muted">暂无直接成员</small>';
-      else html += members.map(m => '<span class="tag">' + esc(m) + ' <button data-rm-member="' + esc(m) + '">&times;</button></span>').join(' ');
+      else html += members.map(m => '<span class="tag">' + esc(m) + (isUnifiedAuth ? '' : ' <button data-rm-member="' + esc(m) + '">&times;</button>') + '</span>').join(' ');
       if (inheritedMembers.length > 0) {
         html += '<div class="mt-1"><small class="text-muted">子组成员</small><div>' +
           inheritedMembers.map(m => '<span class="tag">' + esc(m) + '</span>').join(' ') +
@@ -221,7 +225,7 @@ export async function init(ctx) {
     renderMembers();
     renderSkills();
 
-    overlay.querySelector('#gd-add-btn').addEventListener('click', async () => {
+    overlay.querySelector('#gd-add-btn')?.addEventListener('click', async () => {
       const input = overlay.querySelector('#gd-add-member');
       const names = input.value.split(',').map(s => s.trim()).filter(Boolean);
       if (names.length === 0) return;

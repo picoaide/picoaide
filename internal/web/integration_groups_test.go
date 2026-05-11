@@ -112,6 +112,38 @@ func TestGroupMembers_AddListRemove(t *testing.T) {
 	assertStatus(t, resp, 200)
 }
 
+func TestGroupMutations_ForbiddenInUnifiedAuthExceptWhitelist(t *testing.T) {
+	env := setupTestServer(t)
+	env.Cfg.Web.AuthMode = "ldap"
+	if err := auth.CreateGroup("ldap-team", "ldap", "", nil); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	if err := auth.AddUsersToGroup("ldap-team", []string{"testuser"}); err != nil {
+		t.Fatalf("AddUsersToGroup: %v", err)
+	}
+
+	resp := env.postForm(t, "/api/admin/groups/create", "testadmin", url.Values{"name": {"manual-team"}})
+	assertStatus(t, resp, 403)
+
+	resp = env.postForm(t, "/api/admin/groups/delete", "testadmin", url.Values{"name": {"ldap-team"}})
+	assertStatus(t, resp, 403)
+
+	resp = env.postForm(t, "/api/admin/groups/members/add", "testadmin", url.Values{
+		"group_name": {"ldap-team"},
+		"usernames":  {"another-user"},
+	})
+	assertStatus(t, resp, 403)
+
+	resp = env.postForm(t, "/api/admin/groups/members/remove", "testadmin", url.Values{
+		"group_name": {"ldap-team"},
+		"username":   {"testuser"},
+	})
+	assertStatus(t, resp, 403)
+
+	resp = env.postForm(t, "/api/admin/whitelist", "testadmin", url.Values{"users": {"testuser"}})
+	assertStatus(t, resp, 200)
+}
+
 func TestGroupMembers_IncludesInheritedSubGroupMembers(t *testing.T) {
 	env := setupTestServer(t)
 	if err := auth.CreateGroup("parent-team", "local", "", nil); err != nil {

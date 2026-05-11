@@ -392,6 +392,28 @@ func TestAdminSectionRoutesServeAdminShell(t *testing.T) {
 	}
 }
 
+func TestUIStaticImagesRoute(t *testing.T) {
+	s := newTestServer(t)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	s.registerUIRoutes(r)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/images/logo-mark.svg", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want %d", w.Code, http.StatusOK)
+	}
+	if got := w.Header().Get("Content-Type"); !strings.Contains(got, "image/svg+xml") {
+		t.Fatalf("Content-Type=%q, want image/svg+xml", got)
+	}
+	if body := w.Body.String(); !strings.Contains(body, "<svg") {
+		t.Fatal("logo response does not look like SVG")
+	}
+}
+
 func TestAdminSectionRoutesRedirectUnauthenticated(t *testing.T) {
 	s := newTestServer(t)
 

@@ -2580,6 +2580,10 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
+	if s.cfg.UnifiedAuthEnabled() {
+		writeError(c, http.StatusForbidden, "统一认证模式下不允许手动删除组，请通过 LDAP 同步")
+		return
+	}
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -2602,6 +2606,10 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
 
 func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
+		return
+	}
+	if s.cfg.UnifiedAuthEnabled() {
+		writeError(c, http.StatusForbidden, "统一认证模式下不允许手动修改组成员，请通过 LDAP 同步")
 		return
 	}
 	if c.Request.Method != "POST" {
@@ -2639,6 +2647,10 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
 
 func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
+		return
+	}
+	if s.cfg.UnifiedAuthEnabled() {
+		writeError(c, http.StatusForbidden, "统一认证模式下不允许手动修改组成员，请通过 LDAP 同步")
 		return
 	}
 	if c.Request.Method != "POST" {
