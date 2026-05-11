@@ -24,6 +24,7 @@ from core.permissions import get_default_permissions
 from ui.styles import DARK_STYLE
 from ui.login_window import LoginWindow
 from ui.main_window import MainWindow
+from version import VERSION
 
 logging.basicConfig(
   level=logging.INFO,
@@ -37,6 +38,7 @@ def main():
   app.setQuitOnLastWindowClosed(False)
   app.setStyleSheet(DARK_STYLE)
   app.setApplicationName("PicoAide Desktop")
+  app.setApplicationVersion(VERSION)
 
   cfg = load_config()
   # 确保权限字段完整

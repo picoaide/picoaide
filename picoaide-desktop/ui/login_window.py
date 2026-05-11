@@ -6,6 +6,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
+from version import VERSION
+
 
 class LoginWindow(QDialog):
   def __init__(self, cfg, parent=None):
@@ -29,7 +31,7 @@ class LoginWindow(QDialog):
     title.setAlignment(Qt.AlignCenter)
     layout.addWidget(title)
 
-    subtitle = QLabel("连接到 PicoAide 服务器")
+    subtitle = QLabel(f"连接到 PicoAide 服务器 · {VERSION}")
     subtitle.setProperty("class", "subtitle")
     subtitle.setAlignment(Qt.AlignCenter)
     layout.addWidget(subtitle)

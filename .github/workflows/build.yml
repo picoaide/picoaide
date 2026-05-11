@@ -83,9 +83,13 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
+          version="dev"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
           ext=""
           [ "${GOOS}" = "windows" ] && ext=".exe"
-          go build -o picoaide-${{ matrix.suffix }}${ext} ./cmd/picoaide/
+          go build -ldflags "-X github.com/picoaide/picoaide/internal/config.Version=${version}" -o picoaide-${{ matrix.suffix }}${ext} ./cmd/picoaide/
 
       - uses: actions/upload-artifact@v7
         with:
@@ -104,7 +108,12 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Package extension
-        run: cd picoaide-extension && zip -r ../picoaide-extension.zip .
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            sh scripts/package-extension.sh "${GITHUB_REF_NAME#v}" picoaide-extension.zip
+          else
+            cd picoaide-extension && zip -qr ../picoaide-extension.zip .
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
@@ -151,7 +160,12 @@ jobs:
         run: pip install pyinstaller
 
       - name: Build desktop client
-        run: ${{ matrix.build_cmd }}
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            sh scripts/set-desktop-version.sh "${GITHUB_REF_NAME#v}" picoaide-desktop
+          fi
+          ${{ matrix.build_cmd }}
         env:
           CI: 1
 
