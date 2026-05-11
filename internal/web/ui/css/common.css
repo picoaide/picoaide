@@ -508,6 +508,11 @@ tbody tr:hover { background: #f8fbff; }
 .tag { display: inline-flex; align-items: center; gap: .35rem; padding: .28rem .62rem; margin: .14rem; background: #f8fafc; color: #334155; border: 1px solid var(--border); border-radius: 999px; font-size: .83rem; font-weight: 600; }
 .tag button { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; font-size: 1rem; line-height: 1; transition: color var(--transition); }
 .tag button:hover { color: var(--danger); }
+.group-tags { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem; max-width: 24rem; }
+.group-tags .tag { margin: 0; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-tags[data-expanded="false"] .group-tag-extra { display: none; }
+.group-tag-toggle { cursor: pointer; color: var(--primary); background: #eff6ff; border-color: #bfdbfe; }
+.group-tag-toggle:hover { background: #dbeafe; color: var(--primary-dark); }
 
 /* ===== Brand / Navigation ===== */
 .brand-mark { width: 30px; height: 30px; display: inline-block; object-fit: contain; border-radius: 8px; flex: 0 0 auto; box-shadow: 0 8px 18px rgba(15,23,42,.12); }

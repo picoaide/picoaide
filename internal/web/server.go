@@ -160,6 +160,30 @@ func (s *Server) parseSessionToken(token string) (string, bool) {
 	return username, true
 }
 
+func (s *Server) sessionUserAllowed(username string) bool {
+	if username == "" {
+		return false
+	}
+	if auth.IsSuperadmin(username) {
+		return true
+	}
+	if !s.cfg.UnifiedAuthEnabled() {
+		return auth.UserExists(username)
+	}
+	if !s.cfg.LDAPEnabled() {
+		return false
+	}
+	if auth.UserExists(username) {
+		return false
+	}
+	whitelist, _ := user.LoadWhitelist()
+	if !user.IsWhitelisted(whitelist, username) {
+		return false
+	}
+	rec, _ := auth.GetContainerByUsername(username)
+	return rec != nil
+}
+
 // getSessionUser 从请求的 cookie 中提取已登录的用户名
 func (s *Server) getSessionUser(c *gin.Context) string {
 	cookie, err := c.Cookie("session")
@@ -168,6 +192,9 @@ func (s *Server) getSessionUser(c *gin.Context) string {
 	}
 	username, ok := s.parseSessionToken(cookie)
 	if !ok {
+		return ""
+	}
+	if !s.sessionUserAllowed(username) {
 		return ""
 	}
 	return username
@@ -320,6 +347,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	// 超管 - 认证配置
 	r.POST("/api/admin/auth/test-ldap", s.handleAdminAuthTestLDAP)
 	r.GET("/api/admin/auth/ldap-users", s.handleAdminAuthLDAPUsers)
+	r.POST("/api/admin/auth/sync-users", s.handleAdminAuthSyncUsers)
 	r.POST("/api/admin/auth/sync-groups", s.handleAdminAuthSyncGroups)
 	// 超管 - 用户组
 	r.GET("/api/admin/groups", s.handleAdminGroups)

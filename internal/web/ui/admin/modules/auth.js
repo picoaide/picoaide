@@ -21,12 +21,12 @@ export async function init(ctx) {
     updateLDAPVisibility(ldapOn);
   });
 
-  $('#save-auth-btn').addEventListener('click', saveAuthConfig);
-  $('#save-ldap-btn').addEventListener('click', saveLDAPConfig);
+  $('#save-auth-config-btn').addEventListener('click', saveAllConfig);
+  $('#save-auth-config-bottom-btn').addEventListener('click', saveAllConfig);
   $('#test-ldap-btn').addEventListener('click', testLDAP);
-  $('#save-group-config-btn').addEventListener('click', saveGroupConfig);
+  $('#sync-users-btn').addEventListener('click', syncLDAPUsers);
+  $('#sync-users-cleanup-btn').addEventListener('click', syncLDAPUsersWithCleanup);
   $('#sync-groups-btn').addEventListener('click', syncLDAPGroups);
-  $('#save-sync-btn').addEventListener('click', saveSyncConfig);
   $('#wl-enabled').addEventListener('change', updateWhitelistVisibility);
   $('#wl-add-btn').addEventListener('click', addWhitelistUser);
   $('#wl-search-btn').addEventListener('click', searchLDAPUsers);
@@ -84,21 +84,13 @@ export async function init(ctx) {
     $('#ldap-mode-notice').classList.toggle('hidden', !ldapOn);
   }
 
-  async function saveAuthConfig() {
-    showMsg('#auth-msg', '保存中...', true);
+  function collectConfigFromForm() {
     var ldapOn = $('#auth-mode').value === 'ldap';
     if (!rawConfig.web) rawConfig.web = {};
     rawConfig.web.ldap_enabled = ldapOn;
     rawConfig.web.auth_mode = ldapOn ? 'ldap' : 'local';
     rawConfig.web.password = $('#session-secret').value;
-    try {
-      var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
-      showMsg('#auth-msg', res.message || res.error, res.success);
-    } catch (e) { showMsg('#auth-msg', e.message, false); }
-  }
 
-  async function saveLDAPConfig() {
-    showMsg('#auth-msg', '保存中...', true);
     if (!rawConfig.ldap) rawConfig.ldap = {};
     rawConfig.ldap.host = $('#ldap-host').value;
     rawConfig.ldap.bind_dn = $('#ldap-bind-dn').value;
@@ -106,30 +98,19 @@ export async function init(ctx) {
     rawConfig.ldap.base_dn = $('#ldap-base-dn').value;
     rawConfig.ldap.filter = $('#ldap-filter').value;
     rawConfig.ldap.username_attribute = $('#ldap-username-attr').value;
-    try {
-      var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
-      showMsg('#auth-msg', res.message || res.error, res.success);
-    } catch (e) { showMsg('#auth-msg', e.message, false); }
-  }
 
-  async function saveGroupConfig() {
-    showMsg('#sync-groups-msg', '保存中...', true);
-    if (!rawConfig.ldap) rawConfig.ldap = {};
     rawConfig.ldap.group_search_mode = $('#ldap-group-mode').value;
     rawConfig.ldap.group_base_dn = $('#ldap-group-base-dn').value;
     rawConfig.ldap.group_filter = $('#ldap-group-filter').value;
     rawConfig.ldap.group_member_attribute = $('#ldap-group-member-attr').value;
-    try {
-      var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
-      showMsg('#sync-groups-msg', res.message || res.error, res.success);
-    } catch (e) { showMsg('#sync-groups-msg', e.message, false); }
-  }
 
-  async function saveSyncConfig() {
-    showMsg('#auth-msg', '保存中...', true);
-    if (!rawConfig.ldap) rawConfig.ldap = {};
     rawConfig.ldap.whitelist_enabled = $('#wl-enabled').value === 'true';
     rawConfig.ldap.sync_interval = $('#sync-interval').value;
+  }
+
+  async function saveAllConfig() {
+    showMsg('#auth-msg', '保存中...', true);
+    collectConfigFromForm();
     try {
       var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
       if (res.success) {
@@ -142,8 +123,25 @@ export async function init(ctx) {
     } catch (e) { showMsg('#auth-msg', e.message, false); }
   }
 
+  async function syncLDAPUsers() {
+    showMsg('#sync-groups-msg', '同步账号中...', true);
+    try {
+      var res = await Api.post('/api/admin/auth/sync-users', {});
+      showMsg('#sync-groups-msg', res.message || res.error, res.success);
+    } catch (e) { showMsg('#sync-groups-msg', e.message, false); }
+  }
+
+  async function syncLDAPUsersWithCleanup() {
+    if (!confirm('确定同步 LDAP 账号并归档不在 LDAP 或白名单中的旧账号吗？')) return;
+    showMsg('#sync-groups-msg', '同步并归档旧账号中...', true);
+    try {
+      var res = await Api.post('/api/admin/auth/sync-users', { cleanup: 'true' });
+      showMsg('#sync-groups-msg', res.message || res.error, res.success);
+    } catch (e) { showMsg('#sync-groups-msg', e.message, false); }
+  }
+
   async function syncLDAPGroups() {
-    showMsg('#sync-groups-msg', '同步中...', true);
+    showMsg('#sync-groups-msg', '同步组中...', true);
     try {
       var res = await Api.post('/api/admin/auth/sync-groups', {});
       showMsg('#sync-groups-msg', res.message || res.error, res.success);

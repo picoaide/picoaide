@@ -53,12 +53,14 @@ export async function init(ctx) {
     for (const u of users) {
       if (u.role === 'superadmin') continue;
       const statusCls = u.status === 'running' ? 'badge-ok' : 'badge-muted';
+      const hasImage = !!u.image_tag;
       const imgBadge = u.image_ready
         ? '<span class="badge badge-ok">就绪</span>'
-        : '<span class="badge badge-danger">未拉取</span>';
-      const noImg = !u.image_ready ? ' disabled title="镜像未拉取"' : '';
+        : '<span class="badge badge-danger">' + (hasImage ? '未拉取' : '未绑定') + '</span>';
+      const noImg = !u.image_ready ? ' disabled title="' + (hasImage ? '镜像未拉取' : '未绑定镜像，请先在认证配置中同步 LDAP 账号') + '"' : '';
+      const imageText = hasImage ? esc(u.image_tag) : '<small class="text-muted">未绑定镜像</small>';
       const groups = groupMap[u.username] || [];
-      const groupTags = groups.map(g => '<span class="tag">' + esc(g) + '</span>').join(' ');
+      const groupTags = renderGroupTags(groups);
       const tr = document.createElement('tr');
       let actions = '<div class="btn-group">';
       actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="start" data-user="' + esc(u.username) + '">启动</button>';
@@ -71,7 +73,7 @@ export async function init(ctx) {
       actions += '<button class="btn btn-sm btn-danger" data-action="delete" data-user="' + esc(u.username) + '">删除用户</button>';
       actions += '</span></span>';
       actions += '</div>';
-      tr.innerHTML = '<td><strong>' + esc(u.username) + '</strong></td><td>' + (groupTags || '<small class="text-muted">-</small>') + '</td><td><span class="badge ' + statusCls + '">' + esc(u.status) + '</span></td><td>' + esc(u.image_tag) + ' ' + imgBadge + '</td><td>' + esc(u.ip || '-') + '</td><td class="actions-cell">' + actions + '</td>';
+      tr.innerHTML = '<td><strong>' + esc(u.username) + '</strong></td><td>' + (groupTags || '<small class="text-muted">-</small>') + '</td><td><span class="badge ' + statusCls + '">' + esc(u.status) + '</span></td><td>' + imageText + ' ' + imgBadge + '</td><td>' + esc(u.ip || '-') + '</td><td class="actions-cell">' + actions + '</td>';
       tbody.appendChild(tr);
     }
 
@@ -112,6 +114,30 @@ export async function init(ctx) {
         if (menu.classList.contains('open')) positionActionMenu(menu, btn);
       });
     });
+    tbody.querySelectorAll('[data-groups-toggle]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const wrap = btn.closest('[data-groups-wrap]');
+        const expanded = wrap.dataset.expanded === 'true';
+        wrap.dataset.expanded = expanded ? 'false' : 'true';
+        btn.textContent = expanded ? '+' + btn.dataset.remaining : '收起';
+        btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+      });
+    });
+  }
+
+  function renderGroupTags(groups) {
+    if (!groups || groups.length === 0) return '<small class="text-muted">-</small>';
+    const visibleCount = 2;
+    const html = groups.map((g, i) => {
+      const hiddenClass = i >= visibleCount ? ' group-tag-extra' : '';
+      return '<span class="tag group-tag' + hiddenClass + '">' + esc(g) + '</span>';
+    }).join('');
+    if (groups.length <= visibleCount) return '<div class="group-tags">' + html + '</div>';
+    const remaining = groups.length - visibleCount;
+    return '<div class="group-tags" data-groups-wrap data-expanded="false">' + html +
+      '<button type="button" class="tag group-tag-toggle" data-groups-toggle data-remaining="' + remaining + '" aria-expanded="false">+' + remaining + '</button>' +
+      '</div>';
   }
 
   if (!actionMenuCloseBound) {

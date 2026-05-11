@@ -691,6 +691,164 @@ func (s *Server) requireSuperadmin(c *gin.Context) string {
 	return username
 }
 
+func (s *Server) defaultUserImageTag(ctx context.Context) (string, error) {
+	if s.dockerAvailable {
+		localTags, err := dockerpkg.ListLocalTags(ctx, s.cfg.Image.Name)
+		if err != nil {
+			return "", err
+		}
+		if len(localTags) > 0 {
+			sortTagsForDisplay(localTags)
+			return localTags[0], nil
+		}
+	}
+	return strings.TrimSpace(s.cfg.Image.Tag), nil
+}
+
+func (s *Server) initLDAPUser(username string) error {
+	if err := user.ValidateUsername(username); err != nil {
+		return err
+	}
+	ctx := contextWithTimeout(10)
+	imageTag, err := s.defaultUserImageTag(ctx)
+	if err != nil {
+		return fmt.Errorf("获取默认镜像失败: %w", err)
+	}
+	if imageTag == "" {
+		return fmt.Errorf("未找到可用镜像，请先在镜像管理中拉取镜像")
+	}
+	if err := user.InitUser(s.cfg, username, imageTag); err != nil {
+		return err
+	}
+	if s.dockerAvailable {
+		go s.autoStartUserContainer(username)
+	}
+	return nil
+}
+
+type ldapUserSyncResult struct {
+	LDAPUserCount        int
+	AllowedUserCount     int
+	InitializedCount     int
+	ImageUpdatedCount    int
+	DeletedLocalAuth     int
+	ArchivedStaleUsers   int
+	InvalidUsernameCount int
+	GroupMemberCount     int
+}
+
+func (s *Server) syncLDAPUsersFromDirectory(cleanupStaleUsers bool) (*ldapUserSyncResult, error) {
+	if !s.cfg.LDAPEnabled() {
+		return nil, fmt.Errorf("LDAP 未启用")
+	}
+
+	ldapUsers, err := ldap.FetchUsers(s.cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	whitelist, _ := user.LoadWhitelist()
+	result := &ldapUserSyncResult{LDAPUserCount: len(ldapUsers)}
+	allowedSet := make(map[string]bool)
+	var allowedUsers []string
+	for _, username := range ldapUsers {
+		username = strings.TrimSpace(username)
+		if username == "" || !user.IsWhitelisted(whitelist, username) {
+			continue
+		}
+		if err := user.ValidateUsername(username); err != nil {
+			result.InvalidUsernameCount++
+			continue
+		}
+		if !allowedSet[username] {
+			allowedSet[username] = true
+			allowedUsers = append(allowedUsers, username)
+		}
+	}
+	result.AllowedUserCount = len(allowedUsers)
+
+	ctx := contextWithTimeout(10)
+	imageTag, err := s.defaultUserImageTag(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("获取默认镜像失败: %w", err)
+	}
+	defaultImageRef := ""
+	if imageTag != "" {
+		defaultImageRef = s.cfg.Image.Name + ":" + imageTag
+	}
+
+	for _, username := range allowedUsers {
+		rec, err := auth.GetContainerByUsername(username)
+		if err != nil {
+			return nil, err
+		}
+		if rec == nil {
+			if imageTag == "" {
+				return nil, fmt.Errorf("用户 %s 需要初始化，但未找到可用镜像，请先在镜像管理中拉取镜像", username)
+			}
+			if err := user.InitUser(s.cfg, username, imageTag); err != nil {
+				return nil, err
+			}
+			result.InitializedCount++
+			if s.dockerAvailable {
+				go s.autoStartUserContainer(username)
+			}
+		} else if rec.Image == "" && defaultImageRef != "" {
+			if err := auth.UpdateContainerImage(username, defaultImageRef); err != nil {
+				return nil, err
+			}
+			result.ImageUpdatedCount++
+			if s.dockerAvailable && rec.ContainerID == "" {
+				go s.autoStartUserContainer(username)
+			}
+		} else if rec.Image == "" {
+			return nil, fmt.Errorf("用户 %s 缺少镜像，但未找到可用镜像，请先在镜像管理中拉取镜像", username)
+		}
+
+		if s.cfg.LDAP.GroupSearchMode != "" {
+			if groups, err := ldap.FetchUserGroups(s.cfg, username); err == nil {
+				if err := auth.SyncUserGroups(username, groups); err == nil {
+					result.GroupMemberCount += len(groups)
+				}
+			}
+		}
+	}
+
+	localUsers, err := auth.GetAllLocalUsers()
+	if err != nil {
+		return nil, err
+	}
+	for _, localUser := range localUsers {
+		if localUser.Role == "superadmin" {
+			continue
+		}
+		if err := auth.DeleteUser(localUser.Username); err == nil {
+			result.DeletedLocalAuth++
+		}
+	}
+
+	if cleanupStaleUsers {
+		containers, err := auth.GetAllContainers()
+		if err != nil {
+			return nil, err
+		}
+		for _, rec := range containers {
+			if allowedSet[rec.Username] || auth.IsSuperadmin(rec.Username) {
+				continue
+			}
+			if rec.ContainerID != "" && s.dockerAvailable {
+				_ = dockerpkg.Remove(context.Background(), rec.ContainerID)
+			}
+			_ = auth.DeleteContainer(rec.Username)
+			if err := user.ArchiveUser(s.cfg, rec.Username); err == nil {
+				result.ArchivedStaleUsers++
+			}
+		}
+	}
+
+	return result, nil
+}
+
 // ============================================================
 // 用户管理
 // ============================================================
@@ -826,12 +984,15 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
 
 	// 获取镜像标签参数，未指定时自动使用本地最新标签
 	imageTag := c.PostForm("image_tag")
-	if imageTag == "" && s.dockerAvailable {
+	if imageTag == "" {
 		ctx := contextWithTimeout(10)
-		localTags, err := dockerpkg.ListLocalTags(ctx, s.cfg.Image.Name)
-		if err == nil && len(localTags) > 0 {
-			imageTag = localTags[len(localTags)-1]
+		defaultTag, err := s.defaultUserImageTag(ctx)
+		if err != nil {
+			auth.DeleteUser(username)
+			writeError(c, http.StatusInternalServerError, "获取默认镜像失败: "+err.Error())
+			return
 		}
+		imageTag = defaultTag
 	}
 	if imageTag == "" {
 		auth.DeleteUser(username)
@@ -967,7 +1128,11 @@ func (s *Server) handleContainerAction(c *gin.Context, action string) {
 	// 启动/重启前检查镜像是否存在
 	if action == "start" || action == "restart" || action == "debug" {
 		if rec.Image == "" || !dockerpkg.ImageExists(ctx, rec.Image) {
-			writeError(c, http.StatusBadRequest, "容器镜像 "+rec.Image+" 不存在，请先拉取镜像")
+			if rec.Image == "" {
+				writeError(c, http.StatusBadRequest, "用户未绑定容器镜像，请先在认证配置中同步 LDAP 账号")
+			} else {
+				writeError(c, http.StatusBadRequest, "容器镜像 "+rec.Image+" 不存在，请先拉取镜像")
+			}
 			return
 		}
 	}
@@ -1536,6 +1701,52 @@ func (s *Server) handleAdminAuthLDAPUsers(c *gin.Context) {
 	}{true, users})
 }
 
+func (s *Server) handleAdminAuthSyncUsers(c *gin.Context) {
+	if s.requireSuperadmin(c) == "" {
+		return
+	}
+	if c.Request.Method != "POST" {
+		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+		return
+	}
+	if !s.checkCSRF(c) {
+		writeError(c, http.StatusForbidden, "无效请求")
+		return
+	}
+	if !s.cfg.LDAPEnabled() {
+		writeError(c, http.StatusBadRequest, "LDAP 未启用")
+		return
+	}
+
+	cleanupStaleUsers := c.PostForm("cleanup") == "true"
+	result, err := s.syncLDAPUsersFromDirectory(cleanupStaleUsers)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "同步 LDAP 账号失败: "+err.Error())
+		return
+	}
+
+	message := fmt.Sprintf("同步完成，LDAP %d 个账号，允许 %d 个，新初始化 %d 个，补齐镜像 %d 个，移除本地普通登录凭据 %d 个",
+		result.LDAPUserCount,
+		result.AllowedUserCount,
+		result.InitializedCount,
+		result.ImageUpdatedCount,
+		result.DeletedLocalAuth,
+	)
+	if cleanupStaleUsers {
+		message += fmt.Sprintf("，归档过期账号 %d 个", result.ArchivedStaleUsers)
+	}
+	if result.InvalidUsernameCount > 0 {
+		message += fmt.Sprintf("，跳过非法用户名 %d 个", result.InvalidUsernameCount)
+	}
+
+	logger.Audit("ldap.users_sync", "operator", s.getSessionUser(c), "initialized", result.InitializedCount, "image_updated", result.ImageUpdatedCount, "deleted_local_auth", result.DeletedLocalAuth, "cleanup", cleanupStaleUsers)
+	writeJSON(c, http.StatusOK, struct {
+		Success bool                `json:"success"`
+		Message string              `json:"message"`
+		Result  *ldapUserSyncResult `json:"result"`
+	}{true, message, result})
+}
+
 // ============================================================
 // 白名单管理
 // ============================================================
@@ -1586,6 +1797,7 @@ func (s *Server) handleAdminWhitelistPost(c *gin.Context) {
 		}
 	}
 	sort.Strings(users)
+	operator := s.getSessionUser(c)
 
 	// 写入数据库（使用 xorm）
 	engine, err := auth.GetEngine()
@@ -1601,14 +1813,14 @@ func (s *Server) handleAdminWhitelistPost(c *gin.Context) {
 	}
 	session.Exec("DELETE FROM whitelist")
 	for _, u := range users {
-		session.Exec("INSERT OR IGNORE INTO whitelist (username, added_by) VALUES (?, ?)", u, s.getSessionUser(c))
+		session.Exec("INSERT OR IGNORE INTO whitelist (username, added_by) VALUES (?, ?)", u, operator)
 	}
 	if err := session.Commit(); err != nil {
 		writeError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeSuccess(c, "白名单已更新")
-	logger.Audit("whitelist.update", "count", len(users), "operator", s.getSessionUser(c))
+	logger.Audit("whitelist.update", "count", len(users), "operator", operator)
 }
 
 // ============================================================
@@ -2563,33 +2775,41 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
 		return
 	}
 
-	groupMap, err := ldap.FetchAllGroupsWithMembers(s.cfg)
+	result, err := s.syncLDAPUsersFromDirectory(false)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "获取 LDAP 组失败: "+err.Error())
+		writeError(c, http.StatusInternalServerError, "同步 LDAP 账号失败: "+err.Error())
 		return
 	}
 
-	// 获取白名单
-	whitelist, _ := user.LoadWhitelist()
-
 	groupCount := 0
-	userCount := 0
-	for groupName, members := range groupMap {
-		// 创建组（如果不存在）
-		auth.CreateGroup(groupName, "ldap", "", nil)
-		groupCount++
-
-		// 过滤白名单用户
-		var filtered []string
-		for _, m := range members {
-			if whitelist == nil || whitelist[m] {
-				filtered = append(filtered, m)
-			}
+	userCount := result.GroupMemberCount
+	if s.cfg.LDAP.GroupSearchMode != "" {
+		groupMap, err := ldap.FetchAllGroupsWithMembers(s.cfg)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "获取 LDAP 组失败: "+err.Error())
+			return
 		}
 
-		if len(filtered) > 0 {
-			auth.AddUsersToGroup(groupName, filtered)
-			userCount += len(filtered)
+		// 获取白名单
+		whitelist, _ := user.LoadWhitelist()
+
+		for groupName, members := range groupMap {
+			// 创建组（如果不存在）
+			auth.CreateGroup(groupName, "ldap", "", nil)
+			groupCount++
+
+			// 过滤白名单用户
+			var filtered []string
+			for _, m := range members {
+				if whitelist == nil || whitelist[m] {
+					filtered = append(filtered, m)
+				}
+			}
+
+			if len(filtered) > 0 {
+				auth.AddUsersToGroup(groupName, filtered)
+				userCount += len(filtered)
+			}
 		}
 	}
 
@@ -2598,7 +2818,7 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
 		Message     string `json:"message"`
 		GroupCount  int    `json:"group_count"`
 		MemberCount int    `json:"member_count"`
-	}{true, fmt.Sprintf("同步完成，发现 %d 个组，共 %d 个组成员关系", groupCount, userCount), groupCount, userCount})
+	}{true, fmt.Sprintf("同步完成，新初始化 %d 个账号，补齐镜像 %d 个，发现 %d 个组，共 %d 个组成员关系", result.InitializedCount, result.ImageUpdatedCount, groupCount, userCount), groupCount, userCount})
 }
 
 // ============================================================

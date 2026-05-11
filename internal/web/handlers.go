@@ -163,6 +163,12 @@ func (s *Server) handleLogin(c *gin.Context) {
 		writeError(c, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
+	if auth.UserExists(username) {
+		if err := auth.DeleteUser(username); err != nil {
+			writeError(c, http.StatusInternalServerError, "清理本地账号失败: "+err.Error())
+			return
+		}
+	}
 
 	whitelist, _ := user.LoadWhitelist()
 	if !user.IsWhitelisted(whitelist, username) {
@@ -172,7 +178,11 @@ func (s *Server) handleLogin(c *gin.Context) {
 
 	// 首次登录自动初始化（创建容器记录，分配 IP）
 	if rec, _ := auth.GetContainerByUsername(username); rec == nil {
-		go user.InitUser(s.cfg, username, "")
+		if err := s.initLDAPUser(username); err != nil {
+			logger.Audit("user.init_failed", "username", username, "method", "ldap", "error", err.Error())
+			writeError(c, http.StatusInternalServerError, "LDAP 登录成功，但初始化账号失败: "+err.Error())
+			return
+		}
 	}
 
 	// 异步同步用户的 LDAP 组

@@ -18,8 +18,18 @@ import (
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
+	auth.ResetDB()
+	if err := auth.InitDB(t.TempDir()); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	if err := auth.CreateUser("admin", "admin123", "superadmin"); err != nil {
+		t.Fatalf("CreateUser(admin): %v", err)
+	}
+	if err := auth.CreateUser("testuser", "user123", "user"); err != nil {
+		t.Fatalf("CreateUser(testuser): %v", err)
+	}
 	return &Server{
-		cfg:     &config.GlobalConfig{},
+		cfg:     &config.GlobalConfig{Web: config.WebConfig{AuthMode: "local"}},
 		secret:  "test-secret-key-12345",
 		csrfKey: "test-secret-key-12345-csrf",
 	}

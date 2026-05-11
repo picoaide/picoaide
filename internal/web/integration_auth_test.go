@@ -281,7 +281,7 @@ func TestChangePassword_UnifiedAuth(t *testing.T) {
 		"new_password": {"newpass123"},
 	}
 	resp := env.postForm(t, "/api/user/password", "testuser", form)
-	assertStatus(t, resp, 403)
+	assertStatus(t, resp, 401)
 }
 
 func TestHealth_NoAuth(t *testing.T) {

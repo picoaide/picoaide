@@ -4,6 +4,7 @@
     <h2>认证配置</h2>
     <p>统一管理本地超管、LDAP 登录、白名单和用户组同步策略。</p>
   </div>
+  <button class="btn btn-primary btn-sm" id="save-auth-config-btn">保存全部认证配置</button>
 </section>
 <div id="auth-msg" class="msg"></div>
 
@@ -21,7 +22,6 @@
     <label>Session 密钥</label>
     <input type="password" id="session-secret" placeholder="change-me-to-a-random-secret">
   </div>
-  <button class="btn btn-primary btn-sm" id="save-auth-btn">保存认证配置</button>
 </div>
 
 <div id="ldap-section">
@@ -41,7 +41,6 @@
     </div>
     <div class="row mt-1">
       <button class="btn btn-outline btn-sm" id="test-ldap-btn">测试连接</button>
-      <button class="btn btn-primary btn-sm" id="save-ldap-btn">保存 LDAP 配置</button>
     </div>
     <div id="ldap-test-result" class="mt-1 hidden" style="font-size:0.9em"></div>
   </div>
@@ -64,8 +63,9 @@
       <div class="field"><label>组成员属性</label><input type="text" id="ldap-group-member-attr" placeholder="member"></div>
     </div>
     <div class="row mt-1">
+      <button class="btn btn-outline btn-sm" id="sync-users-btn">同步 LDAP 账号</button>
+      <button class="btn btn-danger btn-sm" id="sync-users-cleanup-btn">同步并归档旧账号</button>
       <button class="btn btn-outline btn-sm" id="sync-groups-btn">同步 LDAP 组</button>
-      <button class="btn btn-primary btn-sm" id="save-group-config-btn">保存组配置</button>
     </div>
     <div id="sync-groups-msg" class="msg"></div>
   </div>
@@ -92,7 +92,6 @@
       </div>
     </div>
     <p class="text-sm text-muted">自动同步会在后台定期从 LDAP 同步组数据，修改后需保存配置并重启服务生效。</p>
-    <button class="btn btn-primary btn-sm" id="save-sync-btn">保存同步配置</button>
   </div>
 
   <div id="wl-section" class="card hidden">
@@ -109,4 +108,8 @@
       <button class="btn btn-primary btn-sm" id="wl-add-btn">添加</button>
     </div>
   </div>
+</div>
+
+<div class="row mt-1">
+  <button class="btn btn-primary btn-sm" id="save-auth-config-bottom-btn">保存全部认证配置</button>
 </div>
