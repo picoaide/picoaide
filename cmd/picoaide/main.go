@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/picoaide/picoaide/internal/auth"
+	"github.com/picoaide/picoaide/internal/authsource"
 	"github.com/picoaide/picoaide/internal/config"
 	dockerpkg "github.com/picoaide/picoaide/internal/docker"
-	"github.com/picoaide/picoaide/internal/ldap"
 	"github.com/picoaide/picoaide/internal/logger"
 	"github.com/picoaide/picoaide/internal/user"
 	"github.com/picoaide/picoaide/internal/util"
@@ -307,7 +307,7 @@ func runFirstRun(reader *bufio.Reader) {
 	fmt.Println()
 
 	// 步骤 1: 数据目录
-	fmt.Println("--- 步骤 1/4: 数据目录 ---")
+	fmt.Println("--- 步骤 1/3: 数据目录 ---")
 	fmt.Print("请输入数据目录 (默认: /data/picoaide): ")
 	dataDir, _ := reader.ReadString('\n')
 	dataDir = strings.TrimSpace(dataDir)
@@ -357,7 +357,7 @@ func runFirstRun(reader *bufio.Reader) {
 	fmt.Println()
 
 	// 步骤 2: 超管账户
-	fmt.Println("--- 步骤 2/4: 超管账户 ---")
+	fmt.Println("--- 步骤 2/3: 超管账户 ---")
 	if err := setupSuperAdmin(reader, dataDir); err != nil {
 		fmt.Fprintf(os.Stderr, "超管设置失败: %v\n", err)
 		os.Exit(1)
@@ -377,7 +377,7 @@ func runFirstRun(reader *bufio.Reader) {
 	}
 
 	// 步骤 3: 监听地址
-	fmt.Println("--- 步骤 3/4: 监听地址 ---")
+	fmt.Println("--- 步骤 3/3: 监听地址 ---")
 	fmt.Print("监听地址 (默认: :80): ")
 	listenAddr, _ := reader.ReadString('\n')
 	listenAddr = strings.TrimSpace(listenAddr)
@@ -387,8 +387,8 @@ func runFirstRun(reader *bufio.Reader) {
 	cfg.Web.Listen = listenAddr
 	fmt.Println()
 
-	// 步骤 4: 镜像仓库
-	fmt.Println("--- 步骤 4/4: 镜像仓库 ---")
+	// 镜像仓库
+	fmt.Println("--- 镜像仓库 ---")
 	fmt.Println("  1) GitHub (ghcr.io)")
 	fmt.Println("  2) 腾讯云 (hkccr.ccs.tencentyun.com)")
 	fmt.Print("请选择 [1]: ")
@@ -416,11 +416,6 @@ func runFirstRun(reader *bufio.Reader) {
 	}
 	fmt.Println()
 
-	// 默认本地认证模式
-	cfg.Web.AuthMode = "local"
-	falseVal := false
-	cfg.Web.LDAPEnabled = &falseVal
-
 	// 保存配置
 	if err := config.SaveToDB(cfg, "system"); err != nil {
 		fmt.Fprintf(os.Stderr, "保存配置失败: %v\n", err)
@@ -435,7 +430,6 @@ func runFirstRun(reader *bufio.Reader) {
 	fmt.Println("=== 初始化完成 ===")
 	fmt.Printf("数据目录: %s\n", dataDir)
 	fmt.Printf("监听地址: %s\n", listenAddr)
-	fmt.Println("认证模式: 本地认证")
 	fmt.Println()
 	fmt.Println("安装浏览器插件后，访问管理面板完成后续配置")
 }
@@ -487,7 +481,7 @@ func runInitExisting(cfg *config.GlobalConfig) {
 
 	if cfg.LDAPEnabled() {
 		fmt.Print("验证 LDAP 连接... ")
-		users, err := ldap.FetchUsers(cfg)
+		users, err := authsource.LDAPFetchUsers(cfg)
 		if err != nil {
 			fmt.Printf("失败: %v\n", err)
 			fmt.Fprintf(os.Stderr, "LDAP 连接失败，请检查配置\n")

@@ -4,6 +4,7 @@ export async function init(ctx) {
   let pageSize = 50;
   let totalPages = 1;
   let search = '';
+  let loadSeq = 0;
 
   // 获取认证模式
   const usersData = await Api.get('/api/admin/users?runtime=false&page=1&page_size=1').catch(() => ({}));
@@ -51,11 +52,13 @@ export async function init(ctx) {
   });
 
   async function loadWhitelist() {
+    const seq = ++loadSeq;
     const tags = ctx.$('#wl-tags');
     tags.innerHTML = '';
     const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
     if (search) params.set('search', search);
     const data = await Api.get('/api/admin/whitelist?' + params.toString());
+    if (seq !== loadSeq) return;
     if (!data.success) return;
     page = data.page || page;
     pageSize = data.page_size || pageSize;

@@ -216,8 +216,3 @@ var browserToolDefs = []ToolDef{
 		},
 	},
 }
-
-// GetToolList 返回浏览器 MCP 工具列表（兼容旧代码）
-func GetToolList() []ToolDef {
-	return browserToolDefs
-}

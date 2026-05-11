@@ -115,20 +115,6 @@ func GetUserList(cfg *config.GlobalConfig) ([]string, error) {
 	return users, nil
 }
 
-// ForEachUser 遍历所有用户并执行回调函数
-func ForEachUser(cfg *config.GlobalConfig, fn func(string) error) error {
-	users, err := GetUserList(cfg)
-	if err != nil {
-		return err
-	}
-	for _, u := range users {
-		if err := fn(u); err != nil {
-			fmt.Fprintf(os.Stderr, "处理用户 %s 失败: %v\n", u, err)
-		}
-	}
-	return nil
-}
-
 // InitUser 初始化单个用户：创建目录、分配 IP、写入数据库
 func InitUser(cfg *config.GlobalConfig, username string, imageTag string) error {
 	if err := ValidateUsername(username); err != nil {

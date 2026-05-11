@@ -235,28 +235,12 @@ func ResetDB() {
 	dbDataDir = ""
 }
 
-// GetDB 返回底层 *sql.DB 连接（供其他包直接操作 DB，向后兼容）
-func GetDB() (*sql.DB, error) {
-	if err := ensureDB(); err != nil {
-		return nil, err
-	}
-	return engine.DB().DB, nil
-}
-
 // GetEngine 返回 xorm 引擎（供新代码使用）
 func GetEngine() (*xorm.Engine, error) {
 	if err := ensureDB(); err != nil {
 		return nil, err
 	}
 	return engine, nil
-}
-
-// DB 返回底层 *sql.DB 连接（供其他包使用，向后兼容）
-func DB() *sql.DB {
-	if engine == nil {
-		return nil
-	}
-	return engine.DB().DB
 }
 
 // ensureDB 确保数据库连接可用，engine 为 nil 时自动重连
@@ -984,19 +968,42 @@ func CreateGroup(name, source, description string, parentID *int64) error {
 	return nil
 }
 
-// DeleteGroup 删除组（级联删除成员和技能绑定）
+// DeleteGroup 删除组及其成员、技能绑定，并将子组提升为顶级组。
 func DeleteGroup(name string) error {
 	if err := ensureDB(); err != nil {
 		return err
 	}
-	affected, err := engine.Where("name = ?", name).Delete(&Group{})
+	gid, err := GetGroupID(name)
 	if err != nil {
-		return fmt.Errorf("删除组失败: %w", err)
+		return err
+	}
+	session := engine.NewSession()
+	defer session.Close()
+	if err := session.Begin(); err != nil {
+		return err
+	}
+	if _, err := session.Where("group_id = ?", gid).Delete(&UserGroup{}); err != nil {
+		_ = session.Rollback()
+		return err
+	}
+	if _, err := session.Where("group_id = ?", gid).Delete(&GroupSkill{}); err != nil {
+		_ = session.Rollback()
+		return err
+	}
+	if _, err := session.Exec("UPDATE groups SET parent_id = NULL WHERE parent_id = ?", gid); err != nil {
+		_ = session.Rollback()
+		return err
+	}
+	affected, err := session.Where("id = ?", gid).Delete(&Group{})
+	if err != nil {
+		_ = session.Rollback()
+		return err
 	}
 	if affected == 0 {
+		_ = session.Rollback()
 		return fmt.Errorf("组 %s 不存在", name)
 	}
-	return nil
+	return session.Commit()
 }
 
 // ListGroups 列出所有组及其统计
@@ -1068,13 +1075,16 @@ func AddUsersToGroup(groupName string, usernames []string) error {
 	return nil
 }
 
-// RemoveUserFromGroup 从组移除用户
+// RemoveUserFromGroup 从组中移除用户。
 func RemoveUserFromGroup(groupName, username string) error {
 	gid, err := GetGroupID(groupName)
 	if err != nil {
 		return err
 	}
-	_, err = engine.Where("group_id = ? AND username = ?", gid, username).Delete(&UserGroup{})
+	if err := ensureDB(); err != nil {
+		return err
+	}
+	_, err = engine.Where("username = ? AND group_id = ?", username, gid).Delete(&UserGroup{})
 	return err
 }
 
@@ -1330,22 +1340,6 @@ func SetGroupParent(groupName string, parentID *int64) error {
 		Cols("parent_id").
 		Update(&Group{ParentID: parentID})
 	return err
-}
-
-// GetGroupIDByName 根据组名获取 ID
-func GetGroupIDByName(name string) (int64, error) {
-	if err := ensureDB(); err != nil {
-		return 0, err
-	}
-	var group Group
-	has, err := engine.Where("name = ?", name).Get(&group)
-	if err != nil {
-		return 0, err
-	}
-	if !has {
-		return 0, fmt.Errorf("组 %s 不存在", name)
-	}
-	return group.ID, nil
 }
 
 // ============================================================

@@ -1,30 +1,9 @@
 package user
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
-
-const testRulesJSON = `{
-  "latest_supported_config_version": 3,
-  "versions": [
-    { "version": "0.2.4", "config_version": 1, "config_changed": false, "actions": [] },
-    { "version": "0.2.5", "config_version": 2, "config_changed": true, "from_config": 1, "to_config": 2, "actions": [
-      { "op": "move", "path": "channels.*.mention_only", "to": "channels.*.group_trigger.mention_only" },
-      { "op": "infer_model_enabled" }
-    ] },
-    { "version": "0.2.6", "config_version": 2, "config_changed": false, "actions": [] },
-    { "version": "0.2.7", "config_version": 3, "config_changed": true, "from_config": 2, "to_config": 3, "actions": [
-      { "op": "set", "path": "version", "value": 3 },
-      { "op": "delete", "path": "bindings" },
-      { "op": "rename", "from": "channels", "to": "channel_list", "mode": "channels_to_nested" },
-      { "op": "map", "path": "tools.mcp.servers", "field": "transport", "to": "type", "value": "sse" }
-    ] },
-    { "version": "0.2.8", "config_version": 3, "config_changed": false, "actions": [] }
-  ]
-}`
 
 func TestMigratePicoClawConfigTo028(t *testing.T) {
 	cfg := map[string]interface{}{
@@ -49,12 +28,12 @@ func TestMigratePicoClawConfigTo028(t *testing.T) {
 		},
 	}
 
-	svc := testPicoClawMigrationService(t, testRulesJSON)
+	svc := testPicoClawMigrationService(t, testRules())
 	if err := svc.Migrate(cfg, "v0.2.6", "v0.2.8"); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
 
-	if cfg["version"] != float64(3) {
+	if !numericEqual(cfg["version"], 3) {
 		t.Fatalf("version = %v, want 3", cfg["version"])
 	}
 	if _, ok := cfg["channels"]; ok {
@@ -254,7 +233,7 @@ func TestMigratePicoClawConfigSameVersionDoesNothing(t *testing.T) {
 		},
 	}
 
-	svc := testPicoClawMigrationService(t, testRulesJSON)
+	svc := testPicoClawMigrationService(t, testRules())
 	if err := svc.Migrate(cfg, "v0.2.7", "v0.2.7"); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
@@ -275,12 +254,12 @@ func TestMigratePicoClawConfigSameVersionDoesNothing(t *testing.T) {
 }
 
 func TestPicoClawMigrationBlocksUnsupportedVersion(t *testing.T) {
-	svc := testPicoClawMigrationService(t, `{
-    "latest_supported_config_version": 3,
-    "versions": [
-      { "version": "0.2.8", "config_version": 3, "config_changed": false, "actions": [] }
-    ]
-  }`)
+	svc := testPicoClawMigrationService(t, PicoClawMigrationRuleSet{
+		LatestSupportedConfigVersion: 3,
+		Versions: []PicoClawMigrationVersionRule{
+			{Version: "0.2.8", ConfigVersion: 3, Actions: []PicoClawMigrationRule{}},
+		},
+	})
 	err := svc.EnsureUpgradeable("v0.2.8", "v0.2.9")
 	if err == nil {
 		t.Fatal("EnsureUpgradeable() error = nil, want unsupported error")
@@ -291,7 +270,7 @@ func TestPicoClawMigrationBlocksUnsupportedVersion(t *testing.T) {
 }
 
 func TestPicoClawMigrationBlocksUnsupportedDowngradeEndpoint(t *testing.T) {
-	svc := testPicoClawMigrationService(t, testRulesJSON)
+	svc := testPicoClawMigrationService(t, testRules())
 	err := svc.EnsureUpgradeable("v0.2.9", "v0.2.8")
 	if err == nil {
 		t.Fatal("EnsureUpgradeable() error = nil, want unsupported downgrade endpoint error")
@@ -302,7 +281,7 @@ func TestPicoClawMigrationBlocksUnsupportedDowngradeEndpoint(t *testing.T) {
 }
 
 func TestPicoClawMigrationAllowsSupportedDowngrade(t *testing.T) {
-	svc := testPicoClawMigrationService(t, testRulesJSON)
+	svc := testPicoClawMigrationService(t, testRules())
 	if err := svc.EnsureUpgradeable("v0.2.8", "v0.2.4"); err != nil {
 		t.Fatalf("EnsureUpgradeable() error = %v", err)
 	}
@@ -322,11 +301,11 @@ func TestPicoClawMigrationNoConfigChangeIsNoop(t *testing.T) {
 			"telegram": map[string]interface{}{"token": "secret"},
 		},
 	}
-	svc := testPicoClawMigrationService(t, testRulesJSON)
+	svc := testPicoClawMigrationService(t, testRules())
 	if err := svc.Migrate(cfg, "v0.2.7", "v0.2.8"); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
-	if cfg["version"] != float64(3) {
+	if !numericEqual(cfg["version"], 3) {
 		t.Fatalf("version = %v, want 3", cfg["version"])
 	}
 	if _, ok := cfg["channel_list"]; ok {
@@ -354,73 +333,39 @@ func TestReleasePicoClawMigrationRulesCache(t *testing.T) {
 
 func TestPicoClawMigrationAllowsRegisteredReleaseWithoutConfigChange(t *testing.T) {
 	cfg := map[string]interface{}{}
-	svc := testPicoClawMigrationService(t, testRulesJSON)
+	svc := testPicoClawMigrationService(t, testRules())
 	if err := svc.EnsureUpgradeable("v0.2.6", "v0.2.8"); err != nil {
 		t.Fatalf("EnsureUpgradeable() error = %v", err)
 	}
 	if err := svc.Migrate(cfg, "v0.2.6", "v0.2.8"); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
-	if cfg["version"] != float64(3) {
+	if !numericEqual(cfg["version"], 3) {
 		t.Fatalf("version = %v, want 3", cfg["version"])
 	}
 }
 
 func TestPicoClawMigrationBlocksNewConfigVersionBeyondPicoAideSupport(t *testing.T) {
-	svc := testPicoClawMigrationService(t, `{
-    "latest_supported_config_version": 4,
-    "versions": [
-      { "version": "0.2.8", "config_version": 3, "config_changed": false, "actions": [] },
-      { "version": "0.2.10", "config_version": 4, "config_changed": true, "from_config": 3, "to_config": 4, "actions": [
-        { "op": "set", "path": "version", "value": 4 }
-      ] }
-    ]
-  }`)
+	svc := testPicoClawMigrationService(t, PicoClawMigrationRuleSet{
+		LatestSupportedConfigVersion: 4,
+		Versions: []PicoClawMigrationVersionRule{
+			{Version: "0.2.8", ConfigVersion: 3, Actions: []PicoClawMigrationRule{}},
+			{
+				Version:       "0.2.10",
+				ConfigVersion: 4,
+				ConfigChanged: true,
+				FromConfig:    3,
+				ToConfig:      4,
+				Actions:       []PicoClawMigrationRule{{Op: "set", Path: "version", Value: 4}},
+			},
+		},
+	})
 	err := svc.EnsureUpgradeable("v0.2.8", "v0.2.10")
 	if err == nil {
 		t.Fatal("EnsureUpgradeable() error = nil, want unsupported config version error")
 	}
 	if !strings.Contains(err.Error(), "只支持到 3") {
 		t.Fatalf("error = %q, want supported config version message", err.Error())
-	}
-}
-
-func TestSavePicoClawMigrationRulesRejectsUnsupportedConfigVersion(t *testing.T) {
-	_, err := SavePicoClawMigrationRules(t.TempDir(), []byte(`{
-    "latest_supported_config_version": 4,
-    "versions": [
-      { "version": "0.2.10", "config_version": 4, "config_changed": false, "actions": [] }
-    ]
-  }`))
-	if err == nil {
-		t.Fatal("SavePicoClawMigrationRules() error = nil, want unsupported config version error")
-	}
-	if !strings.Contains(err.Error(), "只支持到 3") {
-		t.Fatalf("error = %q, want supported config version message", err.Error())
-	}
-}
-
-func TestSavePicoClawMigrationRulesWritesLocalCache(t *testing.T) {
-	cacheDir := t.TempDir()
-	info, err := SavePicoClawMigrationRules(cacheDir, []byte(testRulesJSON))
-	if err != nil {
-		t.Fatalf("SavePicoClawMigrationRules() error = %v", err)
-	}
-	if info.PicoAideSupportedConfigVersion != 3 {
-		t.Fatalf("PicoAideSupportedConfigVersion = %d, want 3", info.PicoAideSupportedConfigVersion)
-	}
-	if info.CachePath == "" || info.UpdatedAt == "" {
-		t.Fatalf("info should include cache path and updated_at: %+v", info)
-	}
-	if _, err := os.Stat(filepath.Join(cacheDir, picoClawMigrationCacheFile)); err != nil {
-		t.Fatalf("cache file not written: %v", err)
-	}
-	loaded, err := LoadPicoClawMigrationRulesInfo(cacheDir)
-	if err != nil {
-		t.Fatalf("LoadPicoClawMigrationRulesInfo() error = %v", err)
-	}
-	if len(loaded.Versions) != 5 {
-		t.Fatalf("loaded versions = %d, want 5", len(loaded.Versions))
 	}
 }
 
@@ -444,11 +389,56 @@ func TestPicoClawTagAtLeast(t *testing.T) {
 	}
 }
 
-func testPicoClawMigrationService(t *testing.T, rulesJSON string) *PicoClawMigrationService {
+func testRules() PicoClawMigrationRuleSet {
+	return PicoClawMigrationRuleSet{
+		LatestSupportedConfigVersion: 3,
+		Versions: []PicoClawMigrationVersionRule{
+			{Version: "0.2.4", ConfigVersion: 1, Actions: []PicoClawMigrationRule{}},
+			{
+				Version:       "0.2.5",
+				ConfigVersion: 2,
+				ConfigChanged: true,
+				FromConfig:    1,
+				ToConfig:      2,
+				Actions: []PicoClawMigrationRule{
+					{Op: "move", Path: "channels.*.mention_only", To: "channels.*.group_trigger.mention_only"},
+					{Op: "infer_model_enabled"},
+				},
+			},
+			{Version: "0.2.6", ConfigVersion: 2, Actions: []PicoClawMigrationRule{}},
+			{
+				Version:       "0.2.7",
+				ConfigVersion: 3,
+				ConfigChanged: true,
+				FromConfig:    2,
+				ToConfig:      3,
+				Actions: []PicoClawMigrationRule{
+					{Op: "set", Path: "version", Value: 3},
+					{Op: "delete", Path: "bindings"},
+					{Op: "rename", From: "channels", To: "channel_list", Mode: "channels_to_nested"},
+					{Op: "map", Path: "tools.mcp.servers", Field: "transport", To: "type", Value: "sse"},
+				},
+			},
+			{Version: "0.2.8", ConfigVersion: 3, Actions: []PicoClawMigrationRule{}},
+		},
+	}
+}
+
+func testPicoClawMigrationService(t *testing.T, rules PicoClawMigrationRuleSet) *PicoClawMigrationService {
 	t.Helper()
-	rules, err := parsePicoClawMigrationRules([]byte(rulesJSON))
-	if err != nil {
-		t.Fatalf("parsePicoClawMigrationRules() error = %v", err)
+	if err := rules.Validate(); err != nil {
+		t.Fatalf("rules.Validate() error = %v", err)
 	}
 	return &PicoClawMigrationService{rules: rules}
+}
+
+func numericEqual(value interface{}, want int) bool {
+	switch v := value.(type) {
+	case int:
+		return v == want
+	case float64:
+		return v == float64(want)
+	default:
+		return false
+	}
 }

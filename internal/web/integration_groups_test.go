@@ -30,27 +30,33 @@ func TestGroups_ListEmpty(t *testing.T) {
 	assertStatus(t, resp, 200)
 }
 
-func TestGroupCreate_Forbidden(t *testing.T) {
+func TestGroupCreate_LocalModeSuccess(t *testing.T) {
 	env := setupTestServer(t)
 	form := url.Values{
 		"name":        {"dev-team"},
 		"description": {"Developers"},
 	}
 	resp := env.postForm(t, "/api/admin/groups/create", "testadmin", form)
-	assertStatus(t, resp, 403)
+	assertStatus(t, resp, 200)
+	if _, err := auth.GetGroupID("dev-team"); err != nil {
+		t.Fatalf("group should exist: %v", err)
+	}
 }
 
-func TestGroupDelete_Forbidden(t *testing.T) {
+func TestGroupDelete_LocalModeSuccess(t *testing.T) {
 	env := setupTestServer(t)
 	if err := auth.CreateGroup("to-delete", "local", "", nil); err != nil {
 		t.Fatalf("CreateGroup: %v", err)
 	}
 	form := url.Values{"name": {"to-delete"}}
 	resp := env.postForm(t, "/api/admin/groups/delete", "testadmin", form)
-	assertStatus(t, resp, 403)
+	assertStatus(t, resp, 200)
+	if _, err := auth.GetGroupID("to-delete"); err == nil {
+		t.Fatal("group should be deleted")
+	}
 }
 
-func TestGroupMembers_ListAndMutationForbidden(t *testing.T) {
+func TestGroupMembers_ListAndMutationLocalModeSuccess(t *testing.T) {
 	env := setupTestServer(t)
 	if err := auth.CreateGroup("team-a", "local", "", nil); err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -58,13 +64,16 @@ func TestGroupMembers_ListAndMutationForbidden(t *testing.T) {
 	if err := auth.AddUsersToGroup("team-a", []string{"testuser"}); err != nil {
 		t.Fatalf("AddUsersToGroup: %v", err)
 	}
+	if err := auth.CreateUser("another-user", "pass123", "user"); err != nil {
+		t.Fatalf("CreateUser another-user: %v", err)
+	}
 
 	form := url.Values{
 		"group_name": {"team-a"},
 		"usernames":  {"another-user"},
 	}
 	resp := env.postForm(t, "/api/admin/groups/members/add", "testadmin", form)
-	assertStatus(t, resp, 403)
+	assertStatus(t, resp, 200)
 
 	resp = env.get(t, "/api/admin/groups/members?name=team-a", "testadmin")
 	assertStatus(t, resp, 200)
@@ -73,13 +82,20 @@ func TestGroupMembers_ListAndMutationForbidden(t *testing.T) {
 	}
 	parseJSON(t, resp, &result)
 	found := false
+	foundAdded := false
 	for _, m := range result.Members {
 		if m == "testuser" {
 			found = true
 		}
+		if m == "another-user" {
+			foundAdded = true
+		}
 	}
 	if !found {
 		t.Error("testuser should be in team-a members")
+	}
+	if !foundAdded {
+		t.Error("another-user should be in team-a members")
 	}
 
 	form = url.Values{
@@ -87,7 +103,60 @@ func TestGroupMembers_ListAndMutationForbidden(t *testing.T) {
 		"username":   {"testuser"},
 	}
 	resp = env.postForm(t, "/api/admin/groups/members/remove", "testadmin", form)
-	assertStatus(t, resp, 403)
+	assertStatus(t, resp, 200)
+	members, err := auth.GetGroupMembers("team-a")
+	if err != nil {
+		t.Fatalf("GetGroupMembers: %v", err)
+	}
+	for _, member := range members {
+		if member == "testuser" {
+			t.Fatal("testuser should be removed")
+		}
+	}
+}
+
+func TestGroupMembersAdd_LocalModeRejectsUnknownUser(t *testing.T) {
+	env := setupTestServer(t)
+	if err := auth.CreateGroup("team-a", "local", "", nil); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+
+	form := url.Values{
+		"group_name": {"team-a"},
+		"usernames":  {"ghost-user"},
+	}
+	resp := env.postForm(t, "/api/admin/groups/members/add", "testadmin", form)
+	assertStatus(t, resp, 400)
+
+	members, err := auth.GetGroupMembers("team-a")
+	if err != nil {
+		t.Fatalf("GetGroupMembers: %v", err)
+	}
+	if len(members) != 0 {
+		t.Fatalf("members = %v, want empty", members)
+	}
+}
+
+func TestGroupMembersAdd_LocalModeRejectsSuperadmin(t *testing.T) {
+	env := setupTestServer(t)
+	if err := auth.CreateGroup("team-a", "local", "", nil); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+
+	form := url.Values{
+		"group_name": {"team-a"},
+		"usernames":  {"testadmin"},
+	}
+	resp := env.postForm(t, "/api/admin/groups/members/add", "testadmin", form)
+	assertStatus(t, resp, 400)
+
+	members, err := auth.GetGroupMembers("team-a")
+	if err != nil {
+		t.Fatalf("GetGroupMembers: %v", err)
+	}
+	if len(members) != 0 {
+		t.Fatalf("members = %v, want empty", members)
+	}
 }
 
 func TestGroupMutations_ForbiddenInUnifiedAuthExceptWhitelist(t *testing.T) {

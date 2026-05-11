@@ -82,24 +82,6 @@ func ensureSessionSecret() (string, error) {
 	return secret, nil
 }
 
-// startLDAPSyncScheduler 定时同步 LDAP 用户和组
-func (s *Server) startLDAPSyncScheduler(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	slog.Info("LDAP 定时同步已启动", "interval", interval)
-	for range ticker.C {
-		s.syncLDAPDirectory()
-	}
-}
-
-// syncLDAPDirectory 执行 LDAP 账号和组同步。
-func (s *Server) syncLDAPDirectory() {
-	if _, err := s.syncLDAPUsersFromDirectory(false); err != nil {
-		slog.Error("LDAP 用户定时同步失败", "error", err)
-	}
-	s.syncLDAPGroups()
-}
-
 // syncLDAPGroups 执行 LDAP 组同步
 func (s *Server) syncLDAPGroups() {
 	if !s.cfg.LDAPEnabled() {
@@ -435,6 +417,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	// 超管 - 用户管理
 	r.GET("/api/admin/users", s.handleAdminUsers)
 	r.POST("/api/admin/users/create", s.handleAdminUserCreate)
+	r.POST("/api/admin/users/batch-create", s.handleAdminUserBatchCreate)
 	r.POST("/api/admin/users/delete", s.handleAdminUserDelete)
 	// 超管 - 超管账户管理
 	r.GET("/api/admin/superadmins", s.handleAdminSuperadmins)

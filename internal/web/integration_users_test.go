@@ -22,6 +22,37 @@ func TestAdminUsers_List(t *testing.T) {
 	if len(result.Users) == 0 {
 		t.Error("should have users")
 	}
+	for _, u := range result.Users {
+		if u["role"] == "superadmin" {
+			t.Fatalf("superadmin should not be listed in user management: %+v", u)
+		}
+	}
+}
+
+func TestAdminUsers_TotalExcludesSuperadmins(t *testing.T) {
+	env := setupTestServer(t)
+	resp := env.get(t, "/api/admin/users?runtime=false", "testadmin")
+	assertStatus(t, resp, 200)
+	var result struct {
+		Success bool `json:"success"`
+		Total   int  `json:"total"`
+		Users   []struct {
+			Username string `json:"username"`
+			Role     string `json:"role"`
+		} `json:"users"`
+	}
+	parseJSON(t, resp, &result)
+	if !result.Success {
+		t.Fatal("should succeed")
+	}
+	if result.Total != len(result.Users) {
+		t.Fatalf("total = %d, len(users) = %d", result.Total, len(result.Users))
+	}
+	for _, u := range result.Users {
+		if u.Role == "superadmin" {
+			t.Fatalf("superadmin should not be counted in user management: %+v", u)
+		}
+	}
 }
 
 func TestAdminUsers_ForbiddenForRegularUser(t *testing.T) {
@@ -122,11 +153,120 @@ func TestAdminAuthLDAPUsers_DirectorySourceUsesLDAP(t *testing.T) {
 	}
 }
 
-func TestAdminUserCreate_Forbidden(t *testing.T) {
+func TestAdminUserCreate_LocalModeSuccess(t *testing.T) {
+	env := setupTestServer(t)
+	form := url.Values{
+		"username":  {"newuser"},
+		"image_tag": {"test-tag"},
+	}
+	resp := env.postForm(t, "/api/admin/users/create", "testadmin", form)
+	assertStatus(t, resp, 200)
+	var result struct {
+		Success  bool   `json:"success"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	parseJSON(t, resp, &result)
+	if !result.Success {
+		t.Fatal("should succeed")
+	}
+	if result.Username != "newuser" {
+		t.Fatalf("username = %q, want newuser", result.Username)
+	}
+	if result.Password == "" {
+		t.Fatal("should return initial password")
+	}
+	if !auth.UserExists("newuser") {
+		t.Fatal("newuser should exist")
+	}
+}
+
+func TestAdminUserCreate_LocalModeInvalidUsername(t *testing.T) {
 	env := setupTestServer(t)
 	form := url.Values{"username": {"bad/user"}}
 	resp := env.postForm(t, "/api/admin/users/create", "testadmin", form)
+	assertStatus(t, resp, 400)
+}
+
+func TestAdminUserCreate_UnifiedModeForbidden(t *testing.T) {
+	env := setupTestServer(t)
+	env.Cfg.Web.AuthMode = "ldap"
+	form := url.Values{"username": {"newuser"}}
+	resp := env.postForm(t, "/api/admin/users/create", "testadmin", form)
 	assertStatus(t, resp, 403)
+}
+
+func TestAdminUserBatchCreate_LocalModeMixedResults(t *testing.T) {
+	env := setupTestServer(t)
+	form := url.Values{
+		"usernames": {"batch1\nbad/user\ntestuser\nbatch2"},
+		"image_tag": {"test-tag"},
+	}
+	resp := env.postForm(t, "/api/admin/users/batch-create", "testadmin", form)
+	assertStatus(t, resp, 200)
+	var result struct {
+		Success bool `json:"success"`
+		Created int  `json:"created"`
+		Failed  int  `json:"failed"`
+		Results []struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+			Success  bool   `json:"success"`
+			Error    string `json:"error"`
+		} `json:"results"`
+	}
+	parseJSON(t, resp, &result)
+	if result.Success {
+		t.Fatal("batch should report partial failure")
+	}
+	if result.Created != 2 || result.Failed != 2 {
+		t.Fatalf("created=%d failed=%d, want 2/2", result.Created, result.Failed)
+	}
+	if !auth.UserExists("batch1") || !auth.UserExists("batch2") {
+		t.Fatal("successful batch users should exist")
+	}
+}
+
+func TestAdminUserBatchCreate_UnifiedModeForbidden(t *testing.T) {
+	env := setupTestServer(t)
+	env.Cfg.Web.AuthMode = "ldap"
+	form := url.Values{
+		"usernames": {"batch1\nbatch2"},
+		"image_tag": {"test-tag"},
+	}
+	resp := env.postForm(t, "/api/admin/users/batch-create", "testadmin", form)
+	assertStatus(t, resp, 403)
+}
+
+func TestAdminUserDelete_LocalModeSuccess(t *testing.T) {
+	env := setupTestServer(t)
+	form := url.Values{"username": {"testuser"}}
+	resp := env.postForm(t, "/api/admin/users/delete", "testadmin", form)
+	assertStatus(t, resp, 200)
+	if auth.UserExists("testuser") {
+		t.Fatal("testuser should be deleted")
+	}
+}
+
+func TestAdminUserDelete_LocalModeRejectsSuperadmin(t *testing.T) {
+	env := setupTestServer(t)
+	form := url.Values{"username": {"testadmin"}}
+	resp := env.postForm(t, "/api/admin/users/delete", "testadmin", form)
+	assertStatus(t, resp, 400)
+	if !auth.IsSuperadmin("testadmin") {
+		t.Fatal("testadmin should still exist")
+	}
+}
+
+func TestAdminUserDelete_UnifiedModeForbidden(t *testing.T) {
+	env := setupTestServer(t)
+	env.Cfg.Web.AuthMode = "ldap"
+	form := url.Values{"username": {"testuser"}}
+	resp := env.postForm(t, "/api/admin/users/delete", "testadmin", form)
+	assertStatus(t, resp, 403)
+	if !auth.UserExists("testuser") {
+		t.Fatal("testuser should not be deleted in unified mode")
+	}
 }
 
 func TestSuperadmins_List(t *testing.T) {

@@ -1,12 +1,12 @@
 """主窗口：连接状态 + 权限管理 + 白名单目录"""
 
 from PySide6.QtWidgets import (
-  QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+  QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
   QLabel, QPushButton, QCheckBox, QListWidget, QListWidgetItem,
-  QFileDialog, QGroupBox, QSystemTrayIcon, QMenu, QComboBox,
+  QFileDialog, QGroupBox, QSystemTrayIcon, QMenu,
   QStyle, QStyleOptionButton,
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon, QPainter, QPen, QColor
 
 from core.permissions import PERMISSION_GROUPS

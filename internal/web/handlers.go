@@ -558,15 +558,6 @@ func (s *Server) handleChangePassword(c *gin.Context) {
 	logger.Audit("password.change", "username", username)
 }
 
-// isSuperadmin 检查请求的用户是否是超管
-func (s *Server) isSuperadmin(c *gin.Context) bool {
-	username := s.getSessionUser(c)
-	if username == "" {
-		return false
-	}
-	return auth.IsSuperadmin(username)
-}
-
 // handleConfigGet 从数据库读取配置并返回为 JSON
 func (s *Server) handleConfigGet(c *gin.Context) {
 	username := s.requireAuth(c)

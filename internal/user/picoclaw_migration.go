@@ -1,26 +1,18 @@
 package user
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
 
 const PicoAideIssueURL = "https://github.com/picoaide/picoaide/issues"
-const defaultPicoClawMigrationRulesURL = "https://raw.githubusercontent.com/picoaide/picoaide/main/rules/picoclaw/migrations.json"
-const picoClawMigrationCacheFile = "picoclaw_migrations.json"
-const picoClawMigrationUpdateStampFile = "picoclaw_migrations.updated_at"
 const PicoAideSupportedPicoClawConfigVersion = 3
 
 type PicoClawMigrationRuleSet struct {
@@ -59,9 +51,7 @@ type PicoClawMigrationRulesInfo struct {
 
 type PicoClawMigrationService struct {
 	cacheDir string
-	rawURL   string
 	rules    PicoClawMigrationRuleSet
-	client   *http.Client
 }
 
 var picoclawVersionPattern = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)`)
@@ -69,11 +59,9 @@ var picoclawVersionPattern = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)`)
 func NewPicoClawMigrationService(cacheDir string) (*PicoClawMigrationService, error) {
 	svc := &PicoClawMigrationService{
 		cacheDir: cacheDir,
-		rawURL:   defaultPicoClawMigrationRulesURL,
-		client:   &http.Client{Timeout: 20 * time.Second},
 	}
 	if err := svc.ReleaseBundledRulesCache(); err != nil {
-		slog.Warn("释放 Picoclaw 本地迁移规则缓存失败", "error", err)
+		return nil, err
 	}
 	rules, err := svc.loadRules()
 	if err != nil {
@@ -88,168 +76,36 @@ func ReleasePicoClawMigrationRulesCache(cacheDir string) error {
 	return svc.ReleaseBundledRulesCache()
 }
 
-func RefreshPicoClawMigrationRules(cacheDir string) error {
-	svc := &PicoClawMigrationService{
-		cacheDir: cacheDir,
-		rawURL:   defaultPicoClawMigrationRulesURL,
-		client:   &http.Client{Timeout: 20 * time.Second},
-	}
-	return svc.Refresh()
-}
-
 func RefreshPicoClawMigrationRulesFromAdapter(cacheDir, remoteBaseURL string) error {
 	_, err := RefreshPicoClawAdapterFromRemote(cacheDir, remoteBaseURL, &http.Client{Timeout: 20 * time.Second})
 	return err
 }
 
 func LoadPicoClawMigrationRulesInfo(cacheDir string) (PicoClawMigrationRulesInfo, error) {
-	if pkg, err := NewPicoClawAdapterPackage(cacheDir); err == nil {
-		rules := pkg.ToMigrationRuleSet()
-		info := PicoClawMigrationRulesInfo{
-			LatestSupportedConfigVersion:   rules.LatestSupportedConfigVersion,
-			PicoAideSupportedConfigVersion: rules.LatestSupportedConfigVersion,
-			AdapterSchemaVersion:           pkg.Index.AdapterSchemaVersion,
-			AdapterVersion:                 pkg.Index.AdapterVersion,
-			Versions:                       rules.Versions,
-			CachePath:                      filepath.Join(cacheDir, picoclawAdapterDir, picoclawAdapterIndexFile),
-		}
-		if st, err := os.Stat(info.CachePath); err == nil {
-			info.UpdatedAt = st.ModTime().Format(time.RFC3339)
-		}
-		return info, nil
-	}
-	svc := &PicoClawMigrationService{cacheDir: cacheDir}
-	if err := svc.ReleaseBundledRulesCache(); err != nil {
-		slog.Warn("释放 Picoclaw 本地迁移规则缓存失败", "error", err)
-	}
-	rules, err := svc.loadRules()
+	pkg, err := NewPicoClawAdapterPackage(cacheDir)
 	if err != nil {
 		return PicoClawMigrationRulesInfo{}, err
 	}
+	rules := pkg.ToMigrationRuleSet()
 	info := PicoClawMigrationRulesInfo{
 		LatestSupportedConfigVersion:   rules.LatestSupportedConfigVersion,
-		PicoAideSupportedConfigVersion: PicoAideSupportedPicoClawConfigVersion,
+		PicoAideSupportedConfigVersion: rules.LatestSupportedConfigVersion,
+		AdapterSchemaVersion:           pkg.Index.AdapterSchemaVersion,
+		AdapterVersion:                 pkg.Index.AdapterVersion,
 		Versions:                       rules.Versions,
-		CachePath:                      filepath.Join(cacheDir, picoClawMigrationCacheFile),
+		CachePath:                      filepath.Join(cacheDir, picoclawAdapterDir, picoclawAdapterIndexFile),
 	}
-	if data, err := os.ReadFile(filepath.Join(cacheDir, picoClawMigrationUpdateStampFile)); err == nil {
-		info.UpdatedAt = strings.TrimSpace(string(data))
-	} else if st, err := os.Stat(info.CachePath); err == nil {
+	if st, err := os.Stat(info.CachePath); err == nil {
 		info.UpdatedAt = st.ModTime().Format(time.RFC3339)
 	}
 	return info, nil
-}
-
-func SavePicoClawMigrationRules(cacheDir string, data []byte) (PicoClawMigrationRulesInfo, error) {
-	rules, err := ParsePicoClawMigrationRules(data)
-	if err != nil {
-		return PicoClawMigrationRulesInfo{}, err
-	}
-	if err := rules.EnsureSupportedByPicoAide(); err != nil {
-		return PicoClawMigrationRulesInfo{}, err
-	}
-	formatted, err := json.MarshalIndent(rules, "", "  ")
-	if err != nil {
-		return PicoClawMigrationRulesInfo{}, fmt.Errorf("格式化 Picoclaw 迁移规则失败: %w", err)
-	}
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return PicoClawMigrationRulesInfo{}, err
-	}
-	cachePath := filepath.Join(cacheDir, picoClawMigrationCacheFile)
-	tmpPath := cachePath + ".tmp"
-	if err := os.WriteFile(tmpPath, formatted, 0644); err != nil {
-		return PicoClawMigrationRulesInfo{}, err
-	}
-	if err := os.Rename(tmpPath, cachePath); err != nil {
-		_ = os.Remove(tmpPath)
-		return PicoClawMigrationRulesInfo{}, err
-	}
-	now := time.Now().Format(time.RFC3339)
-	if err := os.WriteFile(filepath.Join(cacheDir, picoClawMigrationUpdateStampFile), []byte(now), 0644); err != nil {
-		return PicoClawMigrationRulesInfo{}, err
-	}
-	return PicoClawMigrationRulesInfo{
-		LatestSupportedConfigVersion:   rules.LatestSupportedConfigVersion,
-		PicoAideSupportedConfigVersion: PicoAideSupportedPicoClawConfigVersion,
-		Versions:                       rules.Versions,
-		CachePath:                      cachePath,
-		UpdatedAt:                      now,
-	}, nil
 }
 
 func (s *PicoClawMigrationService) ReleaseBundledRulesCache() error {
 	if s == nil {
 		return nil
 	}
-	if err := ReleasePicoClawAdapterCache(s.cacheDir); err == nil {
-		return nil
-	}
-	cachePath := filepath.Join(s.cacheDir, picoClawMigrationCacheFile)
-	if _, err := os.Stat(cachePath); err == nil {
-		return nil
-	}
-	data, err := readBundledPicoClawMigrationRules()
-	if err != nil {
-		return err
-	}
-	rules, err := parsePicoClawMigrationRules(data)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(s.cacheDir, 0755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(cachePath, data, 0644); err != nil {
-		return err
-	}
-	s.rules = rules
-	return nil
-}
-
-func (s *PicoClawMigrationService) RefreshIfDue() error {
-	if s == nil {
-		return nil
-	}
-	stampPath := filepath.Join(s.cacheDir, picoClawMigrationUpdateStampFile)
-	if st, err := os.Stat(stampPath); err == nil && time.Since(st.ModTime()) < 24*time.Hour {
-		return nil
-	}
-	if err := s.Refresh(); err != nil {
-		slog.Warn("自动更新 Picoclaw 迁移规则失败，将继续使用本地缓存规则", "error", err)
-	}
-	return nil
-}
-
-func (s *PicoClawMigrationService) Refresh() error {
-	if s == nil {
-		return nil
-	}
-	var lastErr error
-	for i := 0; i < 5; i++ {
-		if i > 0 {
-			time.Sleep(time.Duration(i) * time.Second)
-		}
-		rules, data, err := s.fetchRemoteRules()
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if err := rules.EnsureSupportedByPicoAide(); err != nil {
-			return err
-		}
-		if err := os.MkdirAll(s.cacheDir, 0755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(s.cacheDir, picoClawMigrationCacheFile), data, 0644); err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(s.cacheDir, picoClawMigrationUpdateStampFile), []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
-			return err
-		}
-		s.rules = rules
-		return nil
-	}
-	return fmt.Errorf("更新 Picoclaw 迁移规则失败，已重试 5 次: %w", lastErr)
+	return ReleasePicoClawAdapterCache(s.cacheDir)
 }
 
 func (s *PicoClawMigrationService) EnsureUpgradeable(fromTag, toTag string) error {
@@ -291,75 +147,11 @@ func (s *PicoClawMigrationService) Migrate(cfg map[string]interface{}, fromTag, 
 }
 
 func (s *PicoClawMigrationService) loadRules() (PicoClawMigrationRuleSet, error) {
-	if pkg, err := NewPicoClawAdapterPackage(s.cacheDir); err == nil {
-		return pkg.ToMigrationRuleSet(), nil
-	}
-	cachePath := filepath.Join(s.cacheDir, picoClawMigrationCacheFile)
-	if data, err := os.ReadFile(cachePath); err == nil {
-		return parsePicoClawMigrationRules(data)
-	}
-	data, err := readBundledPicoClawMigrationRules()
+	pkg, err := NewPicoClawAdapterPackage(s.cacheDir)
 	if err != nil {
-		return PicoClawMigrationRuleSet{}, fmt.Errorf("未找到本地 Picoclaw 迁移规则缓存，请先手动更新迁移规则: %w", err)
+		return PicoClawMigrationRuleSet{}, fmt.Errorf("未找到本地 Picoclaw adapter，请先手动更新配置适配包: %w", err)
 	}
-	return parsePicoClawMigrationRules(data)
-}
-
-func readBundledPicoClawMigrationRules() ([]byte, error) {
-	paths := []string{
-		filepath.Join("rules", "picoclaw", "migrations.json"),
-		filepath.Join(filepath.Dir(os.Args[0]), "rules", "picoclaw", "migrations.json"),
-	}
-	if _, file, _, ok := runtime.Caller(0); ok {
-		paths = append(paths, filepath.Join(filepath.Dir(file), "..", "..", "rules", "picoclaw", "migrations.json"))
-	}
-	var lastErr error
-	for _, path := range paths {
-		data, err := os.ReadFile(path)
-		if err == nil {
-			return data, nil
-		}
-		lastErr = err
-	}
-	return nil, lastErr
-}
-
-func (s *PicoClawMigrationService) fetchRemoteRules() (PicoClawMigrationRuleSet, []byte, error) {
-	resp, err := s.client.Get(s.rawURL)
-	if err != nil {
-		return PicoClawMigrationRuleSet{}, nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return PicoClawMigrationRuleSet{}, nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil {
-		return PicoClawMigrationRuleSet{}, nil, err
-	}
-	rules, err := parsePicoClawMigrationRules(data)
-	if err != nil {
-		return PicoClawMigrationRuleSet{}, nil, err
-	}
-	return rules, data, nil
-}
-
-func parsePicoClawMigrationRules(data []byte) (PicoClawMigrationRuleSet, error) {
-	return ParsePicoClawMigrationRules(data)
-}
-
-func ParsePicoClawMigrationRules(data []byte) (PicoClawMigrationRuleSet, error) {
-	var rules PicoClawMigrationRuleSet
-	if err := json.Unmarshal(data, &rules); err != nil {
-		return rules, fmt.Errorf("解析 Picoclaw 迁移规则失败: %w", err)
-	}
-	sort.SliceStable(rules.Versions, func(i, j int) bool {
-		return compareVersionStrings(rules.Versions[i].Version, rules.Versions[j].Version) < 0
-	})
-	if err := rules.Validate(); err != nil {
-		return rules, err
-	}
-	return rules, nil
+	return pkg.ToMigrationRuleSet(), nil
 }
 
 func (r PicoClawMigrationRuleSet) Validate() error {
@@ -462,15 +254,6 @@ func (r PicoClawMigrationRuleSet) UnsupportedEndpointVersions(fromTag, toTag str
 		}
 	}
 	return uniqueStrings(missing)
-}
-
-func (r PicoClawMigrationRuleSet) NextVersionAfter(version string) string {
-	for _, candidate := range r.Versions {
-		if compareVersionStrings(candidate.Version, version) > 0 {
-			return candidate.Version
-		}
-	}
-	return ""
 }
 
 func (r PicoClawMigrationRuleSet) versionMap() map[string]PicoClawMigrationVersionRule {

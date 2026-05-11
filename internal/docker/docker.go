@@ -186,31 +186,10 @@ func ContainerStatus(ctx context.Context, containerID string) string {
 	return inspect.State.Status
 }
 
-// ContainerRunning 返回容器是否运行中
-func ContainerRunning(ctx context.Context, containerID string) bool {
-	if containerID == "" {
-		return false
-	}
-	inspect, err := cli.ContainerInspect(ctx, containerID)
-	if err != nil {
-		return false
-	}
-	return inspect.State.Running
-}
-
 // ContainerExists 按容器名检查容器是否存在
 func ContainerExists(ctx context.Context, username string) bool {
 	_, err := cli.ContainerInspect(ctx, "picoaide-"+username)
 	return err == nil
-}
-
-// GetContainerIDByName 按容器名获取容器 ID
-func GetContainerIDByName(ctx context.Context, username string) (string, error) {
-	inspect, err := cli.ContainerInspect(ctx, "picoaide-"+username)
-	if err != nil {
-		return "", err
-	}
-	return inspect.ID, nil
 }
 
 // ContainerLogs 获取容器日志

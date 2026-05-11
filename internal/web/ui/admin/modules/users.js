@@ -7,8 +7,10 @@ export async function init(ctx) {
   let pageSize = 20;
   let totalPages = 1;
   let search = '';
+  let unifiedAuth = true;
 
   ctx.$('#refresh-users').addEventListener('click', () => loadUsers());
+  ctx.$('#create-user-btn')?.addEventListener('click', openCreateModal);
   ctx.$('#users-search-btn')?.addEventListener('click', () => {
     search = ctx.$('#users-search').value.trim();
     page = 1;
@@ -57,6 +59,8 @@ export async function init(ctx) {
     page = data.page || page;
     pageSize = data.page_size || pageSize;
     totalPages = data.total_pages || 1;
+    unifiedAuth = !!data.unified_auth;
+    updateModeNotice(data);
 
     const users = data.users || [];
     updatePager(data);
@@ -83,6 +87,9 @@ export async function init(ctx) {
       actions += '<span class="action-menu"><button class="btn btn-sm btn-outline" data-menu-toggle type="button">更多</button><span class="action-menu-panel">';
       actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="debug" data-user="' + esc(u.username) + '">调试重启</button>';
       actions += '<button class="btn btn-sm btn-outline" data-action="stop" data-user="' + esc(u.username) + '">停止</button>';
+      if (!unifiedAuth) {
+        actions += '<button class="btn btn-sm btn-danger" data-action="delete-user" data-user="' + esc(u.username) + '">删除用户</button>';
+      }
       actions += '</span></span>';
       actions += '</div>';
       tr.innerHTML = '<td><strong>' + esc(u.username) + '</strong></td><td>' + renderSource(u.source) + '</td><td>' + (groupTags || '<small class="text-muted">-</small>') + '</td><td><span class="badge ' + statusCls + '">' + esc(u.status) + '</span></td><td>' + imageText + ' ' + imgBadge + '</td><td>' + esc(u.ip || '-') + '</td><td class="actions-cell">' + actions + '</td>';
@@ -93,6 +100,13 @@ export async function init(ctx) {
       btn.addEventListener('click', async () => {
         if (btn.dataset.action === 'logs') {
           openLogModal(btn.dataset.user);
+          return;
+        }
+        if (btn.dataset.action === 'delete-user') {
+          if (!confirm('确定删除普通用户 ' + btn.dataset.user + '？用户目录会被归档。')) return;
+          const res = await Api.post('/api/admin/users/delete', { username: btn.dataset.user });
+          showMsg('#users-msg', res.message || res.error, res.success);
+          if (res.success) loadUsers();
           return;
         }
         if (btn.dataset.action === 'apply') {
@@ -131,6 +145,24 @@ export async function init(ctx) {
     });
   }
 
+  function updateModeNotice(data) {
+    const tip = ctx.$('#users-mode-tip');
+    const desc = ctx.$('#users-page-desc');
+    const createBtn = ctx.$('#create-user-btn');
+    if (createBtn) createBtn.classList.toggle('hidden', unifiedAuth);
+    if (desc) {
+      desc.textContent = unifiedAuth
+        ? '普通用户来自当前认证源，管理员负责容器、镜像和配置下发。'
+        : '普通用户由管理员本地创建，管理员负责容器、镜像和配置下发。';
+    }
+    if (!tip) return;
+    tip.classList.remove('hidden');
+    tip.textContent = unifiedAuth
+      ? '普通用户由当前认证源同步，不支持手动新建或删除。'
+      : '当前为本地认证，普通用户可在此手动新建或删除。';
+    tip.className = 'msg msg-info';
+  }
+
   function updatePager(data) {
     const info = ctx.$('#users-page-info');
     if (info) {
@@ -164,6 +196,73 @@ export async function init(ctx) {
     if (source === 'local') return '<span class="badge badge-muted">本地</span>';
     if (!source || source === 'unknown') return '<span class="badge badge-muted">未知</span>';
     return '<span class="badge badge-muted">' + esc(source) + '</span>';
+  }
+
+  function openCreateModal() {
+    ctx.$('#user-create-modal')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'user-create-modal';
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML =
+      '<div class="modal">' +
+        '<div class="modal-header">批量新建普通用户<button id="modal-close">&times;</button></div>' +
+        '<div class="modal-body">' +
+          '<div class="field"><label>用户名</label><textarea id="user-create-names" rows="8" placeholder="user01&#10;user02&#10;user03"></textarea></div>' +
+          '<div class="field"><label>镜像标签</label><select id="user-create-image"><option value="">加载中...</option></select></div>' +
+          '<div id="user-create-msg" class="msg"></div>' +
+          '<pre id="user-create-result" class="hidden" style="max-height:220px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:10px;border-radius:4px;font-size:12px;white-space:pre-wrap;word-break:break-all;margin:0"></pre>' +
+        '</div>' +
+        '<div class="modal-footer"><button class="btn btn-primary" id="user-create-submit">创建</button></div>' +
+      '</div>';
+    ctx.$('#content-area').appendChild(overlay);
+    overlay.querySelector('#modal-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    loadImageTagOptions(overlay);
+    overlay.querySelector('#user-create-submit').addEventListener('click', async () => {
+      const names = overlay.querySelector('#user-create-names').value.trim();
+      const imageTag = overlay.querySelector('#user-create-image').value;
+      if (!names) { showMsg('#user-create-msg', '请至少输入一个用户名', false); return; }
+      showMsg('#user-create-msg', '创建中...', true);
+      const params = { usernames: names };
+      if (imageTag) params.image_tag = imageTag;
+      const res = await Api.post('/api/admin/users/batch-create', params);
+      if (res.results) {
+        renderBatchCreateResult(overlay, res);
+        loadUsers();
+      } else {
+        showMsg('#user-create-msg', res.error || '创建失败', false);
+      }
+    });
+  }
+
+  async function loadImageTagOptions(overlay) {
+    const select = overlay.querySelector('#user-create-image');
+    try {
+      const data = await Api.get('/api/admin/images/local-tags');
+      const tags = data.success ? (data.tags || []) : [];
+      if (tags.length === 0) {
+        select.innerHTML = '<option value="">无可用本地镜像标签</option>';
+        return;
+      }
+      select.innerHTML = tags.map(tag => '<option value="' + esc(tag) + '">' + esc(tag) + '</option>').join('');
+    } catch (e) {
+      select.innerHTML = '<option value="">无法读取本地镜像标签</option>';
+    }
+  }
+
+  function renderBatchCreateResult(overlay, res) {
+    const pre = overlay.querySelector('#user-create-result');
+    const lines = [res.message || '批量创建完成'];
+    for (const item of (res.results || [])) {
+      if (item.success) {
+        lines.push(item.username + '    ' + item.password);
+      } else {
+        lines.push(item.username + '    失败: ' + item.error);
+      }
+    }
+    pre.textContent = lines.join('\n');
+    pre.classList.remove('hidden');
+    showMsg('#user-create-msg', res.message || '', !!res.success);
   }
 
   if (!actionMenuCloseBound) {

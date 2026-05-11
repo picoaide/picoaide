@@ -1,4 +1,5 @@
 var rawConfig = {};
+var whitelistLoadSeq = 0;
 
 export async function init(ctx) {
   const { Api, showMsg, $ } = ctx;
@@ -157,7 +158,6 @@ export async function init(ctx) {
         showMsg('#auth-msg', res.error, false);
       }
       updateWhitelistVisibility();
-      if (whitelistEnabledForMode($('#auth-mode').value)) loadWhitelist();
     } catch (e) { showMsg('#auth-msg', e.message, false); }
   }
 
@@ -235,9 +235,11 @@ export async function init(ctx) {
   }
 
   async function loadWhitelist() {
+    var seq = ++whitelistLoadSeq;
     var tags = $('#wl-tags');
     tags.innerHTML = '';
     var data = await Api.get('/api/admin/whitelist?page=1&page_size=100');
+    if (seq !== whitelistLoadSeq) return;
     if (!data.success) return;
 
     var users = data.users || [];

@@ -58,11 +58,3 @@ func LDAPFetchUserGroups(cfg *config.GlobalConfig, username string) ([]string, e
 	}
 	return provider.FetchUserGroups(cfg, username)
 }
-
-func LDAPFetchAllGroupsWithHierarchy(cfg *config.GlobalConfig) (map[string]GroupHierarchy, error) {
-	provider, err := directoryProvider("ldap")
-	if err != nil {
-		return nil, err
-	}
-	return provider.FetchGroups(cfg)
-}

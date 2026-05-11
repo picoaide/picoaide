@@ -160,19 +160,6 @@ func fetchGroupsBySearch(cfg *config.GlobalConfig, username string) ([]string, e
 	return groups, nil
 }
 
-// FetchAllGroupsWithMembers 获取所有 LDAP 组及其成员（用于手动全量同步）
-func FetchAllGroupsWithMembers(cfg *config.GlobalConfig) (map[string][]string, error) {
-	groups, err := FetchAllGroupsWithHierarchy(cfg)
-	if err != nil {
-		return nil, err
-	}
-	result := make(map[string][]string, len(groups))
-	for name, group := range groups {
-		result[name] = group.Members
-	}
-	return result, nil
-}
-
 // GroupHierarchy LDAP 组同步结果，包含直接成员和直接子组。
 type GroupHierarchy struct {
 	Members   []string

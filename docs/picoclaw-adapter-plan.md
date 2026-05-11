@@ -320,7 +320,7 @@ The existing System Settings page keeps PicoAide-owned settings only:
    - validate package
    - atomic activation
    - update status stamp
-5. Keep current migration APIs compatible by adapting old `migrations.json` callers to the new adapter package.
+5. Route migration APIs through the adapter package.
 6. Extend migration execution to support `config` and `security` storage.
 7. Replace hard-coded config-version support with adapter-declared support and adapter-engine schema-version checks.
 8. Add generic config read/write APIs driven by UI schema.

@@ -739,10 +739,6 @@ func (s *Server) initExternalUser(username string) error {
 	return nil
 }
 
-func (s *Server) purgeOrdinaryAuthProviderState() (*authProviderSwitchCleanupResult, error) {
-	return s.purgeOrdinaryAuthProviderStateForConfig(s.cfg)
-}
-
 func (s *Server) purgeOrdinaryAuthProviderStateForConfig(cfg *config.GlobalConfig) (*authProviderSwitchCleanupResult, error) {
 	result := &authProviderSwitchCleanupResult{}
 
@@ -931,6 +927,9 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
 	// 先输出所有有容器记录的用户
 	seen := make(map[string]bool)
 	for _, c := range containers {
+		if localRoleMap[c.Username] == "superadmin" {
+			continue
+		}
 		seen[c.Username] = true
 		imageRef := c.Image
 		imageTag := imageRef
@@ -957,6 +956,9 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
 
 	// 补上本地用户中没有容器记录的（如超管）
 	for _, u := range localUsers {
+		if u.Role == "superadmin" {
+			continue
+		}
 		if !seen[u.Username] {
 			source := u.Source
 			if source == "" {
@@ -1030,8 +1032,10 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	writeError(c, http.StatusForbidden, "普通用户由当前认证源同步，不允许手动创建")
-	return
+	if s.cfg.UnifiedAuthEnabled() {
+		writeError(c, http.StatusForbidden, "普通用户由当前认证源同步，不允许手动创建")
+		return
+	}
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -1097,12 +1101,125 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
 	}{true, "用户创建成功，容器启动中", username, password})
 }
 
+type adminUserBatchCreateResult struct {
+	Username string `json:"username"`
+	Password string `json:"password,omitempty"`
+	Success  bool   `json:"success"`
+	Error    string `json:"error,omitempty"`
+}
+
+func (s *Server) handleAdminUserBatchCreate(c *gin.Context) {
+	if s.requireSuperadmin(c) == "" {
+		return
+	}
+	if s.cfg.UnifiedAuthEnabled() {
+		writeError(c, http.StatusForbidden, "普通用户由当前认证源同步，不允许手动创建")
+		return
+	}
+	if c.Request.Method != "POST" {
+		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+		return
+	}
+	if !s.checkCSRF(c) {
+		writeError(c, http.StatusForbidden, "无效请求")
+		return
+	}
+
+	usernames := parseBatchUsernames(c.PostForm("usernames"))
+	if len(usernames) == 0 {
+		writeError(c, http.StatusBadRequest, "请至少输入一个用户名")
+		return
+	}
+
+	imageTag := strings.TrimSpace(c.PostForm("image_tag"))
+	if imageTag == "" {
+		ctx := contextWithTimeout(10)
+		defaultTag, err := s.defaultUserImageTag(ctx)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "获取默认镜像失败: "+err.Error())
+			return
+		}
+		imageTag = defaultTag
+	}
+	if imageTag == "" {
+		writeError(c, http.StatusBadRequest, "未指定镜像标签且本地无可用镜像，请先拉取镜像")
+		return
+	}
+
+	results := make([]adminUserBatchCreateResult, 0, len(usernames))
+	created := 0
+	failed := 0
+	for _, username := range usernames {
+		result := s.createLocalUserWithImage(username, imageTag)
+		results = append(results, result)
+		if result.Success {
+			created++
+			continue
+		}
+		failed++
+	}
+
+	logger.Audit("user.batch_create", "count", created, "failed", failed, "operator", s.getSessionUser(c))
+	writeJSON(c, http.StatusOK, struct {
+		Success bool                         `json:"success"`
+		Message string                       `json:"message"`
+		Created int                          `json:"created"`
+		Failed  int                          `json:"failed"`
+		Results []adminUserBatchCreateResult `json:"results"`
+	}{failed == 0, fmt.Sprintf("批量创建完成，成功 %d 个，失败 %d 个", created, failed), created, failed, results})
+}
+
+func parseBatchUsernames(input string) []string {
+	seen := make(map[string]bool)
+	var usernames []string
+	for _, line := range strings.Split(input, "\n") {
+		username := strings.TrimSpace(line)
+		if username == "" || seen[username] {
+			continue
+		}
+		seen[username] = true
+		usernames = append(usernames, username)
+	}
+	return usernames
+}
+
+func (s *Server) createLocalUserWithImage(username, imageTag string) adminUserBatchCreateResult {
+	result := adminUserBatchCreateResult{Username: username}
+	if err := user.ValidateUsername(username); err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	if auth.UserExists(username) {
+		result.Error = "用户 " + username + " 已存在"
+		return result
+	}
+
+	password := auth.GenerateRandomPassword(12)
+	if err := auth.CreateUser(username, password, "user"); err != nil {
+		result.Error = "创建用户失败: " + err.Error()
+		return result
+	}
+	if err := user.InitUser(s.cfg, username, imageTag); err != nil {
+		_ = auth.DeleteUser(username)
+		result.Error = "初始化用户目录失败: " + err.Error()
+		return result
+	}
+	if s.dockerAvailable {
+		go s.autoStartUserContainer(username)
+	}
+	result.Success = true
+	result.Password = password
+	return result
+}
+
 func (s *Server) handleAdminUserDelete(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	writeError(c, http.StatusForbidden, "普通用户由当前认证源同步，不允许手动删除")
-	return
+	if s.cfg.UnifiedAuthEnabled() {
+		writeError(c, http.StatusForbidden, "普通用户由当前认证源同步，不允许手动删除")
+		return
+	}
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -1119,6 +1236,10 @@ func (s *Server) handleAdminUserDelete(c *gin.Context) {
 	}
 	if err := user.ValidateUsername(username); err != nil {
 		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if auth.IsSuperadmin(username) {
+		writeError(c, http.StatusBadRequest, "不能通过普通用户接口删除超管")
 		return
 	}
 
@@ -2687,21 +2808,24 @@ func (s *Server) handleAdminGroups(c *gin.Context) {
 	}
 	groups, total, totalPages, page, pageSize := paginateSlice(groups, pager)
 	writeJSON(c, http.StatusOK, struct {
-		Success    bool             `json:"success"`
-		Groups     []auth.GroupInfo `json:"groups"`
-		Page       int              `json:"page,omitempty"`
-		PageSize   int              `json:"page_size,omitempty"`
-		Total      int              `json:"total,omitempty"`
-		TotalPages int              `json:"total_pages,omitempty"`
-	}{true, groups, page, pageSize, total, totalPages})
+		Success     bool             `json:"success"`
+		UnifiedAuth bool             `json:"unified_auth"`
+		Groups      []auth.GroupInfo `json:"groups"`
+		Page        int              `json:"page,omitempty"`
+		PageSize    int              `json:"page_size,omitempty"`
+		Total       int              `json:"total,omitempty"`
+		TotalPages  int              `json:"total_pages,omitempty"`
+	}{true, s.cfg.UnifiedAuthEnabled(), groups, page, pageSize, total, totalPages})
 }
 
 func (s *Server) handleAdminGroupCreate(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	writeError(c, http.StatusForbidden, "用户组由当前认证源同步，不允许手动创建")
-	return
+	if s.cfg.UnifiedAuthEnabled() {
+		writeError(c, http.StatusForbidden, "用户组由当前认证源同步，不允许手动创建")
+		return
+	}
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -2737,8 +2861,10 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	writeError(c, http.StatusForbidden, "用户组由当前认证源同步，不允许手动删除")
-	return
+	if s.cfg.UnifiedAuthEnabled() {
+		writeError(c, http.StatusForbidden, "用户组由当前认证源同步，不允许手动删除")
+		return
+	}
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -2763,8 +2889,10 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	writeError(c, http.StatusForbidden, "用户组成员由当前认证源同步，不允许手动修改")
-	return
+	if s.cfg.UnifiedAuthEnabled() {
+		writeError(c, http.StatusForbidden, "用户组成员由当前认证源同步，不允许手动修改")
+		return
+	}
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -2779,31 +2907,45 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "组名和用户名不能为空")
 		return
 	}
-	usernames := strings.Split(usersStr, ",")
-	var trimmed []string
-	for _, u := range usernames {
-		u = strings.TrimSpace(u)
-		if u != "" {
-			trimmed = append(trimmed, u)
-		}
-	}
-	if len(trimmed) == 0 {
+	usernames := parseBatchUsernames(usersStr)
+	if len(usernames) == 0 {
 		writeError(c, http.StatusBadRequest, "用户名不能为空")
 		return
 	}
-	if err := auth.AddUsersToGroup(groupName, trimmed); err != nil {
+	if err := validateLocalGroupMembers(usernames); err != nil {
 		writeError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeSuccess(c, fmt.Sprintf("已添加 %d 个用户到组 %s", len(trimmed), groupName))
+	if err := auth.AddUsersToGroup(groupName, usernames); err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeSuccess(c, fmt.Sprintf("已添加 %d 个用户到组 %s", len(usernames), groupName))
+}
+
+func validateLocalGroupMembers(usernames []string) error {
+	for _, username := range usernames {
+		if err := user.ValidateUsername(username); err != nil {
+			return fmt.Errorf("用户 %s 不合法: %w", username, err)
+		}
+		if !auth.UserExists(username) {
+			return fmt.Errorf("用户 %s 不存在", username)
+		}
+		if auth.GetUserRole(username) != "user" || auth.GetUserSource(username) != "local" {
+			return fmt.Errorf("用户 %s 不是本地普通用户", username)
+		}
+	}
+	return nil
 }
 
 func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
 	if s.requireSuperadmin(c) == "" {
 		return
 	}
-	writeError(c, http.StatusForbidden, "用户组成员由当前认证源同步，不允许手动修改")
-	return
+	if s.cfg.UnifiedAuthEnabled() {
+		writeError(c, http.StatusForbidden, "用户组成员由当前认证源同步，不允许手动修改")
+		return
+	}
 	if c.Request.Method != "POST" {
 		writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -3042,13 +3184,6 @@ func formatSize(size int64) string {
 		return fmt.Sprintf("%.1f KB", float64(size)/1024)
 	}
 	return fmt.Sprintf("%.1f MB", float64(size)/(1024*1024))
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // ============================================================

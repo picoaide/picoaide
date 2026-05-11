@@ -15,8 +15,7 @@ if platform.system() == "Windows":
     except Exception:
       pass
 
-from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 
 from core.config import load_config, save_config
 from core.connection import Connection
