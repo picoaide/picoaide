@@ -313,7 +313,7 @@ async function loadFiles(path) {
 
         tr.querySelector('.del-btn').addEventListener('click', async function(e) {
           e.stopPropagation();
-          if (!confirm('删除 ' + entry.name + '？')) return;
+          if (!await confirmModal('删除 ' + esc(entry.name) + '？')) return;
           try {
             var csrf = await getCSRF();
             var res = await apiJSON('POST', '/api/files/delete', {
@@ -338,7 +338,7 @@ async function loadFiles(path) {
 }
 
 $('#mkdir-btn').addEventListener('click', async function() {
-  var name = prompt('目录名：');
+  var name = await promptModal('输入新目录名：');
   if (!name) return;
   var msg = $('#file-msg');
   try {

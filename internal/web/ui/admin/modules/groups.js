@@ -94,7 +94,7 @@ export async function init(ctx) {
     });
     tbody.querySelectorAll('[data-group-apply]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('确定要下发配置到组 ' + btn.dataset.groupApply + ' 的所有成员（包含子组成员）并重启容器吗？')) return;
+        if (!await confirmModal('确定要下发配置到组 ' + btn.dataset.groupApply + ' 的所有成员（包含子组成员）并重启容器吗？')) return;
         showMsg('#groups-msg', '提交中...', true);
         try {
           const res = await Api.post('/api/admin/config/apply', { group: btn.dataset.groupApply });
@@ -108,7 +108,7 @@ export async function init(ctx) {
     });
     tbody.querySelectorAll('[data-group-delete]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('确定删除用户组 ' + btn.dataset.groupDelete + '？组成员关系和技能绑定会一并删除。')) return;
+        if (!await confirmModal('确定删除用户组 ' + btn.dataset.groupDelete + '？组成员关系和技能绑定会一并删除。')) return;
         const res = await Api.post('/api/admin/groups/delete', { name: btn.dataset.groupDelete });
         showMsg('#groups-msg', res.message || res.error, res.success);
         if (res.success) loadGroups();
@@ -229,7 +229,7 @@ export async function init(ctx) {
           const username = btn.dataset.rmMember;
           const res = await Api.post('/api/admin/groups/members/remove', { group_name: groupName, username });
           if (res.success) { await loadMembers(); await loadCandidates(); loadGroups(); }
-          else alert(res.error);
+          else await alertModal(res.error);
         });
       });
     }
@@ -290,10 +290,10 @@ export async function init(ctx) {
             await loadCandidates();
             loadGroups();
           } else {
-            alert(res.error);
+            await alertModal(res.error);
           }
         });
-      });
+      }
     }
 
     function renderSkills() {
@@ -304,7 +304,7 @@ export async function init(ctx) {
         btn.addEventListener('click', async () => {
           const res = await Api.post('/api/admin/groups/skills/unbind', { group_name: groupName, skill_name: btn.dataset.rmSkill });
           if (res.success) { skills.splice(skills.indexOf(btn.dataset.rmSkill), 1); renderSkills(); loadGroups(); }
-          else alert(res.error);
+          else await alertModal(res.error);
         });
       });
     }
@@ -364,10 +364,10 @@ export async function init(ctx) {
 
     overlay.querySelector('#gd-bind-btn').addEventListener('click', async () => {
       const skillName = skillSel.value;
-      if (!skillName) { alert('请选择技能'); return; }
+      if (!skillName) { await alertModal('请选择技能'); return; }
       const res = await Api.post('/api/admin/groups/skills/bind', { group_name: groupName, skill_name: skillName });
-      if (res.success) { if (!skills.includes(skillName)) skills.push(skillName); renderSkills(); loadGroups(); alert(res.message); }
-      else alert(res.error);
+      if (res.success) { if (!skills.includes(skillName)) skills.push(skillName); renderSkills(); loadGroups(); await alertModal(res.message); }
+      else await alertModal(res.error);
     });
   }
 

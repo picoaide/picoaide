@@ -92,7 +92,7 @@ export async function init(ctx) {
   }
 
   async function removeUser(username) {
-    if (!confirm('移除 ' + username + '？')) return;
+    if (!await confirmModal('移除 ' + username + '？')) return;
     const res = await Api.post('/api/admin/whitelist', { remove: username });
     showMsg('#wl-msg', res.message || res.error, res.success);
     if (res.success) loadWhitelist();

@@ -432,7 +432,7 @@ async function loadWhitelist(ctx) {
 
 async function removeWhitelistUser(ctx, username) {
   const { Api, showMsg } = ctx;
-  if (!confirm('移除 ' + username + '？')) return;
+  if (!await confirmModal('移除 ' + username + '？')) return;
   var res = await Api.post('/api/admin/whitelist', { remove: username });
   showMsg('#wl-msg', res.message || res.error, res.success);
   if (res.success) loadWhitelist(ctx);
@@ -514,31 +514,7 @@ async function searchLDAPUsers(ctx) {
 // 工具
 // ============================================================
 
-function confirmModal(msg) {
-  return new Promise(function(resolve) {
-    var overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML =
-      '<div class="modal" style="max-width:440px">' +
-        '<div class="modal-header">确认操作<button class="modal-close-btn">&times;</button></div>' +
-        '<div class="modal-body" style="font-size:.95rem;line-height:1.6">' + msg + '</div>' +
-        '<div class="modal-footer">' +
-          '<button class="btn btn-outline btn-sm modal-cancel-btn">取消</button>' +
-          '<button class="btn btn-primary btn-sm modal-ok-btn">确定</button>' +
-        '</div>' +
-      '</div>';
-    document.body.appendChild(overlay);
 
-    function cleanup(val) {
-      overlay.remove();
-      resolve(val);
-    }
-    overlay.querySelector('.modal-close-btn').addEventListener('click', function() { cleanup(false); });
-    overlay.querySelector('.modal-cancel-btn').addEventListener('click', function() { cleanup(false); });
-    overlay.querySelector('.modal-ok-btn').addEventListener('click', function() { cleanup(true); });
-    overlay.addEventListener('click', function(e) { if (e.target === overlay) cleanup(false); });
-  });
-}
 
 function getServerUrl() {
   return window.location.origin.replace(/\/+$/, '');

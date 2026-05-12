@@ -48,7 +48,7 @@ export async function init(ctx) {
   await loadConfig();
 
   $('#models-save-btn').addEventListener('click', saveConfig);
-  $('#models-reset-btn').addEventListener('click', () => { if (confirm('重新加载？未保存的修改将丢失。')) loadConfig(); });
+  $('#models-reset-btn').addEventListener('click', async () => { if (await confirmModal('重新加载？未保存的修改将丢失。')) loadConfig(); });
   $('#add-model-btn').addEventListener('click', () => {
     if (!rawConfig.picoclaw) rawConfig.picoclaw = {};
     if (!rawConfig.picoclaw.model_list) rawConfig.picoclaw.model_list = [];
@@ -268,10 +268,10 @@ export async function init(ctx) {
     });
 
     container.querySelectorAll('[data-add-key]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
+      btn.addEventListener('click', async function() {
         var idx = parseInt(btn.dataset.addKey);
         var modelName = rawConfig.picoclaw.model_list[idx].model_name;
-        if (!modelName) { alert('请先填写模型名'); return; }
+        if (!modelName) { await alertModal('请先填写模型名'); return; }
         var secMap = getSecurityMap();
         if (!secMap[modelName]) secMap[modelName] = [];
         secMap[modelName].push('');
