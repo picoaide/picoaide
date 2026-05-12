@@ -2,7 +2,7 @@ package web
 
 // BrowserExtra 浏览器服务额外数据
 type BrowserExtra struct {
-	TabID int
+  TabID int
 }
 
 // browserSvc 浏览器服务的连接管理器

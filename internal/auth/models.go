@@ -1,0 +1,138 @@
+package auth
+
+// ============================================================
+// ORM 模型定义
+// ============================================================
+
+// LocalUser 本地用户表
+type LocalUser struct {
+  ID           int64  `xorm:"pk autoincr 'id'"`
+  Username     string `xorm:"unique notnull 'username'"`
+  PasswordHash string `xorm:"notnull 'password_hash'"`
+  Role         string `xorm:"notnull 'role'"`
+  Source       string `xorm:"notnull 'source'"`
+  CreatedAt    string `xorm:"notnull 'created_at'"`
+}
+
+func (LocalUser) TableName() string {
+  return "local_users"
+}
+
+// ContainerRecord 容器数据库记录
+type ContainerRecord struct {
+  ID          int64   `xorm:"pk autoincr 'id'"`
+  Username    string  `xorm:"unique notnull 'username'"`
+  ContainerID string  `xorm:"'container_id'"`
+  Image       string  `xorm:"notnull 'image'"`
+  Status      string  `xorm:"'status'"`
+  IP          string  `xorm:"'ip'"`
+  CPULimit    float64 `xorm:"'cpu_limit'"`
+  MemoryLimit int64   `xorm:"'memory_limit'"`
+  MCPToken    string  `xorm:"'mcp_token'"`
+  CreatedAt   string  `xorm:"'created_at'"`
+  UpdatedAt   string  `xorm:"'updated_at'"`
+}
+
+func (ContainerRecord) TableName() string {
+  return "containers"
+}
+
+// Setting 系统设置表
+type Setting struct {
+  Key       string `xorm:"pk 'key'"`
+  Value     string `xorm:"notnull 'value'"`
+  UpdatedAt string `xorm:"notnull 'updated_at'"`
+}
+
+func (Setting) TableName() string {
+  return "settings"
+}
+
+// SettingsHistory 设置变更历史表
+type SettingsHistory struct {
+  ID        int64  `xorm:"pk autoincr 'id'"`
+  Key       string `xorm:"notnull 'key'"`
+  OldValue  string `xorm:"'old_value'"`
+  NewValue  string `xorm:"'new_value'"`
+  ChangedBy string `xorm:"notnull 'changed_by'"`
+  ChangedAt string `xorm:"notnull 'changed_at'"`
+}
+
+func (SettingsHistory) TableName() string {
+  return "settings_history"
+}
+
+// WhitelistEntry 白名单表
+type WhitelistEntry struct {
+  ID       int64  `xorm:"pk autoincr 'id'"`
+  Username string `xorm:"unique notnull 'username'"`
+  AddedBy  string `xorm:"notnull 'added_by'"`
+  AddedAt  string `xorm:"notnull 'added_at'"`
+}
+
+func (WhitelistEntry) TableName() string {
+  return "whitelist"
+}
+
+// Group 用户组表
+type Group struct {
+  ID          int64  `xorm:"pk autoincr 'id'"`
+  Name        string `xorm:"unique notnull 'name'"`
+  ParentID    *int64 `xorm:"'parent_id'"`
+  Source      string `xorm:"notnull 'source'"`
+  Description string `xorm:"notnull 'description'"`
+  CreatedAt   string `xorm:"notnull 'created_at'"`
+}
+
+func (Group) TableName() string {
+  return "groups"
+}
+
+// UserGroup 用户-组关联表
+type UserGroup struct {
+  ID       int64  `xorm:"pk autoincr 'id'"`
+  Username string `xorm:"notnull 'username'"`
+  GroupID  int64  `xorm:"notnull 'group_id'"`
+}
+
+func (UserGroup) TableName() string {
+  return "user_groups"
+}
+
+// GroupSkill 组-技能关联表
+type GroupSkill struct {
+  ID        int64  `xorm:"pk autoincr 'id'"`
+  GroupID   int64  `xorm:"notnull 'group_id'"`
+  SkillName string `xorm:"notnull 'skill_name'"`
+}
+
+func (GroupSkill) TableName() string {
+  return "group_skills"
+}
+
+// UserChannel 记录用户可见渠道和启用状态。具体密钥仍存放在用户自己的 .security.yml。
+type UserChannel struct {
+  ID            int64  `xorm:"pk autoincr 'id'"`
+  Username      string `xorm:"notnull 'username'"`
+  Channel       string `xorm:"notnull 'channel'"`
+  Allowed       bool   `xorm:"notnull 'allowed'"`
+  Enabled       bool   `xorm:"notnull 'enabled'"`
+  Configured    bool   `xorm:"notnull 'configured'"`
+  ConfigVersion int    `xorm:"notnull 'config_version'"`
+  UpdatedAt     string `xorm:"notnull 'updated_at'"`
+}
+
+func (UserChannel) TableName() string {
+  return "user_channels"
+}
+
+// GroupInfo 组信息（包含成员数和绑定技能数），非数据库模型，仅用于查询结果
+type GroupInfo struct {
+  ID          int64  `json:"id"`
+  Name        string `json:"name"`
+  ParentID    *int64 `json:"parent_id"`
+  Source      string `json:"source"`
+  Description string `json:"description"`
+  MemberCount int    `json:"member_count"`
+  SkillCount  int    `json:"skill_count"`
+}
