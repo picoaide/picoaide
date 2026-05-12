@@ -160,12 +160,26 @@ func fetchGroupsBySearch(cfg *config.GlobalConfig, username string) ([]string, e
   return groups, nil
 }
 
-// FetchAllGroupsWithMembers 获取所有 LDAP 组及其成员（用于手动全量同步）
-func FetchAllGroupsWithMembers(cfg *config.GlobalConfig) (map[string][]string, error) {
+// GroupHierarchy LDAP 组同步结果，包含直接成员和直接子组。
+type GroupHierarchy struct {
+  Members   []string
+  SubGroups []string
+}
+
+// FetchAllGroupsWithHierarchy 获取所有 LDAP 组、成员和组嵌套关系。
+func FetchAllGroupsWithHierarchy(cfg *config.GlobalConfig) (map[string]GroupHierarchy, error) {
   if cfg.LDAP.GroupSearchMode == "group_search" {
-    return fetchAllGroupsBySearch(cfg)
+    return fetchAllGroupsHierarchyBySearch(cfg)
   }
-  return fetchAllGroupsByMemberOf(cfg)
+  members, err := fetchAllGroupsByMemberOf(cfg)
+  if err != nil {
+    return nil, err
+  }
+  result := make(map[string]GroupHierarchy, len(members))
+  for name, groupMembers := range members {
+    result[name] = GroupHierarchy{Members: groupMembers}
+  }
+  return result, nil
 }
 
 // fetchAllGroupsByMemberOf 遍历用户读取 memberOf
@@ -187,8 +201,8 @@ func fetchAllGroupsByMemberOf(cfg *config.GlobalConfig) (map[string][]string, er
   return result, nil
 }
 
-// fetchAllGroupsBySearch 搜索所有组条目并读取成员
-func fetchAllGroupsBySearch(cfg *config.GlobalConfig) (map[string][]string, error) {
+// fetchAllGroupsHierarchyBySearch 搜索所有组条目并读取成员和嵌套组。
+func fetchAllGroupsHierarchyBySearch(cfg *config.GlobalConfig) (map[string]GroupHierarchy, error) {
   l, err := ldap.DialURL(cfg.LDAP.Host)
   if err != nil {
     return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
@@ -224,18 +238,25 @@ func fetchAllGroupsBySearch(cfg *config.GlobalConfig) (map[string][]string, erro
     return nil, fmt.Errorf("搜索组失败: %w", err)
   }
 
-  result := make(map[string][]string)
+  result := make(map[string]GroupHierarchy)
   for _, entry := range sr.Entries {
     groupName := entry.GetAttributeValue("cn")
     if groupName == "" {
       continue
     }
+    group := result[groupName]
     for _, memberDN := range entry.GetAttributeValues(memberAttr) {
       uid := extractAttrValue(memberDN, cfg.LDAP.UsernameAttribute)
       if uid != "" {
-        result[groupName] = append(result[groupName], uid)
+        group.Members = append(group.Members, uid)
+        continue
+      }
+      subGroupName := extractCN(memberDN)
+      if subGroupName != "" {
+        group.SubGroups = append(group.SubGroups, subGroupName)
       }
     }
+    result[groupName] = group
   }
   return result, nil
 }
@@ -419,10 +440,10 @@ func testGroupsBySearch(l *ldap.Conn, groupBaseDN, groupFilter, memberAttr, user
       uid := extractAttrValue(dn, usernameAttr)
       if uid != "" {
         members = append(members, uid)
+        continue
       }
-      // 检查是否引用了其他组（DN 的 objectClass 为组类型）
       cn := extractCN(dn)
-      if cn != "" && uid == "" {
+      if cn != "" {
         subGroups = append(subGroups, cn)
       }
     }

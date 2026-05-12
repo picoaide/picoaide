@@ -143,7 +143,10 @@ export async function init(ctx) {
   }
 
   function removeFixedConfigFields() {
-    if (rawConfig.web) delete rawConfig.web.container_base_url;
+    if (rawConfig.web) {
+      delete rawConfig.web.container_base_url;
+      delete rawConfig.web.password;
+    }
   }
 }
 

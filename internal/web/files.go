@@ -73,15 +73,6 @@ func (s *Server) openWorkspaceRoot(username string) (*os.Root, error) {
   return os.OpenRoot(workspaceDir)
 }
 
-// parentDir 返回 relPath 的父目录相对路径
-func parentDir(relPath string) string {
-  p := filepath.Dir(relPath)
-  if p == "." {
-    return ""
-  }
-  return p
-}
-
 // handleFiles 文件列表 API
 func (s *Server) handleFiles(c *gin.Context) {
   username := s.requireRegularUser(c)

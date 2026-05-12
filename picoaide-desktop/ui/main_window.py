@@ -1,16 +1,17 @@
 """主窗口：连接状态 + 权限管理 + 白名单目录"""
 
 from PySide6.QtWidgets import (
-  QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+  QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
   QLabel, QPushButton, QCheckBox, QListWidget, QListWidgetItem,
-  QFileDialog, QGroupBox, QSystemTrayIcon, QMenu, QComboBox,
+  QFileDialog, QGroupBox, QSystemTrayIcon, QMenu,
   QStyle, QStyleOptionButton,
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon, QPainter, QPen, QColor
 
 from core.permissions import PERMISSION_GROUPS
 from core.config import save_config
+from version import VERSION
 
 
 class CheckCheckBox(QCheckBox):
@@ -43,7 +44,7 @@ class MainWindow(QMainWindow):
     self.conn.on_status_change = self._update_status
 
   def _setup_ui(self):
-    self.setWindowTitle("PicoAide Desktop")
+    self.setWindowTitle(f"PicoAide Desktop {VERSION}")
     self.setMinimumSize(520, 690)
     self.resize(560, 750)
 
@@ -160,7 +161,7 @@ class MainWindow(QMainWindow):
     px = QPixmap(32, 32)
     px.fill(QColor("#e94560"))
     self.tray.setIcon(QIcon(px))
-    self.tray.setToolTip("PicoAide Desktop")
+    self.tray.setToolTip(f"PicoAide Desktop {VERSION}")
 
     menu = QMenu()
     show_action = QAction("显示主窗口", self)

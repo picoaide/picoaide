@@ -6,7 +6,6 @@ const CONFIG = {
   connectionTimeout: 5000,
   connectTimeout: 15000,
   retryDelays: [0, 100, 200, 400, 800],
-  keepaliveInterval: 20000,
 };
 
 // ─── 全局状态 ─────────────────────────────────────────────────────────────────
@@ -15,7 +14,6 @@ let currentTabId = null;            // 当前控制的标签页 ID
 let groupId = null;                 // Chrome 标签组 ID
 const groupTabIds = new Set();      // 标签组成员集合
 let active = false;                 // 连接是否激活
-let eventListeners = [];            // chrome.* 事件监听器引用
 
 // Service Worker 可能被终止重启，从 session storage 恢复 currentTabId
 chrome.storage.session.get('currentTabId').then(r => {
@@ -48,12 +46,6 @@ async function ensureOffscreenDocument() {
     reasons: ['WEB_RTC'],
     justification: 'WebSocket connection to relay server',
   });
-}
-
-async function closeOffscreenDocument() {
-  try {
-    await chrome.offscreen.closeDocument();
-  } catch {}
 }
 
 function sendToOffscreen(type, data) {

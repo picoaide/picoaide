@@ -6,7 +6,23 @@
   </div>
 </section>
 <div id="wl-section">
+  <div class="list-controls">
+    <div class="list-search">
+      <input type="search" id="wl-search-input" placeholder="搜索白名单用户">
+      <button class="btn btn-outline btn-sm" id="wl-search-btn">搜索</button>
+    </div>
+  </div>
   <div id="wl-tags" class="mt-1"></div>
+  <div class="pager" id="wl-pager">
+    <span class="pager-info" id="wl-page-info"></span>
+    <select id="wl-page-size">
+      <option value="50">50 / 页</option>
+      <option value="100">100 / 页</option>
+      <option value="200">200 / 页</option>
+    </select>
+    <button class="btn btn-outline btn-sm" id="wl-prev">上一页</button>
+    <button class="btn btn-outline btn-sm" id="wl-next">下一页</button>
+  </div>
   <div id="wl-msg" class="msg"></div>
   <div class="row mt-1">
     <input type="text" id="wl-add-input" placeholder="输入用户名，多个用逗号分隔">

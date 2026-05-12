@@ -5,10 +5,7 @@ import (
   "log/slog"
   "os"
   "path/filepath"
-  "runtime"
-  "strings"
   "sync"
-  "time"
 
   "gopkg.in/natefinch/lumberjack.v2"
 )
@@ -118,37 +115,9 @@ func parseLevel(val string) slog.Level {
   }
 }
 
-// IsDev 返回是否为开发者模式
-func IsDev() bool {
-  return instance != nil && instance.isDev
-}
-
-// ErrorStack 记录错误日志，dev 模式附带调用栈
-func ErrorStack(msg string, args ...any) {
-  if IsDev() {
-    buf := make([]byte, 4096)
-    n := runtime.Stack(buf, false)
-    args = append(args, "stack", strings.TrimSpace(string(buf[:n])))
-  }
-  slog.Error(msg, args...)
-}
-
 // Audit 记录审计日志
 func Audit(action string, args ...any) {
   allArgs := []any{"type", "AUDIT", "action", action}
   allArgs = append(allArgs, args...)
   slog.Info("audit", allArgs...)
-}
-
-// Access 记录访问日志
-func Access(method, path string, status int, duration time.Duration, ip, user string) {
-  slog.Info("access",
-    "type", "ACCESS",
-    "method", method,
-    "path", path,
-    "status", status,
-    "duration", duration.String(),
-    "ip", ip,
-    "user", user,
-  )
 }

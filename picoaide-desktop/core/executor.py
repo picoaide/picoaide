@@ -28,7 +28,6 @@ def _get_ocr_engine():
 # 禁用 pyautogui failsafe — 本工具本身就是远程桌面控制，鼠标移到角落是正常操作
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0.05
-pyautogui.PAUSE = 0.05
 
 
 def check_whitelist(path, whitelist_dirs):
