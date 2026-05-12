@@ -21,7 +21,6 @@ export async function init(ctx) {
   $('#save-auth-config-bottom-btn').addEventListener('click', saveAllConfig);
   $('#test-ldap-btn').addEventListener('click', testLDAP);
   $('#sync-users-btn').addEventListener('click', syncLDAPUsers);
-  $('#sync-users-cleanup-btn').addEventListener('click', syncLDAPUsersWithCleanup);
   $('#sync-groups-btn').addEventListener('click', syncLDAPGroups);
   $('#wl-enabled').addEventListener('change', updateWhitelistVisibility);
   $('#wl-add-btn').addEventListener('click', addWhitelistUser);
@@ -67,7 +66,6 @@ export async function init(ctx) {
     $('#oidc-scopes').value = rawConfig.oidc?.scopes || 'openid profile email';
     $('#oidc-username-claim').value = rawConfig.oidc?.username_claim || 'preferred_username';
     $('#oidc-groups-claim').value = rawConfig.oidc?.groups_claim || 'groups';
-    $('#oidc-sync-interval').value = rawConfig.oidc?.sync_interval || '0';
 
     updateWhitelistVisibility();
 
@@ -143,7 +141,6 @@ export async function init(ctx) {
     rawConfig.oidc.username_claim = $('#oidc-username-claim').value;
     rawConfig.oidc.groups_claim = $('#oidc-groups-claim').value;
     rawConfig.oidc.whitelist_enabled = mode === 'oidc' ? $('#wl-enabled').value === 'true' : rawConfig.oidc.whitelist_enabled === true;
-    rawConfig.oidc.sync_interval = $('#oidc-sync-interval').value;
   }
 
   async function saveAllConfig() {
@@ -152,7 +149,7 @@ export async function init(ctx) {
     try {
       var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
       if (res.success) {
-        showMsg('#auth-msg', res.message + '。自动同步间隔修改后需重启服务生效。', true);
+        showMsg('#auth-msg', res.message + '。自动同步间隔已实时生效。', true);
         await loadConfig();
       } else {
         showMsg('#auth-msg', res.error, false);
@@ -163,15 +160,6 @@ export async function init(ctx) {
 
   async function syncLDAPUsers() {
     showMsg('#sync-groups-msg', '同步账号中...', true);
-    try {
-      var res = await Api.post('/api/admin/auth/sync-users', {});
-      showMsg('#sync-groups-msg', res.message || res.error, res.success);
-    } catch (e) { showMsg('#sync-groups-msg', e.message, false); }
-  }
-
-  async function syncLDAPUsersWithCleanup() {
-    if (!confirm('确定同步账号并清理不在当前认证源或白名单中的旧账号吗？')) return;
-    showMsg('#sync-groups-msg', '同步并清理旧账号中...', true);
     try {
       var res = await Api.post('/api/admin/auth/sync-users', { cleanup: 'true' });
       showMsg('#sync-groups-msg', res.message || res.error, res.success);

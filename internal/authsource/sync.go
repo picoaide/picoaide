@@ -22,11 +22,7 @@ type UserSyncResult struct {
 type GroupSyncResult struct {
   GroupCount  int
   MemberCount int
-  Hierarchy   map[string]GroupHierarchy
-}
-
-func SyncLDAPUserDirectory(cfg *config.GlobalConfig) (*UserSyncResult, error) {
-  return SyncUserDirectory("ldap", cfg)
+  Hierarchy   GroupHierarchy
 }
 
 func SyncUserDirectory(providerName string, cfg *config.GlobalConfig) (*UserSyncResult, error) {
@@ -68,11 +64,9 @@ func SyncUserDirectory(providerName string, cfg *config.GlobalConfig) (*UserSync
       return nil, err
     }
     result.LocalUserSynced++
-    if cfg.LDAP.GroupSearchMode != "" {
-      if groups, err := provider.FetchUserGroups(cfg, username); err == nil {
-        if err := auth.SyncUserGroups(username, groups); err == nil {
-          result.GroupMemberCount += len(groups)
-        }
+    if groups, err := provider.FetchUserGroups(cfg, username); err == nil {
+      if err := auth.SyncUserGroups(username, groups, providerName); err == nil {
+        result.GroupMemberCount += len(groups)
       }
     }
   }
@@ -96,14 +90,7 @@ func SyncUserDirectory(providerName string, cfg *config.GlobalConfig) (*UserSync
   return result, nil
 }
 
-func SyncLDAPGroups(cfg *config.GlobalConfig, ensureUser func(string) error) (*GroupSyncResult, error) {
-  return SyncGroups("ldap", cfg, ensureUser)
-}
-
 func SyncGroups(providerName string, cfg *config.GlobalConfig, ensureUser func(string) error) (*GroupSyncResult, error) {
-  if cfg.LDAP.GroupSearchMode == "" {
-    return &GroupSyncResult{Hierarchy: map[string]GroupHierarchy{}}, nil
-  }
   provider, err := directoryProvider(providerName)
   if err != nil {
     return nil, err
@@ -111,6 +98,9 @@ func SyncGroups(providerName string, cfg *config.GlobalConfig, ensureUser func(s
   groupMap, err := provider.FetchGroups(cfg)
   if err != nil {
     return nil, err
+  }
+  if len(groupMap) == 0 {
+    return &GroupSyncResult{Hierarchy: GroupHierarchy{}}, nil
   }
   var whitelist map[string]bool
   if cfg.WhitelistEnabledForProvider(providerName) {

@@ -15,6 +15,7 @@ import (
   "os/signal"
   "strconv"
   "strings"
+  "sync"
   "syscall"
   "time"
 
@@ -37,6 +38,8 @@ type Server struct {
   csrfKey         string
   dockerAvailable bool
   loginLimiter    *rateLimiter
+  syncCancel      context.CancelFunc
+  syncMu          sync.Mutex
 }
 
 const sessionSecretSettingKey = "internal.session_secret"
@@ -81,44 +84,73 @@ func ensureSessionSecret() (string, error) {
   return secret, nil
 }
 
-// syncLDAPAuto 执行 LDAP 自动同步（用户目录 + 组）
-func (s *Server) syncLDAPAuto() {
-  if !s.cfg.LDAPEnabled() {
+// syncAuto 自动同步用户目录和组（与手动同步相同的逻辑，含清理过期账号）
+func (s *Server) syncAuto() {
+  if !authsource.HasDirectoryProvider(s.cfg) {
     return
   }
 
-  // 同步用户目录
-  userResult, err := authsource.SyncLDAPUserDirectory(s.cfg)
+  authMode := s.cfg.AuthMode()
+
+  // 同步用户目录（与手动同步相同的逻辑，含清理过期账号）
+  result, err := s.syncUsersFromDirectory(true)
   if err != nil {
-    slog.Error("LDAP 自动同步用户失败", "error", err)
+    slog.Error("自动同步用户失败", "auth_mode", authMode, "error", err)
   } else {
-    slog.Info("LDAP 自动同步用户完成", "synced", userResult.LocalUserSynced, "allowed", userResult.AllowedUserCount)
+    slog.Info("自动同步用户完成", "auth_mode", authMode, "synced", result.LocalUserSynced, "allowed", result.AllowedUserCount, "initialized", result.InitializedCount, "archived", result.ArchivedStaleUsers, "deleted_local_auth", result.DeletedLocalAuth)
   }
 
   // 同步组
-  if s.cfg.LDAP.GroupSearchMode == "" {
-    return
-  }
-  result, err := authsource.SyncLDAPGroups(s.cfg, func(username string) error {
+  groupResult, err := authsource.SyncGroups(authMode, s.cfg, func(username string) error {
     if rec, _ := auth.GetContainerByUsername(username); rec == nil {
-      return s.initLDAPUser(username)
+      return s.initExternalUser(username)
     }
     return nil
   })
   if err != nil {
-    slog.Error("LDAP 自动同步组失败", "error", err)
+    slog.Error("自动同步组失败", "auth_mode", authMode, "error", err)
     return
   }
-  if s.cfg.LDAP.GroupSearchMode == "group_search" {
-    s.syncLDAPGroupParents(result.Hierarchy)
-  }
-  slog.Info("LDAP 自动同步组完成", "groups", result.GroupCount, "members", result.MemberCount)
+  slog.Info("自动同步组完成", "auth_mode", authMode, "groups", groupResult.GroupCount, "members", groupResult.MemberCount)
 }
 
-func (s *Server) syncLDAPGroupParents(groupMap map[string]authsource.GroupHierarchy) {
+// restartSyncTimer 重启定时同步任务，使用当前配置的间隔。保存配置时自动调用。
+func (s *Server) restartSyncTimer() {
+  s.syncMu.Lock()
+  defer s.syncMu.Unlock()
+
+  if s.syncCancel != nil {
+    s.syncCancel()
+    s.syncCancel = nil
+  }
+
+  interval := s.cfg.SyncIntervalDuration()
+  if interval > 0 && s.cfg.UnifiedAuthEnabled() && authsource.HasDirectoryProvider(s.cfg) {
+    ctx, cancel := context.WithCancel(context.Background())
+    s.syncCancel = cancel
+    go func() {
+      ticker := time.NewTicker(interval)
+      defer ticker.Stop()
+      slog.Info("定时同步已启动", "interval", interval, "auth_mode", s.cfg.AuthMode())
+      // 启动时立即执行首次同步
+      s.syncAuto()
+      for {
+        select {
+        case <-ticker.C:
+          s.syncAuto()
+        case <-ctx.Done():
+          slog.Info("定时同步已停止")
+          return
+        }
+      }
+    }()
+  }
+}
+
+func (s *Server) syncGroupParents(groupMap authsource.GroupHierarchy) {
   for groupName := range groupMap {
     if err := auth.SetGroupParent(groupName, nil); err != nil {
-      slog.Warn("清空 LDAP 组父级失败", "group", groupName, "error", err)
+      slog.Warn("清空组父级失败", "group", groupName, "error", err)
     }
   }
   for parentName, group := range groupMap {
@@ -131,7 +163,7 @@ func (s *Server) syncLDAPGroupParents(groupMap map[string]authsource.GroupHierar
         continue
       }
       if err := auth.SetGroupParent(childName, &parentID); err != nil {
-        slog.Warn("同步 LDAP 组父子关系失败", "parent", parentName, "child", childName, "error", err)
+        slog.Warn("同步组父子关系失败", "parent", parentName, "child", childName, "error", err)
       }
     }
   }
@@ -195,86 +227,6 @@ func (s *Server) sessionUserAllowed(username string) bool {
   return rec != nil
 }
 
-func (s *Server) oidcStateCookieName() string {
-  return "oidc_state"
-}
-
-func (s *Server) handleOIDCLoginStart(c *gin.Context) {
-  if s.cfg.AuthMode() != "oidc" {
-    writeError(c, http.StatusBadRequest, "OIDC 未启用")
-    return
-  }
-  state, err := randomHex(16)
-  if err != nil {
-    writeError(c, http.StatusInternalServerError, "生成 OIDC state 失败")
-    return
-  }
-  authURL, err := authsource.OIDCAuthURL(s.cfg, state)
-  if err != nil {
-    writeError(c, http.StatusBadRequest, err.Error())
-    return
-  }
-  http.SetCookie(c.Writer, &http.Cookie{
-    Name:     s.oidcStateCookieName(),
-    Value:    state,
-    Path:     "/api/login/oidc",
-    MaxAge:   600,
-    HttpOnly: true,
-    SameSite: http.SameSiteLaxMode,
-  })
-  c.Redirect(http.StatusFound, authURL)
-}
-
-func (s *Server) handleOIDCCallback(c *gin.Context) {
-  if s.cfg.AuthMode() != "oidc" {
-    writeError(c, http.StatusBadRequest, "OIDC 未启用")
-    return
-  }
-  stateCookie, err := c.Cookie(s.oidcStateCookieName())
-  if err != nil || stateCookie == "" || stateCookie != c.Query("state") {
-    writeError(c, http.StatusForbidden, "OIDC state 无效")
-    return
-  }
-  http.SetCookie(c.Writer, &http.Cookie{Name: s.oidcStateCookieName(), Value: "", Path: "/api/login/oidc", MaxAge: -1, HttpOnly: true})
-
-  identity, err := authsource.OIDCCompleteLogin(c.Request.Context(), s.cfg, c.Query("code"))
-  if err != nil {
-    writeError(c, http.StatusUnauthorized, err.Error())
-    return
-  }
-  if err := user.ValidateUsername(identity.Username); err != nil {
-    writeError(c, http.StatusBadRequest, "OIDC 用户名不合法: "+err.Error())
-    return
-  }
-  if !user.AllowedByWhitelist(s.cfg, "oidc", identity.Username) {
-    writeError(c, http.StatusForbidden, "请联系管理员添加白名单")
-    return
-  }
-  if err := auth.EnsureExternalUser(identity.Username, "user", "oidc"); err != nil {
-    writeError(c, http.StatusInternalServerError, "同步 OIDC 用户失败: "+err.Error())
-    return
-  }
-  if len(identity.Groups) > 0 {
-    _ = auth.SyncUserGroups(identity.Username, identity.Groups)
-  }
-  initializing := false
-  if rec, _ := auth.GetContainerByUsername(identity.Username); rec == nil {
-    initializing = true
-    if err := s.initExternalUser(identity.Username); err != nil {
-      writeError(c, http.StatusInternalServerError, "OIDC 登录成功，但初始化账号失败: "+err.Error())
-      return
-    }
-  } else if !s.userEnvironmentReady(identity.Username) {
-    initializing = true
-  }
-  s.setSessionCookie(c, s.createSessionToken(identity.Username), 86400)
-  logger.Audit("user.login", "username", identity.Username, "method", "oidc")
-  if initializing {
-    c.Redirect(http.StatusFound, "/initializing")
-    return
-  }
-  c.Redirect(http.StatusFound, "/manage")
-}
 
 // getSessionUser 从请求的 cookie 中提取已登录的用户名
 func (s *Server) getSessionUser(c *gin.Context) string {
@@ -379,8 +331,8 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
   login := r.Group("/api/login")
   login.Use(s.rateLimitLogin())
   login.POST("", s.handleLogin)
-  login.GET("/oidc", s.handleOIDCLoginStart)
-  login.GET("/oidc/callback", s.handleOIDCCallback)
+  login.GET("/auth", s.handleAuthStart)
+  login.GET("/callback", s.handleAuthCallback)
   r.GET("/api/login/mode", s.handleLoginMode)
 
   r.POST("/api/logout", s.handleLogout)
@@ -579,27 +531,8 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
     loginLimiter:    newLoginRateLimiter(),
   }
 
-  // LDAP 定时同步
-  var ldapStop chan struct{}
-  if interval := cfg.SyncIntervalDuration(); interval > 0 && cfg.LDAPEnabled() {
-    ldapStop = make(chan struct{})
-    go func() {
-      ticker := time.NewTicker(interval)
-      defer ticker.Stop()
-      slog.Info("LDAP 定时同步已启动", "interval", interval)
-      // 启动时立即执行首次同步
-      s.syncLDAPAuto()
-      for {
-        select {
-        case <-ticker.C:
-          s.syncLDAPAuto()
-        case <-ldapStop:
-          slog.Info("LDAP 定时同步已停止")
-          return
-        }
-      }
-    }()
-  }
+  // 定时同步（实时响应配置变更）
+  s.restartSyncTimer()
 
   gin.SetMode(gin.ReleaseMode)
   r := gin.New()
@@ -652,7 +585,7 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 
     <-sigCh
     slog.Info("收到终止信号，开始优雅关闭...")
-    return gracefulShutdown(srv, redirectServer, dockerOK, ldapStop)
+    return gracefulShutdown(srv, redirectServer, dockerOK, s.syncCancel)
   }
 
   srv := &http.Server{
@@ -668,13 +601,13 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 
   <-sigCh
   slog.Info("收到终止信号，开始优雅关闭...")
-  return gracefulShutdown(srv, redirectServer, dockerOK, ldapStop)
+  return gracefulShutdown(srv, redirectServer, dockerOK, s.syncCancel)
 }
 
 // gracefulShutdown 优雅关闭 HTTP 服务器及相关资源
-func gracefulShutdown(srv, redirectSrv *http.Server, dockerOK bool, ldapStop chan struct{}) error {
-  if ldapStop != nil {
-    close(ldapStop)
+func gracefulShutdown(srv, redirectSrv *http.Server, dockerOK bool, syncCancel context.CancelFunc) error {
+  if syncCancel != nil {
+    syncCancel()
   }
 
   if redirectSrv != nil {

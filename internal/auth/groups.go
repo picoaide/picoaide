@@ -4,7 +4,6 @@ import (
   "database/sql"
   "fmt"
   "sort"
-  "strings"
 )
 
 // ============================================================
@@ -210,8 +209,8 @@ func GetGroupsForUser(username string) ([]string, error) {
   return list, nil
 }
 
-// SyncUserGroups 差量更新用户的组关系（传入用户应属于的组名列表）
-func SyncUserGroups(username string, groupNames []string) error {
+// SyncUserGroups 差量更新用户的组关系（传入用户应属于的组名列表和来源）
+func SyncUserGroups(username string, groupNames []string, source string) error {
   if err := ensureDB(); err != nil {
     return err
   }
@@ -224,7 +223,7 @@ func SyncUserGroups(username string, groupNames []string) error {
 
   // 确保所有组存在
   for _, name := range groupNames {
-    session.Exec("INSERT OR IGNORE INTO groups (name, source) VALUES (?, 'ldap')", name)
+    session.Exec("INSERT OR IGNORE INTO groups (name, source) VALUES (?, ?)", name, source)
   }
 
   // 删除用户当前所有组关系
@@ -285,11 +284,6 @@ func ReplaceGroupMembersBySource(source string, groupMembers map[string][]string
   }
 
   return session.Commit()
-}
-
-// ReplaceLDAPGroupMembers 用 LDAP 当前结果整体替换 LDAP 组成员关系。
-func ReplaceLDAPGroupMembers(groupMembers map[string][]string) error {
-  return ReplaceGroupMembersBySource("ldap", groupMembers)
 }
 
 // BindSkillToGroup 绑定技能到组
@@ -403,5 +397,3 @@ func SetGroupParent(groupName string, parentID *int64) error {
   return err
 }
 
-// ensure interface compatibility: strings is imported but only used by SyncUserGroups indirectly
-var _ = strings.TrimSpace

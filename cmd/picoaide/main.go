@@ -479,12 +479,12 @@ func pullAndListTags(reader *bufio.Reader, cfg *config.GlobalConfig) {
 func runInitExisting(cfg *config.GlobalConfig) {
   fmt.Println("=== PicoAide 初始化 ===")
 
-  if cfg.LDAPEnabled() {
-    fmt.Print("验证 LDAP 连接... ")
-    users, err := authsource.LDAPFetchUsers(cfg)
+  if cfg.UnifiedAuthEnabled() && authsource.HasDirectoryProvider(cfg) {
+    fmt.Print("验证目录同步连接... ")
+    users, err := authsource.FetchUsers(cfg)
     if err != nil {
       fmt.Printf("失败: %v\n", err)
-      fmt.Fprintf(os.Stderr, "LDAP 连接失败，请检查配置\n")
+      fmt.Fprintf(os.Stderr, "目录连接失败，请检查配置\n")
       os.Exit(1)
     }
     fmt.Printf("成功（获取到 %d 个用户）\n", len(users))

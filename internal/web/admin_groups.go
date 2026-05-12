@@ -360,36 +360,32 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
     writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  if !s.cfg.LDAPEnabled() {
-    writeError(c, http.StatusBadRequest, "LDAP 未启用")
+  if !authsource.HasDirectoryProvider(s.cfg) {
+    writeError(c, http.StatusBadRequest, "当前认证方式不支持目录同步")
     return
   }
 
-  result, err := s.syncLDAPUsersFromDirectory(false)
+  authMode := s.cfg.AuthMode()
+  result, err := s.syncUsersFromDirectory(false)
   if err != nil {
-    writeError(c, http.StatusInternalServerError, "同步 LDAP 账号失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "同步账号失败: "+err.Error())
     return
   }
 
   groupCount := 0
   userCount := 0
-  if s.cfg.LDAP.GroupSearchMode != "" {
-    groupResult, err := authsource.SyncLDAPGroups(s.cfg, func(username string) error {
-      if rec, _ := auth.GetContainerByUsername(username); rec == nil {
-        return s.initLDAPUser(username)
-      }
-      return nil
-    })
-    if err != nil {
-      writeError(c, http.StatusInternalServerError, "同步 LDAP 组失败: "+err.Error())
-      return
+  groupResult, err := authsource.SyncGroups(authMode, s.cfg, func(username string) error {
+    if rec, _ := auth.GetContainerByUsername(username); rec == nil {
+      return s.initExternalUser(username)
     }
-    groupCount = groupResult.GroupCount
-    userCount = groupResult.MemberCount
-    if s.cfg.LDAP.GroupSearchMode == "group_search" {
-      s.syncLDAPGroupParents(groupResult.Hierarchy)
-    }
+    return nil
+  })
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "同步组失败: "+err.Error())
+    return
   }
+  groupCount = groupResult.GroupCount
+  userCount = groupResult.MemberCount
 
   writeJSON(c, http.StatusOK, struct {
     Success     bool   `json:"success"`

@@ -109,12 +109,14 @@ func (s *Server) handleHealth(c *gin.Context) {
 
 func (s *Server) handleLoginMode(c *gin.Context) {
   writeJSON(c, http.StatusOK, struct {
-    Success  bool   `json:"success"`
-    AuthMode string `json:"auth_mode"`
-  }{true, s.cfg.AuthMode()})
+    Success  bool                  `json:"success"`
+    AuthMode string                `json:"auth_mode"`
+    Provider authsource.ProviderMeta `json:"provider"`
+  }{true, s.cfg.AuthMode(), authsource.ActiveProviderMeta(s.cfg)})
 }
 
-// handleLogin 处理用户名密码登录请求（本地超管或 LDAP）
+// handleLogin 处理用户名密码登录请求
+// 流程：认证 → 超管逃生通道 → 本地/外部用户分流，不依赖具体认证源名称
 func (s *Server) handleLogin(c *gin.Context) {
   username := c.PostForm("username")
   password := c.PostForm("password")
@@ -123,89 +125,79 @@ func (s *Server) handleLogin(c *gin.Context) {
     return
   }
 
-  isLocalSuperadmin := auth.IsSuperadmin(username)
-  if s.isExtensionRequest(c) && isLocalSuperadmin {
+  isSuperadmin := auth.IsSuperadmin(username)
+  if s.isExtensionRequest(c) && isSuperadmin {
     writeError(c, http.StatusForbidden, "超管用户不允许登录插件，使用普通用户登录")
     return
   }
 
-  // 1. 本地认证（LDAP 模式下仅允许超管）
-  if ok, _, err := auth.AuthenticateLocal(username, password); err == nil && ok {
-    if s.cfg.UnifiedAuthEnabled() && !isLocalSuperadmin {
-      // 统一认证模式下，非超管本地用户禁止登录
-    } else {
-      // 首次登录自动初始化（创建容器记录，分配 IP）
-      // 超管不需要容器
-      if rec, _ := auth.GetContainerByUsername(username); rec == nil {
-        if !isLocalSuperadmin {
-          go user.InitUser(s.cfg, username, "")
-        }
-      }
+  // 1. 通过当前认证源认证（local/ldap/任何 PasswordProvider）
+  authenticated := authsource.Authenticate(s.cfg, username, password)
 
-      s.setSessionCookie(c, s.createSessionToken(username), 86400)
-      logger.Audit("user.login", "username", username, "method", "local")
-      writeJSON(c, http.StatusOK, struct {
-        Success  bool   `json:"success"`
-        Username string `json:"username"`
-      }{
-        Success:  true,
-        Username: username,
-      })
-      return
-    }
+  // 2. 超管逃生通道：当前认证源认证失败时，尝试本地密码
+  if !authenticated && isSuperadmin {
+    ok, _, err := auth.AuthenticateLocal(username, password)
+    authenticated = (err == nil && ok)
   }
 
-  // 2. 外部用户名密码认证只支持 LDAP；OIDC 走浏览器授权码流程。
-  if s.cfg.AuthMode() != "ldap" {
+  if !authenticated {
     logger.Audit("user.login_failed", "username", username, "reason", "invalid_credentials")
     writeError(c, http.StatusUnauthorized, "用户名或密码错误")
     return
   }
 
-  if isLocalSuperadmin {
-    logger.Audit("user.login_failed", "username", username, "reason", "invalid_local_superadmin_password")
-    writeError(c, http.StatusUnauthorized, "用户名或密码错误")
+  authMode := s.cfg.AuthMode()
+
+  // 场景 A：本地模式或超管 → 直接登录
+  if isSuperadmin || !s.cfg.UnifiedAuthEnabled() {
+    if rec, _ := auth.GetContainerByUsername(username); rec == nil && !isSuperadmin {
+      go user.InitUser(s.cfg, username, "")
+    }
+    s.setSessionCookie(c, s.createSessionToken(username), 86400)
+    logger.Audit("user.login", "username", username, "method", "local")
+    writeJSON(c, http.StatusOK, struct {
+      Success  bool   `json:"success"`
+      Username string `json:"username"`
+    }{
+      Success:  true,
+      Username: username,
+    })
     return
   }
 
-  if !authsource.LDAPAuthenticate(s.cfg, username, password) {
-    writeError(c, http.StatusUnauthorized, "用户名或密码错误")
-    return
-  }
-
-  if !user.AllowedByWhitelist(s.cfg, "ldap", username) {
+  // 场景 B：统一认证模式下的外部用户
+  if !user.AllowedByWhitelist(s.cfg, authMode, username) {
     writeError(c, http.StatusForbidden, "请联系管理员添加白名单")
     return
   }
-  if err := auth.EnsureExternalUser(username, "user", "ldap"); err != nil {
-    writeError(c, http.StatusInternalServerError, "同步本地用户失败: "+err.Error())
+  if err := auth.EnsureExternalUser(username, "user", authMode); err != nil {
+    writeError(c, http.StatusInternalServerError, "同步用户失败: "+err.Error())
     return
   }
 
-  // 首次登录自动初始化（创建容器记录，分配 IP）
   initializing := false
   if rec, _ := auth.GetContainerByUsername(username); rec == nil {
     initializing = true
-    if err := s.initLDAPUser(username); err != nil {
-      logger.Audit("user.init_failed", "username", username, "method", "ldap", "error", err.Error())
-      writeError(c, http.StatusInternalServerError, "LDAP 登录成功，但初始化账号失败: "+err.Error())
+    if err := s.initExternalUser(username); err != nil {
+      logger.Audit("user.init_failed", "username", username, "method", authMode, "error", err.Error())
+      writeError(c, http.StatusInternalServerError, "登录成功但初始化账号失败: "+err.Error())
       return
     }
   } else if !s.userEnvironmentReady(username) {
     initializing = true
   }
 
-  // 异步同步用户的 LDAP 组
-  if s.cfg.LDAP.GroupSearchMode != "" {
+  // 异步同步用户的组（所有支持 DirectoryProvider 的认证源通用）
+  if authsource.HasDirectoryProvider(s.cfg) {
     go func() {
-      if groups, err := authsource.LDAPFetchUserGroups(s.cfg, username); err == nil && len(groups) > 0 {
-        auth.SyncUserGroups(username, groups)
+      if groups, err := authsource.FetchUserGroups(s.cfg, username); err == nil && len(groups) > 0 {
+        auth.SyncUserGroups(username, groups, authMode)
       }
     }()
   }
 
   s.setSessionCookie(c, s.createSessionToken(username), 86400)
-  logger.Audit("user.login", "username", username, "method", "ldap")
+  logger.Audit("user.login", "username", username, "method", authMode)
   writeJSON(c, http.StatusOK, struct {
     Success      bool   `json:"success"`
     Username     string `json:"username"`
@@ -215,6 +207,91 @@ func (s *Server) handleLogin(c *gin.Context) {
     Username:     username,
     Initializing: initializing,
   })
+}
+
+// handleAuthStart 启动浏览器认证流程（统一入口，替代 OIDC 专属路径）
+func (s *Server) handleAuthStart(c *gin.Context) {
+  if !authsource.HasBrowserProvider(s.cfg) {
+    writeError(c, http.StatusBadRequest, "当前认证方式不支持浏览器登录")
+    return
+  }
+  state, err := randomHex(16)
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "生成 state 失败")
+    return
+  }
+  authURL, err := authsource.AuthURL(s.cfg, state)
+  if err != nil {
+    writeError(c, http.StatusBadRequest, err.Error())
+    return
+  }
+  http.SetCookie(c.Writer, &http.Cookie{
+    Name:     "auth_state",
+    Value:    state,
+    Path:     "/api/login/callback",
+    MaxAge:   600,
+    HttpOnly: true,
+    SameSite: http.SameSiteLaxMode,
+  })
+  c.Redirect(http.StatusFound, authURL)
+}
+
+// handleAuthCallback 处理浏览器认证回调（统一入口，替代 OIDC 专属回调）
+func (s *Server) handleAuthCallback(c *gin.Context) {
+  if !authsource.HasBrowserProvider(s.cfg) {
+    writeError(c, http.StatusBadRequest, "当前认证方式不支持浏览器回调")
+    return
+  }
+  stateCookie, err := c.Cookie("auth_state")
+  if err != nil || stateCookie == "" || stateCookie != c.Query("state") {
+    writeError(c, http.StatusForbidden, "state 无效")
+    return
+  }
+  http.SetCookie(c.Writer, &http.Cookie{
+    Name: "auth_state", Value: "", Path: "/api/login/callback", MaxAge: -1, HttpOnly: true,
+  })
+
+  identity, err := authsource.CompleteLogin(c.Request.Context(), s.cfg, c.Query("code"))
+  if err != nil {
+    writeError(c, http.StatusUnauthorized, err.Error())
+    return
+  }
+
+  authMode := s.cfg.AuthMode()
+  if err := user.ValidateUsername(identity.Username); err != nil {
+    writeError(c, http.StatusBadRequest, "用户名不合法: "+err.Error())
+    return
+  }
+  if !user.AllowedByWhitelist(s.cfg, authMode, identity.Username) {
+    writeError(c, http.StatusForbidden, "请联系管理员添加白名单")
+    return
+  }
+  if err := auth.EnsureExternalUser(identity.Username, "user", authMode); err != nil {
+    writeError(c, http.StatusInternalServerError, "同步用户失败: "+err.Error())
+    return
+  }
+  if len(identity.Groups) > 0 {
+    _ = auth.SyncUserGroups(identity.Username, identity.Groups, authMode)
+  }
+
+  initializing := false
+  if rec, _ := auth.GetContainerByUsername(identity.Username); rec == nil {
+    initializing = true
+    if err := s.initExternalUser(identity.Username); err != nil {
+      writeError(c, http.StatusInternalServerError, "登录成功，但初始化账号失败: "+err.Error())
+      return
+    }
+  } else if !s.userEnvironmentReady(identity.Username) {
+    initializing = true
+  }
+
+  s.setSessionCookie(c, s.createSessionToken(identity.Username), 86400)
+  logger.Audit("user.login", "username", identity.Username, "method", authMode)
+  if initializing {
+    c.Redirect(http.StatusFound, "/initializing")
+    return
+  }
+  c.Redirect(http.StatusFound, "/manage")
 }
 
 // handleLogout 处理登出请求
@@ -636,6 +713,9 @@ func (s *Server) handleConfigSave(c *gin.Context) {
   if newCfg, err := config.LoadFromDB(); err == nil {
     s.cfg = newCfg
   }
+
+  // 实时重启定时同步（间隔或认证模式改变后立即生效，无需重启服务）
+  s.restartSyncTimer()
 
   var cleanup *authProviderSwitchCleanupResult
   if oldMode != newMode {

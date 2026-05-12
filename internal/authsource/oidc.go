@@ -61,20 +61,8 @@ func (OIDCProvider) CompleteLogin(ctx context.Context, cfg *config.GlobalConfig,
   return &Identity{Username: username, Groups: groups}, nil
 }
 
-func OIDCAuthURL(cfg *config.GlobalConfig, state string) (string, error) {
-  provider, err := browserProvider("oidc")
-  if err != nil {
-    return "", err
-  }
-  return provider.AuthURL(cfg, state)
-}
-
-func OIDCCompleteLogin(ctx context.Context, cfg *config.GlobalConfig, code string) (*Identity, error) {
-  provider, err := browserProvider("oidc")
-  if err != nil {
-    return nil, err
-  }
-  return provider.CompleteLogin(ctx, cfg, code)
+func (OIDCProvider) DisplayName() string {
+  return "企业统一认证"
 }
 
 func buildOIDCConfig(cfg *config.GlobalConfig) (*oidc.Provider, *oauth2.Config, error) {

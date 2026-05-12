@@ -65,10 +65,6 @@ func (s *Server) defaultUserImageTag(ctx context.Context) (string, error) {
 // 外部用户初始化 & LDAP 用户初始化
 // ============================================================
 
-func (s *Server) initLDAPUser(username string) error {
-  return s.initExternalUser(username)
-}
-
 func (s *Server) initExternalUser(username string) error {
   if err := user.ValidateUsername(username); err != nil {
     return err
@@ -138,11 +134,11 @@ func (s *Server) purgeOrdinaryAuthProviderStateForConfig(cfg *config.GlobalConfi
 }
 
 // ============================================================
-// LDAP 用户同步
+// 目录提供者用户同步
 // ============================================================
 
-type ldapUserSyncResult struct {
-  LDAPUserCount        int
+type userSyncResult struct {
+  ProviderUserCount    int
   AllowedUserCount     int
   LocalUserSynced      int
   InitializedCount     int
@@ -153,17 +149,18 @@ type ldapUserSyncResult struct {
   GroupMemberCount     int
 }
 
-func (s *Server) syncLDAPUsersFromDirectory(cleanupStaleUsers bool) (*ldapUserSyncResult, error) {
-  if !s.cfg.LDAPEnabled() {
-    return nil, fmt.Errorf("LDAP 未启用")
+func (s *Server) syncUsersFromDirectory(cleanupStaleUsers bool) (*userSyncResult, error) {
+  if !authsource.HasDirectoryProvider(s.cfg) {
+    return nil, fmt.Errorf("当前认证方式不支持目录同步")
   }
 
-  userResult, err := authsource.SyncLDAPUserDirectory(s.cfg)
+  authMode := s.cfg.AuthMode()
+  userResult, err := authsource.SyncUserDirectory(authMode, s.cfg)
   if err != nil {
     return nil, err
   }
-  result := &ldapUserSyncResult{
-    LDAPUserCount:        userResult.ProviderUserCount,
+  result := &userSyncResult{
+    ProviderUserCount:    userResult.ProviderUserCount,
     AllowedUserCount:     userResult.AllowedUserCount,
     LocalUserSynced:      userResult.LocalUserSynced,
     DeletedLocalAuth:     userResult.DeletedLocalAuth,
@@ -227,10 +224,28 @@ func (s *Server) syncLDAPUsersFromDirectory(cleanupStaleUsers bool) (*ldapUserSy
         result.ArchivedStaleUsers++
       }
     }
-  }
 
-  if err := user.RemoveAllUserData(s.cfg); err != nil {
-    return nil, fmt.Errorf("清空用户目录和归档目录失败: %w", err)
+    // 清理仅存在于 local_users 表但没有容器记录的外部用户
+    localUsers, err := auth.GetAllLocalUsers()
+    if err != nil {
+      return nil, err
+    }
+    for _, u := range localUsers {
+      if u.Role == "superadmin" {
+        continue
+      }
+      if u.Source == "" || u.Source == "local" {
+        continue
+      }
+      if userResult.AllowedSet[u.Username] {
+        continue
+      }
+      _ = auth.DeleteContainer(u.Username)
+      if err := user.ArchiveUser(s.cfg, u.Username); err == nil {
+        result.ArchivedStaleUsers++
+      }
+      _ = auth.DeleteUser(u.Username)
+    }
   }
 
   return result, nil

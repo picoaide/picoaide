@@ -234,7 +234,7 @@ func TestMCPToken(t *testing.T) {
 func TestSyncUserGroups(t *testing.T) {
   testInitDB(t)
 
-  err := SyncUserGroups("user1", []string{"group1", "group2"})
+  err := SyncUserGroups("user1", []string{"group1", "group2"}, "ldap")
   if err != nil {
     t.Fatalf("SyncUserGroups: %v", err)
   }
@@ -248,7 +248,7 @@ func TestSyncUserGroups(t *testing.T) {
   }
 
   // 更新组（移除 group1，添加 group3）
-  SyncUserGroups("user1", []string{"group2", "group3"})
+  SyncUserGroups("user1", []string{"group2", "group3"}, "ldap")
   groups, _ = GetGroupsForUser("user1")
   if len(groups) != 2 {
     t.Fatalf("expected 2 groups after sync, got %d: %v", len(groups), groups)
@@ -262,7 +262,7 @@ func TestSyncUserGroups(t *testing.T) {
   }
 }
 
-func TestReplaceLDAPGroupMembersRemovesStaleRelations(t *testing.T) {
+func TestReplaceGroupMembersBySourceRemovesStaleRelations(t *testing.T) {
   testInitDB(t)
 
   if err := CreateGroup("local-team", "local", "", nil); err != nil {
@@ -271,15 +271,15 @@ func TestReplaceLDAPGroupMembersRemovesStaleRelations(t *testing.T) {
   if err := AddUsersToGroup("local-team", []string{"local-user"}); err != nil {
     t.Fatalf("AddUsersToGroup local: %v", err)
   }
-  if err := ReplaceLDAPGroupMembers(map[string][]string{
+  if err := ReplaceGroupMembersBySource("ldap", map[string][]string{
     "ldap-team": {"alice", "bob"},
   }); err != nil {
-    t.Fatalf("ReplaceLDAPGroupMembers first: %v", err)
+    t.Fatalf("ReplaceGroupMembersBySource first: %v", err)
   }
-  if err := ReplaceLDAPGroupMembers(map[string][]string{
+  if err := ReplaceGroupMembersBySource("ldap", map[string][]string{
     "ldap-team": {"bob"},
   }); err != nil {
-    t.Fatalf("ReplaceLDAPGroupMembers second: %v", err)
+    t.Fatalf("ReplaceGroupMembersBySource second: %v", err)
   }
 
   ldapMembers, err := GetGroupMembers("ldap-team")

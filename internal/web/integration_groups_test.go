@@ -226,7 +226,7 @@ func TestGroupMembers_IncludesInheritedSubGroupMembers(t *testing.T) {
   }
 }
 
-func TestSyncLDAPGroupParentsUpdatesListHierarchy(t *testing.T) {
+func TestSyncGroupParentsUpdatesListHierarchy(t *testing.T) {
   env := setupTestServer(t)
   if err := auth.CreateGroup("ldap-parent", "ldap", "", nil); err != nil {
     t.Fatalf("CreateGroup parent: %v", err)
@@ -235,7 +235,7 @@ func TestSyncLDAPGroupParentsUpdatesListHierarchy(t *testing.T) {
     t.Fatalf("CreateGroup child: %v", err)
   }
 
-  env.Server.syncLDAPGroupParents(map[string]authsource.GroupHierarchy{
+  env.Server.syncGroupParents(authsource.GroupHierarchy{
     "ldap-parent": {SubGroups: []string{"ldap-child"}},
     "ldap-child":  {},
   })

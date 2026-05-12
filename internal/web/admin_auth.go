@@ -85,13 +85,13 @@ func (s *Server) handleAdminAuthLDAPUsers(c *gin.Context) {
   source := strings.ToLower(strings.TrimSpace(c.Query("source")))
   if source == "directory" || source == "remote" || !s.cfg.UnifiedAuthEnabled() {
     var err error
-    users, err = authsource.LDAPFetchUsers(s.cfg)
+    users, err = authsource.FetchUsers(s.cfg)
     if err != nil {
       writeError(c, http.StatusInternalServerError, err.Error())
       return
     }
   } else {
-    localUsers, err := auth.GetExternalUsers("ldap")
+    localUsers, err := auth.GetExternalUsers(source)
     if err != nil {
       writeError(c, http.StatusInternalServerError, err.Error())
       return
@@ -140,42 +140,39 @@ func (s *Server) handleAdminAuthSyncUsers(c *gin.Context) {
     writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  if !s.cfg.LDAPEnabled() {
-    writeError(c, http.StatusBadRequest, "LDAP 未启用")
-    return
-  }
-  if s.cfg.AuthMode() != "ldap" {
-    writeError(c, http.StatusBadRequest, "当前认证方式不是 LDAP")
+  if !authsource.HasDirectoryProvider(s.cfg) {
+    writeError(c, http.StatusBadRequest, "当前认证方式不支持目录同步")
     return
   }
 
-  cleanupStaleUsers := c.PostForm("cleanup") == "true"
-  result, err := s.syncLDAPUsersFromDirectory(cleanupStaleUsers)
+  authMode := s.cfg.AuthMode()
+  result, err := s.syncUsersFromDirectory(true)
   if err != nil {
-    writeError(c, http.StatusInternalServerError, "同步 LDAP 账号失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "同步账号失败: "+err.Error())
     return
   }
 
-  message := fmt.Sprintf("同步完成，LDAP %d 个账号，允许 %d 个，写入本地用户 %d 个，新初始化 %d 个，补齐镜像 %d 个，移除本地普通登录凭据 %d 个",
-    result.LDAPUserCount,
+  message := fmt.Sprintf("同步完成，%s %d 个账号，允许 %d 个，写入本地用户 %d 个，新初始化 %d 个，补齐镜像 %d 个，移除本地普通登录凭据 %d 个",
+    authMode,
+    result.ProviderUserCount,
     result.AllowedUserCount,
     result.LocalUserSynced,
     result.InitializedCount,
     result.ImageUpdatedCount,
     result.DeletedLocalAuth,
   )
-  if cleanupStaleUsers {
+  if result.ArchivedStaleUsers > 0 {
     message += fmt.Sprintf("，清理过期账号 %d 个", result.ArchivedStaleUsers)
   }
   if result.InvalidUsernameCount > 0 {
     message += fmt.Sprintf("，跳过非法用户名 %d 个", result.InvalidUsernameCount)
   }
 
-  logger.Audit("ldap.users_sync", "operator", s.getSessionUser(c), "initialized", result.InitializedCount, "image_updated", result.ImageUpdatedCount, "deleted_local_auth", result.DeletedLocalAuth, "cleanup", cleanupStaleUsers)
+  logger.Audit("directory.users_sync", "operator", s.getSessionUser(c), "auth_mode", authMode, "initialized", result.InitializedCount, "image_updated", result.ImageUpdatedCount, "deleted_local_auth", result.DeletedLocalAuth, "cleanup", true)
   writeJSON(c, http.StatusOK, struct {
-    Success bool                `json:"success"`
-    Message string              `json:"message"`
-    Result  *ldapUserSyncResult `json:"result"`
+    Success bool              `json:"success"`
+    Message string            `json:"message"`
+    Result  *userSyncResult `json:"result"`
   }{true, message, result})
 }
 
