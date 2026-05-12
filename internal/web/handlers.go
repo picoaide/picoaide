@@ -141,6 +141,10 @@ func (s *Server) handleLogin(c *gin.Context) {
   }
 
   if !authenticated {
+    if !authsource.HasPasswordProvider(s.cfg) {
+      writeError(c, http.StatusBadRequest, "当前认证方式不支持密码登录，请使用 SSO 登录")
+      return
+    }
     logger.Audit("user.login_failed", "username", username, "reason", "invalid_credentials")
     writeError(c, http.StatusUnauthorized, "用户名或密码错误")
     return
@@ -714,9 +718,6 @@ func (s *Server) handleConfigSave(c *gin.Context) {
     s.cfg = newCfg
   }
 
-  // 实时重启定时同步（间隔或认证模式改变后立即生效，无需重启服务）
-  s.restartSyncTimer()
-
   var cleanup *authProviderSwitchCleanupResult
   if oldMode != newMode {
     var err error
@@ -727,6 +728,9 @@ func (s *Server) handleConfigSave(c *gin.Context) {
     }
     logger.Audit("auth.provider_switch", "operator", changedBy, "old_mode", oldMode, "new_mode", newMode, "users_removed", cleanup.UsersRemoved, "container_records", cleanup.ContainerRecords)
   }
+
+  // 实时重启定时同步（间隔或认证模式改变后立即生效，无需重启服务）
+  s.restartSyncTimer()
 
   if cleanup != nil {
     writeJSON(c, http.StatusOK, struct {

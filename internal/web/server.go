@@ -111,6 +111,7 @@ func (s *Server) syncAuto() {
     slog.Error("自动同步组失败", "auth_mode", authMode, "error", err)
     return
   }
+  s.syncGroupParents(groupResult.Hierarchy)
   slog.Info("自动同步组完成", "auth_mode", authMode, "groups", groupResult.GroupCount, "members", groupResult.MemberCount)
 }
 

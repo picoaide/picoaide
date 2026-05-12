@@ -386,6 +386,7 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
   }
   groupCount = groupResult.GroupCount
   userCount = groupResult.MemberCount
+  s.syncGroupParents(groupResult.Hierarchy)
 
   writeJSON(c, http.StatusOK, struct {
     Success     bool   `json:"success"`

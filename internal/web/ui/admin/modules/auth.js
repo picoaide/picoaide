@@ -169,8 +169,8 @@ function renderProviderConfig(ctx, mode) {
     if (hasDirectory && section.fields.some(function(f) { return f.key.indexOf('sync_interval') >= 0; })) {
       var syncRow = document.createElement('div');
       syncRow.className = 'row mt-1';
-      syncRow.appendChild(createSyncBtn('sync-users-btn', '同步账号（自动清理旧账号）', function() { syncLDAPUsers(ctx); }));
-      syncRow.appendChild(createSyncBtn('sync-groups-btn', '同步用户组', function() { syncLDAPGroups(ctx); }));
+      syncRow.appendChild(createSyncBtn('sync-users-btn', '同步账号（自动清理旧账号）', function() { syncDirectoryUsers(ctx); }));
+      syncRow.appendChild(createSyncBtn('sync-groups-btn', '同步用户组', function() { syncDirectoryGroups(ctx); }));
       card.appendChild(syncRow);
       var msgDiv = document.createElement('div');
       msgDiv.id = 'sync-groups-msg';
@@ -376,7 +376,7 @@ function getFormValue(key) {
 // 同步操作
 // ============================================================
 
-async function syncLDAPUsers(ctx) {
+async function syncDirectoryUsers(ctx) {
   const { Api, showMsg } = ctx;
   showMsg('#sync-groups-msg', '同步账号中...', true);
   try {
@@ -385,7 +385,7 @@ async function syncLDAPUsers(ctx) {
   } catch (e) { showMsg('#sync-groups-msg', e.message, false); }
 }
 
-async function syncLDAPGroups(ctx) {
+async function syncDirectoryGroups(ctx) {
   const { Api, showMsg } = ctx;
   showMsg('#sync-groups-msg', '同步组中...', true);
   try {
