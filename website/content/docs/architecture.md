@@ -1,16 +1,144 @@
 ---
-title: "架构概览"
-description: "PicoAide 系统架构、认证、容器隔离和 MCP 中继说明"
+title: "架构设计"
+description: "PicoAide 系统架构、设计哲学、组件边界和关键架构决策"
 weight: 2
 draft: false
 ---
 
+## 设计哲学
+
+PicoAide 的核心理念可以概括为一句话：
+
+> **AI 的力量应当被释放，但数据的边界必须被守护。**
+
+这决定了 PicoAide 的架构走向——它不是一个直接把 AI 能力暴露给用户的管理工具，而是一个**控制平面**。所有 AI 操作都在明确定义的边界内执行：容器隔离了执行环境，认证继承了组织权限，MCP 中继控制了工具访问范围，文件白名单限制了数据读写。
+
+PicoAide 不试图替代大模型或 Agent 框架。它解决的是企业在引入 AI 操作助手时面临的三个核心矛盾：
+
+1. **能力 vs 安全** — AI 需要操作真实环境才有价值，但操作权限必须精确可控
+2. **统一 vs 个性化** — 管理需要统一策略，但每位员工的工作场景各不相同
+3. **集成 vs 独立** — AI 需要接入浏览器、桌面、文件系统，但不能拥有不受限的访问权
+
+## 系统总览
+
 PicoAide 由一个 Go 服务端、多个用户级 PicoClaw 容器、浏览器扩展和桌面客户端组成。服务端不直接执行浏览器或桌面动作，而是作为认证、配置、容器和 MCP 消息的控制平面。
 
-## 组件边界
+```text
+┌──────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│  管理员/用户   │────▶│  PicoAide Server  │────▶│   SQLite 配置存储  │
+│  (浏览器)     │     │  (Go + Gin)      │     │  (用户/容器/配置)  │
+└──────────────┘     └────────┬─────────┘     └──────────────────┘
+                              │
+               ┌──────────────┼──────────────┐
+               ▼              ▼              ▼
+        ┌──────────┐  ┌──────────────┐  ┌──────────┐
+        │ Docker   │  │  MCP SSE     │  │ WebSocket │
+        │ Engine   │  │  端点        │  │ 中继     │
+        └──────────┘  └──────┬───────┘  └─────┬────┘
+               │             │                 │
+               ▼             ▼                 ▼
+        ┌──────────┐  ┌──────────────┐  ┌──────────┐
+        │ PicoClaw │  │ 浏览器扩展   │  │ 桌面客户端 │
+        │ 容器×N   │  │ (Chrome)     │  │ (Python)  │
+        └──────────┘  └──────────────┘  └──────────┘
+```
+
+## 五大设计决策
+
+### 一、控制平面模式
+
+PicoAide 不做 Agent 框架，不做大模型推理。它做一个清晰的**控制平面**——
+
+- **认证**：统一管理用户身份，支持 Local / LDAP / OIDC 三种模式
+- **配置**：在 SQLite 中存储全局配置，以 KV 键值对展平，分层合并下发
+- **容器**：通过 Docker SDK 管理用户容器生命周期
+- **中继**：MCP SSE + WebSocket 负责消息转发，不参与执行
+
+这个边界带来的好处：PicoAide 不绑定任何大模型，不限定任何 Agent 框架。用户容器内跑什么 AI 软件由管理员决定，PicoAide 只负责供给和连接。
+
+### 二、容器级隔离
+
+每位员工拥有独立的 PicoClaw 容器。这不是为了性能，而是为了**安全边界**：
+
+- 容器使用独立网络 `picoaide-net`（100.64.0.0/16），ICC=false 禁止容器间通信
+- 用户工作目录通过 bind mount 挂载到容器 `/root`
+- 一个用户的 AI Agent 无法访问其他用户的容器或数据
+- 删除用户时容器和目录会归档，不会留下残留
+
+容器是"执行沙箱"——AI Agent 在里面运行，但它能调用的外部工具（浏览器、桌面）由 PicoAide 的 MCP 中继层控制。
+
+### 三、认证可插拔
+
+PicoAide 不创造新的身份体系，而是继承已有的。它支持三种认证模式：
+
+| 模式 | 适用场景 | 用户来源 | 密码管理 |
+|------|---------|---------|---------|
+| Local | 小团队、个人部署 | SQLite 本地用户 | argon2id 哈希，PicoAide 管理 |
+| LDAP | 企业内网、AD/OpenLDAP | 目录服务器同步 | LDAP 服务器管理 |
+| OIDC | SSO 平台、Keycloak/Azure AD | IdP 浏览器跳转 | IdP 管理 |
+
+关键设计：**超管逃生通道**。无论哪种认证模式，超管账户始终在本地存储。即使 LDAP 服务器宕机或 OIDC Provider 不可用，管理员也能用本地超管密码登录系统。
+
+切换认证模式时，系统会自动清理旧模式下的普通用户数据（容器、目录、组成员），确保状态一致。
+
+### 四、MCP 三层中继
+
+PicoAide 使用 Model Context Protocol（MCP）作为 AI 与外部工具的通信协议。架构分为三层：
+
+```
+用户 PicoClaw 容器 (AI Agent)
+        │
+        ▼  SSE 连接 (MCP 协议)
+┌───────────────────────────────┐
+│  MCP Service 层               │
+│  ─ initialize / tools/list    │
+│  ─ tools/call 路由到执行端    │
+├───────────────────────────────┤
+│  ServiceHub 层                │
+│  ─ WebSocket 连接管理         │
+│  ─ 命令转发 / 超时 / keepalive│
+├───────────────────────────────┤
+│  代理层 (browser/computer)    │
+│  ─ 浏览器扩展 / 桌面客户端    │
+└───────────────────────────────┘
+```
+
+- AI 通过 SSE 端点发送 `tools/call` 请求
+- PicoAide 服务端查找该用户已连接的 WebSocket 执行端
+- 命令通过 WebSocket 转发到浏览器扩展或桌面客户端
+- 执行端执行操作并返回结果
+
+这种架构确保 AI 不直接接触用户的浏览器或桌面 API，所有操作都经过 PicoAide 的认证和路由。
+
+### 五、配置分层下发
+
+PicoAide 的配置体系采用分层策略：
+
+```
+全局配置 (SQLite settings 表)
+    │
+    ├── Picoclaw 基础配置 (model, temperature...)
+    ├── 渠道策略 (全局启用/禁用)
+    ├── 安全配置 (.security.yml 中的密钥)
+    └── 技能仓库 (repos 定义)
+            │
+            ▼
+各用户配置合并 (util.MergeMap)
+    │
+    ├── 用户级渠道覆盖 (启用/禁用)
+    ├── 用户级配置字段
+    └── 组级技能绑定
+            │
+            ▼
+用户目录 config.json + .security.yml
+```
+
+配置以展平的键值对存储在 SQLite 中，通过 `flattenConfig()` / `buildNested()` 实现 Go 结构体到 KV 的双向转换。Picoclaw Adapter 包负责版本管理——当升级镜像时，迁移引擎自动将配置从旧版本迁移到新版本。
+
+## 组件关系
 
 | 组件 | 代码位置 | 职责 |
-| --- | --- | --- |
+|------|---------|------|
 | 服务端 | `cmd/picoaide`, `internal/web` | HTTP API、管理后台、认证、MCP 中继、WebSocket 中继 |
 | 配置层 | `internal/config`, `internal/auth` | SQLite 配置、用户、组、白名单、会话密钥 |
 | 容器层 | `internal/docker`, `internal/user` | Docker 网络、容器生命周期、用户工作区 |
@@ -18,118 +146,30 @@ PicoAide 由一个 Go 服务端、多个用户级 PicoClaw 容器、浏览器扩
 | 桌面执行端 | `picoaide-desktop` | 截图、鼠标、键盘、OCR、白名单文件访问 |
 | 官网 | `website` | Hugo 静态站点和文档 |
 
-整体调用路径：
+## 数据流示例
+
+以下是 AI 执行一次浏览器操作的完整路径：
 
 ```text
-用户 / 管理员
-  -> PicoAide Server
-     -> SQLite 配置和状态
-     -> Docker Engine
-     -> 用户 PicoClaw 容器
-     -> MCP SSE
-        -> WebSocket 执行端
-           -> 浏览器扩展 / 桌面客户端
+1. 用户在浏览器扩展中点击"授权 AI 控制"
+2. 扩展通过 WebSocket 连接到 PicoAide Server
+3. AI 在容器中调用 browser_navigate 工具
+4. 容器通过 SSE 向 PicoAide Server 发送 tools/call 请求
+5. Server 查找该用户的 browser 执行端 WebSocket
+6. Server 将命令转发给浏览器扩展
+7. 扩展在用户当前标签页执行导航
+8. 结果沿原路径返回给 AI
 ```
 
-## 认证模型
+整个过程中，AI 不知道浏览器的真实地址，不持有用户的会话 Cookie，所有操作都在用户授权的范围内执行。
 
-服务端支持本地认证和 LDAP 认证。登录接口先尝试本地认证，再按配置尝试 LDAP。
+## 安全边界总结
 
-本地认证流程：
-
-```text
-POST /api/login
-  -> auth.AuthenticateLocal
-  -> 生成 HMAC session cookie
-  -> 首次普通用户登录时异步初始化用户容器目录
-```
-
-LDAP 认证流程：
-
-```text
-POST /api/login
-  -> ldap.Authenticate
-  -> 白名单检查
-  -> 首次登录异步初始化用户
-  -> 异步同步用户 LDAP 组
-  -> 生成 HMAC session cookie
-```
-
-会话 Cookie 名称是 `session`，有效期为 24 小时。CSRF token 按登录用户和小时窗口生成，表单 POST 请求通过 `csrf_token` 字段校验。
-
-超管和普通用户的边界不同：
-
-- 超管可以访问 `/admin/*` 和管理 API。
-- 普通用户访问 `/manage`，管理自己的渠道配置、文件和本地密码。
-- 超管不能登录浏览器扩展，也不能获取普通用户 MCP token。
-
-## 容器隔离
-
-PicoAide 为每个普通用户分配独立 PicoClaw 容器。用户目录位于：
-
-```text
-<data-dir>/users/<username>/
-  .picoclaw/
-    config.json
-    .security.yml
-    workspace/
-      skills/
-```
-
-Docker 网络使用 `picoaide-net`：
-
-| 属性 | 值 |
-| --- | --- |
-| 子网 | `100.64.0.0/16` |
-| 网关 | `100.64.0.1` |
-| 容器 IP | 从 `100.64.0.2` 开始分配 |
-| 容器间通信 | ICC=false |
-
-服务端会在启动时初始化 Docker 客户端并确保网络存在。如果 Docker 不可用，管理后台仍可启动，但容器相关操作会返回服务不可用。
-
-## MCP 中继
-
-PicoAide 注册两个 MCP SSE 服务：
-
-| 服务 | SSE 端点 | 执行端 WebSocket |
-| --- | --- | --- |
-| browser | `/api/mcp/sse/browser` | `/api/browser/ws` |
-| computer | `/api/mcp/sse/computer` | `/api/computer/ws` |
-
-MCP 调用流程：
-
-```text
-PicoClaw 容器
-  -> GET /api/mcp/sse/{service}?token=...
-  -> POST /api/mcp/sse/{service}?token=...
-  -> tools/list
-  -> tools/call
-  -> PicoAide 查找同用户 WebSocket 执行端
-  -> 转发命令并等待结果
-```
-
-`/api/browser/ws` 和 `/api/computer/ws` 只给执行端连接使用。AI 容器不应该直接调用 WebSocket 地址。
-
-如果执行端未连接，工具调用返回类似：
-
-```text
-picoaide-browser 代理未连接
-picoaide-computer 代理未连接
-```
-
-## 配置下发
-
-全局配置在 SQLite 中，用户级配置写入：
-
-- `config.json`
-- `.security.yml`
-
-保存渠道配置或应用全局配置后，服务端会重启对应容器。升级镜像时，代码还会通过 Picoclaw adapter 的 migration 规则检查配置版本是否可升级。
-
-Picoclaw adapter 的默认来源：
-
-- 本地 bundled `rules/picoclaw`
-- `PICOAIDE_RULE_CACHE_DIR`
-- `~/.picoaide-config.yaml`
-- `PICOAIDE_PICOCLAW_ADAPTER_URL`
-- 默认远端 `https://raw.githubusercontent.com/picoaide/picoaide/main/rules/picoclaw`
+| 层面 | 机制 | 说明 |
+|------|------|------|
+| 网络 | Docker ICC=false | 容器间无法直连 |
+| 认证 | HMAC 签名会话 | Cookie 不包含敏感信息 |
+| 工具 | MCP 代理 | AI 不直接调用浏览器/桌面 API |
+| 文件 | 白名单 + 沙盒路径 | 限定 `.picoclaw/workspace/` 内操作 |
+| 配置 | 敏感键过滤 | `internal.*` 键不暴露给 API |
+| 速率 | 登录限流 | 10 次/5 分钟，防暴力破解 |

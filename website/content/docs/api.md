@@ -1,7 +1,7 @@
 ---
 title: "API 参考"
 description: "PicoAide HTTP API、MCP SSE 和管理接口参考"
-weight: 7
+weight: 12
 draft: false
 ---
 

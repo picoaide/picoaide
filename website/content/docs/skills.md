@@ -2,7 +2,7 @@
 title: "技能系统"
 description: "PicoAide 技能仓库、上传安装、按用户和按组部署说明"
 weight: 3
-draft: false
+draft: true
 ---
 
 技能是部署到用户 PicoClaw 工作区的目录。PicoAide 不限定技能必须使用某种语言；实际部署动作是把技能目录复制到用户的：
