@@ -19,3 +19,7 @@ func (LocalProvider) Authenticate(cfg *config.GlobalConfig, username, password s
 func (LocalProvider) DisplayName() string {
   return "本地用户"
 }
+
+func (LocalProvider) ConfigFields() []FieldSection {
+  return nil
+}

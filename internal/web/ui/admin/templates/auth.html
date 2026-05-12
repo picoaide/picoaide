@@ -12,100 +12,12 @@
   <div class="card-header">认证模式</div>
   <div class="field">
     <label>认证方式</label>
-    <select id="auth-mode">
-      <option value="local">本地认证</option>
-      <option value="ldap">LDAP 统一登录</option>
-      <option value="oidc">OIDC 统一登录</option>
-    </select>
+    <select id="auth-mode"></select>
   </div>
   <div id="provider-mode-notice" class="msg msg-info hidden">统一认证模式下，本地普通用户被禁用，仅超管可使用本地密码登录。切换认证方式会清空当前普通用户、容器记录、用户目录和归档目录。</div>
 </div>
 
-<div id="oidc-section">
-  <div class="card">
-    <div class="card-header">OIDC 配置</div>
-    <div class="grid-2">
-      <div class="field"><label>Issuer URL</label><input type="text" id="oidc-issuer-url" placeholder="https://idp.example.com"></div>
-      <div class="field"><label>Redirect URL</label><input type="text" id="oidc-redirect-url" placeholder="https://picoaide.example.com/api/login/oidc/callback"></div>
-    </div>
-    <div class="grid-2">
-      <div class="field"><label>Client ID</label><input type="text" id="oidc-client-id"></div>
-      <div class="field"><label>Client Secret</label><input type="password" id="oidc-client-secret"></div>
-    </div>
-    <div class="grid-2">
-      <div class="field"><label>Scopes</label><input type="text" id="oidc-scopes" placeholder="openid profile email"></div>
-      <div class="field"><label>用户名 Claim</label><input type="text" id="oidc-username-claim" placeholder="preferred_username"></div>
-    </div>
-    <div class="grid-2">
-      <div class="field"><label>用户组 Claim</label><input type="text" id="oidc-groups-claim" placeholder="groups"></div>
-      <div class="field"></div>
-    </div>
-    <p class="text-sm text-muted">OIDC 用户按需同步（首次登录时自动创建），无法批量枚举用户和组。管理员在 OIDC 身份提供商处删除用户后，本地不会自动清理。</p>
-  </div>
-</div>
-
-<div id="ldap-section">
-  <div class="card">
-    <div class="card-header">LDAP 配置</div>
-    <div class="grid-2">
-      <div class="field"><label>LDAP 地址</label><input type="text" id="ldap-host" placeholder="ldap://ldap.example.com:389"></div>
-      <div class="field"><label>Bind DN</label><input type="text" id="ldap-bind-dn" placeholder="cn=admin,dc=example,dc=com"></div>
-    </div>
-    <div class="grid-2">
-      <div class="field"><label>Bind Password</label><input type="password" id="ldap-bind-password"></div>
-      <div class="field"><label>Base DN</label><input type="text" id="ldap-base-dn" placeholder="ou=users,dc=example,dc=com"></div>
-    </div>
-    <div class="grid-2">
-      <div class="field"><label>Filter</label><input type="text" id="ldap-filter" placeholder="(objectClass=inetOrgPerson)"></div>
-      <div class="field"><label>Username Attribute</label><input type="text" id="ldap-username-attr" placeholder="uid"></div>
-    </div>
-    <div class="row mt-1">
-      <button class="btn btn-outline btn-sm" id="test-ldap-btn">测试连接</button>
-    </div>
-    <div id="ldap-test-result" class="mt-1 hidden" style="font-size:0.9em"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">LDAP 组配置</div>
-    <div class="grid-2">
-      <div class="field">
-        <label>组搜索方式</label>
-        <select id="ldap-group-mode">
-          <option value="">不启用组同步</option>
-          <option value="member_of">memberOf（AD 风格）</option>
-          <option value="group_search">groupOfNames（OpenLDAP 风格）</option>
-        </select>
-      </div>
-      <div class="field"><label>组 Base DN</label><input type="text" id="ldap-group-base-dn" placeholder="留空使用用户 Base DN"></div>
-    </div>
-    <div class="grid-2">
-      <div class="field"><label>组过滤条件</label><input type="text" id="ldap-group-filter" placeholder="(objectClass=groupOfNames)"></div>
-      <div class="field"><label>组成员属性</label><input type="text" id="ldap-group-member-attr" placeholder="member"></div>
-    </div>
-    <div class="row mt-1">
-      <button class="btn btn-outline btn-sm" id="sync-users-btn">同步账号（自动清理旧账号）</button>
-      <button class="btn btn-outline btn-sm" id="sync-groups-btn">同步用户组</button>
-    </div>
-    <div id="sync-groups-msg" class="msg"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">同步</div>
-    <div class="field">
-      <label>自动同步间隔</label>
-      <select id="sync-interval">
-        <option value="0">禁用</option>
-        <option value="1m">每 1 分钟</option>
-        <option value="5m">每 5 分钟</option>
-        <option value="15m">每 15 分钟</option>
-        <option value="30m" selected>每 30 分钟</option>
-        <option value="1h">每 1 小时</option>
-        <option value="24h">每天</option>
-      </select>
-    </div>
-    <p class="text-sm text-muted">自动同步会在后台定期从 LDAP 同步组数据，保存配置后实时生效。</p>
-  </div>
-</div>
+<div id="provider-config-container"></div>
 
 <div id="auth-whitelist-section">
   <div class="card">

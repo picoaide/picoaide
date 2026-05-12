@@ -398,6 +398,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
   r.GET("/api/admin/auth/ldap-users", s.handleAdminAuthLDAPUsers)
   r.POST("/api/admin/auth/sync-users", s.handleAdminAuthSyncUsers)
   r.POST("/api/admin/auth/sync-groups", s.handleAdminAuthSyncGroups)
+  r.GET("/api/admin/auth/providers", s.handleAdminAuthProviders)
   // 超管 - 用户组
   r.GET("/api/admin/groups", s.handleAdminGroups)
   r.POST("/api/admin/groups/create", s.handleAdminGroupCreate)

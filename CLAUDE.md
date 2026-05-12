@@ -368,7 +368,7 @@ internal/web/
 
 ### 认证源扩展规范
 
-统一认证源必须通过 `internal/authsource` 扩展，禁止把新认证源逻辑堆到 `internal/web`、`internal/auth` 或单个大文件里。
+统一认证源必须通过 `internal/authsource` 扩展，禁止把新认证源逻辑堆到 `internal/web`、`internal/auth` 或单个大文件里。新增认证源前先阅读 `docs/auth-source-guide.md`。
 
 - `internal/authsource/provider.go` 只放认证源接口和注册表
 - 每一种认证源独立一个文件（如 `ldap.go`、`oidc.go`、后续新增 `saml.go`、`feishu.go` 等）

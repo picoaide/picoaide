@@ -177,6 +177,20 @@ func (s *Server) handleAdminAuthSyncUsers(c *gin.Context) {
 }
 
 // ============================================================
+// 认证源描述 — 前端动态渲染配置表单用
+// ============================================================
+
+func (s *Server) handleAdminAuthProviders(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
+    return
+  }
+  writeJSON(c, http.StatusOK, struct {
+    Success   bool                         `json:"success"`
+    Providers []authsource.ProviderDescriptor `json:"providers"`
+  }{true, authsource.ListProviders()})
+}
+
+// ============================================================
 // 白名单管理
 // ============================================================
 

@@ -62,7 +62,24 @@ func (OIDCProvider) CompleteLogin(ctx context.Context, cfg *config.GlobalConfig,
 }
 
 func (OIDCProvider) DisplayName() string {
-  return "企业统一认证"
+  return "OIDC"
+}
+
+func (OIDCProvider) ConfigFields() []FieldSection {
+  return []FieldSection{
+    {
+      Name: "OIDC 配置",
+      Fields: []FieldDefinition{
+        {Key: "oidc.issuer_url", Label: "Issuer URL", Type: FieldText, Placeholder: "https://idp.example.com", Required: true},
+        {Key: "oidc.client_id", Label: "Client ID", Type: FieldText, Required: true},
+        {Key: "oidc.client_secret", Label: "Client Secret", Type: FieldPassword, Required: true},
+        {Key: "oidc.redirect_url", Label: "Redirect URL", Type: FieldText, Placeholder: "https://picoaide.example.com/api/login/callback", Required: true},
+        {Key: "oidc.scopes", Label: "Scopes", Type: FieldText, Default: "openid profile email"},
+        {Key: "oidc.username_claim", Label: "用户名 Claim", Type: FieldText, Default: "preferred_username"},
+        {Key: "oidc.groups_claim", Label: "用户组 Claim", Type: FieldText, Default: "groups"},
+      },
+    },
+  }
 }
 
 func buildOIDCConfig(cfg *config.GlobalConfig) (*oidc.Provider, *oauth2.Config, error) {

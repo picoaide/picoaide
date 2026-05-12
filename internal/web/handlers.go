@@ -765,12 +765,12 @@ func authModeFromRaw(raw map[string]interface{}, fallback string) string {
 }
 
 func validAuthMode(mode string) bool {
-  switch mode {
-  case "local", "ldap", "oidc":
-    return true
-  default:
-    return false
+  for _, name := range authsource.RegisteredProviderNames() {
+    if name == mode {
+      return true
+    }
   }
+  return false
 }
 
 func normalizeAuthModeInRaw(raw map[string]interface{}, mode string) {
