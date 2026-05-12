@@ -1,7 +1,7 @@
 ---
 title: "常见问题"
 description: "PicoAide 安装、认证、容器、MCP 和客户端常见问题"
-weight: 8
+weight: 13
 draft: false
 ---
 

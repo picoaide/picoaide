@@ -237,7 +237,7 @@ export async function init(ctx) {
     });
     tbody.querySelectorAll('[data-rm]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('删除技能 ' + btn.dataset.rm + '？')) return;
+        if (!await confirmModal('删除技能 ' + btn.dataset.rm + '？')) return;
         const res = await Api.post('/api/admin/skills/remove', { name: btn.dataset.rm });
         showMsg('#skills-msg', res.message || res.error, res.success);
         if (res.success) loadSkills();
@@ -413,7 +413,7 @@ export async function init(ctx) {
       });
       card.querySelectorAll('[data-rm-repo]').forEach(btn => {
         btn.addEventListener('click', async function() {
-          if (!confirm('移除 Git 来源 ' + btn.dataset.rmRepo + '？已安装技能不会被删除。')) return;
+          if (!await confirmModal('移除 Git 来源 ' + btn.dataset.rmRepo + '？已安装技能不会被删除。')) return;
           const res = await Api.post('/api/admin/skills/repos/remove', { name: btn.dataset.rmRepo });
           showMsg('#repo-msg', res.message || res.error, res.success);
           if (res.success) loadRepos();

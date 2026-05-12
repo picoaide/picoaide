@@ -1,6 +1,7 @@
 package docker
 
 import (
+  "bytes"
   "context"
   "encoding/json"
   "fmt"
@@ -86,11 +87,12 @@ func EnsureNetwork(ctx context.Context) error {
 
 // CreateContainer 创建用户容器（bind mount + 静态 IP + 资源限制）
 func CreateContainer(ctx context.Context, username, imageRef, userDir, ip string, cpuLimit float64, memMB int64) (string, error) {
-  return CreateContainerWithOptions(ctx, username, imageRef, userDir, ip, cpuLimit, memMB, false)
+  return CreateContainerWithOptions(ctx, username, imageRef, userDir, ip, cpuLimit, memMB, false, nil)
 }
 
-// CreateContainerWithOptions 创建用户容器，debugGateway=true 时以 Picoclaw debug 模式启动 gateway
-func CreateContainerWithOptions(ctx context.Context, username, imageRef, userDir, ip string, cpuLimit float64, memMB int64, debugGateway bool) (string, error) {
+// CreateContainerWithOptions 创建用户容器
+// extraMounts 为额外的 bind mount 列表（用于共享文件夹挂载）
+func CreateContainerWithOptions(ctx context.Context, username, imageRef, userDir, ip string, cpuLimit float64, memMB int64, debugGateway bool, extraMounts []mount.Mount) (string, error) {
   containerName := "picoaide-" + username
 
   // 如果同名容器已存在，先移除
@@ -105,6 +107,7 @@ func CreateContainerWithOptions(ctx context.Context, username, imageRef, userDir
     Source: userDir,
     Target: "/root",
   })
+  mounts = append(mounts, extraMounts...)
 
   hostConfig := &container.HostConfig{
     Mounts:        mounts,
@@ -253,6 +256,43 @@ func stripANSI(s string) string {
     i++
   }
   return b.String()
+}
+
+// ExecCommand 在容器内执行命令，返回 stdout 输出和退出码
+func ExecCommand(ctx context.Context, containerID string, cmd []string) (string, int, error) {
+  createResp, err := cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+    Cmd:          cmd,
+    AttachStdout: true,
+    AttachStderr: true,
+  })
+  if err != nil {
+    return "", -1, fmt.Errorf("创建 exec 失败: %w", err)
+  }
+
+  resp, err := cli.ContainerExecAttach(ctx, createResp.ID, container.ExecStartOptions{})
+  if err != nil {
+    return "", -1, fmt.Errorf("附加 exec 失败: %w", err)
+  }
+  defer resp.Close()
+
+  var buf bytes.Buffer
+  _, _ = io.Copy(&buf, resp.Reader)
+
+  inspectResp, err := cli.ContainerExecInspect(ctx, createResp.ID)
+  if err != nil {
+    return buf.String(), -1, fmt.Errorf("检查 exec 状态失败: %w", err)
+  }
+
+  return buf.String(), inspectResp.ExitCode, nil
+}
+
+// TestContainerDir 检查容器内目录是否存在（用于测试共享文件夹挂载）
+func TestContainerDir(ctx context.Context, containerID, dirPath string) (bool, error) {
+  _, exitCode, err := ExecCommand(ctx, containerID, []string{"test", "-d", dirPath})
+  if err != nil {
+    return false, err
+  }
+  return exitCode == 0, nil
 }
 
 // ImageExists 检查镜像是否已存在于本地

@@ -6,7 +6,7 @@ export async function init(ctx) {
   await loadMigrationRulesInfo();
 
   $('#save-btn').addEventListener('click', saveConfig);
-  $('#reset-btn').addEventListener('click', () => { if (confirm('重新加载？未保存的修改将丢失。')) loadConfig(); });
+  $('#reset-btn').addEventListener('click', async () => { if (await confirmModal('重新加载？未保存的修改将丢失。')) loadConfig(); });
   $('#refresh-migration-rules-btn')?.addEventListener('click', refreshMigrationRules);
   $('#upload-migration-rules-btn')?.addEventListener('click', uploadMigrationRules);
   $('#migration-rules-file')?.addEventListener('change', function() {
@@ -51,7 +51,7 @@ export async function init(ctx) {
   }
 
   async function refreshMigrationRules() {
-    if (!confirm('确定从远端更新 Picoclaw 配置适配包吗？')) return;
+    if (!await confirmModal('确定从远端更新 Picoclaw 配置适配包吗？')) return;
     showMsg('#settings-msg', '正在更新配置适配...', true);
     try {
       var res = await Api.post('/api/admin/migration-rules/refresh', {});
@@ -121,7 +121,7 @@ export async function init(ctx) {
   }
 
   $('#apply-all-btn').addEventListener('click', async function() {
-    if (!confirm('确定要下发配置到所有用户并重启其容器吗？')) return;
+    if (!await confirmModal('确定要下发配置到所有用户并重启其容器吗？')) return;
     showMsg('#settings-msg', '正在提交下发任务...', true);
     try {
       var res = await Api.post('/api/admin/config/apply', {});

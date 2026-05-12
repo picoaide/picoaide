@@ -432,6 +432,16 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
   r.GET("/api/admin/images/local-tags", s.handleAdminLocalTags)
   r.GET("/api/admin/images/upgrade-candidates", s.handleAdminImageUpgradeCandidates)
   r.GET("/api/admin/images/users", s.handleAdminImageUsers)
+  // 超管 - 团队空间（共享文件夹）
+  r.GET("/api/admin/shared-folders", s.handleAdminSharedFolders)
+  r.POST("/api/admin/shared-folders/create", s.handleAdminSharedFoldersCreate)
+  r.POST("/api/admin/shared-folders/update", s.handleAdminSharedFoldersUpdate)
+  r.POST("/api/admin/shared-folders/delete", s.handleAdminSharedFoldersDelete)
+  r.POST("/api/admin/shared-folders/groups/set", s.handleAdminSharedFoldersSetGroups)
+  r.POST("/api/admin/shared-folders/test", s.handleAdminSharedFoldersTest)
+  r.POST("/api/admin/shared-folders/mount", s.handleAdminSharedFoldersMount)
+  // 普通用户 - 团队空间
+  r.GET("/api/shared-folders", s.handleSharedFolders)
 }
 
 // setSessionCookie 设置 session cookie

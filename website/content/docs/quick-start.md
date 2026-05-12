@@ -1,27 +1,31 @@
 ---
-title: "快速开始"
-description: "PicoAide 快速入门指南"
+title: "快速入门"
+description: "PicoAide 快速入门指南 — 安装、初始化和基础验证"
 weight: 1
 draft: false
 ---
 
-本指南按当前代码实现说明 PicoAide 的安装、初始化和最小可用配置。
+PicoAide 是一个企业级 AI 工作平台。它为每位员工分配独立的 AI 操作助手容器，通过浏览器扩展和桌面客户端让 AI 在授权范围内执行实际工作流，同时确保企业数据不出边界。
+
+本指南带你从零开始完成安装、初始化和基础验证，约 10 分钟可完成。
 
 ## 环境要求
 
-服务端运行在 Linux 上，依赖 Docker 和 root 权限。桌面客户端支持 Windows、macOS 和 Linux，但那部分不在服务端初始化范围内。
+服务端必须运行在 Linux 上，需要 Docker Engine 和 root 权限。
 
 | 项目 | 要求 |
-| --- | --- |
-| 操作系统 | Linux |
-| Docker | Docker Engine 已安装并可用 |
-| 权限 | root |
+|------|------|
+| 操作系统 | Linux（x86_64） |
+| Docker | Docker Engine 24+，已安装并运行 |
+| 权限 | root（用于 Docker 通信） |
 | 端口 | 默认 `:80`，可在配置中修改 |
-| 存储 | 用于数据库、用户目录和镜像缓存的持久化磁盘 |
+| 磁盘 | 持久化磁盘，用于存储数据库、用户目录和镜像 |
+
+桌面客户端可以运行在 Windows、macOS 和 Linux 上，不受此限制。
 
 ## 下载安装
 
-推荐从 GitHub Releases 下载服务端二进制文件。当前代码里的安装向导默认就是这一条路径。
+### 方式一：GitHub Release 下载（推荐）
 
 ```bash
 curl -L -o picoaide \
@@ -30,111 +34,114 @@ chmod +x picoaide
 sudo mv picoaide /usr/sbin/picoaide
 ```
 
-如果你在仓库内构建：
+### 方式二：源码编译
 
 ```bash
 git clone https://github.com/picoaide/picoaide.git
 cd picoaide
 go build -o picoaide ./cmd/picoaide/
-GOOS=linux GOARCH=amd64 go build -o picoaide ./cmd/picoaide/
+sudo mv picoaide /usr/sbin/picoaide
+```
+
+### 方式三：生产环境构建（注入版本信息）
+
+```bash
+GOOS=linux GOARCH=amd64 go build \
+  -ldflags "-X github.com/picoaide/picoaide/internal/config.Version=1.0.0" \
+  -o picoaide ./cmd/picoaide/
 ```
 
 ## 初始化
 
-运行初始化命令后，程序会创建数据目录、写入数据库默认值、生成会话密钥，并准备 systemd 服务。
+运行初始化命令后，程序会创建数据目录、写入数据库默认值、生成会话密钥，并准备 systemd 服务：
 
 ```bash
-picoaide init
+sudo picoaide init
 ```
 
-初始化向导当前包含四步：
+初始化向导依次进行四步配置：
 
-- 数据目录
-- 超管账户
-- 监听地址
-- 镜像仓库
-
-### 数据目录
+### 第一步：数据目录
 
 默认值是 `/data/picoaide`。该目录会保存：
 
-- `picoaide.db`
-- `users/`
-- `archive/`
+- `picoaide.db` — SQLite 数据库，存储用户、容器、配置和组信息
+- `users/` — 每个用户的工作目录，包含 `config.json`、`.security.yml` 和 `workspace/`
+- `archive/` — 删除用户时的归档目录
 
-### 超管账户
+### 第二步：超管账户
 
-初始化会要求设置本地超级管理员账户。这个账户不依赖 LDAP，也不需要用户容器。
+设置本地超级管理员用户名和密码。超管账户不依赖外部认证源，即使 LDAP 不可用也能登录管理后台。请妥善保管密码，忘记密码后可通过 `picoaide reset-password <username>` 重置。
 
-### 监听地址
+### 第三步：监听地址
 
-默认是 `:80`。如果你启用 TLS 并把监听地址设为 `:443`，代码会额外起一个 `:80` 的跳转入口。
+默认是 `:80`。如果启用 TLS 并将监听地址设为 `:443`，服务端会自动额外启动 `:80` 入口用于 HTTP 跳转到 HTTPS。
 
-### 镜像仓库
+### 第四步：镜像仓库
 
-初始化时可以选择：
+选择 PicoClaw 容器的镜像来源：
 
-- `github`：拉取 `ghcr.io/picoaide/picoaide:<tag>`
-- `tencent`：拉取 `hkccr.ccs.tencentyun.com/picoaide/picoaide:<tag>`
+- `github` — 从 `ghcr.io/picoaide/picoaide:<tag>` 拉取
+- `tencent` — 从 `hkccr.ccs.tencentyun.com/picoaide/picoaide:<tag>` 拉取
 
-初始化默认使用本地认证模式。LDAP 是否启用取决于配置中的 `web.auth_mode` 和 `web.ldap_enabled`。
+初始化完成后，系统会自动拉取选定仓库的最新镜像。
+
+### 初始化后默认配置
+
+初始化时默认使用本地认证模式（`web.auth_mode = local`）。如果需要 LDAP 或 OIDC 认证，初始化完成后通过管理后台或 API 切换。
 
 ## 服务管理
 
-初始化后可以用 systemd 管理服务：
+初始化成功后，PicoAide 会自动安装 systemd 服务。你可以使用以下命令管理：
 
 ```bash
+# 查看服务状态
 systemctl status picoaide
+
+# 启动服务
+systemctl start picoaide
+
+# 停止服务
 systemctl stop picoaide
+
+# 重启服务
 systemctl restart picoaide
+
+# 查看实时日志
 journalctl -u picoaide -f
 ```
 
-服务启动命令由代码写入当前工作目录和监听地址，形式类似：
+服务默认以 `picoaide serve -listen :80` 启动，工作目录为 `/data/picoaide`。
 
-```ini
-[Unit]
-Description=PicoAide Management API Server
-After=network.target docker.service
+## 验证安装
 
-[Service]
-Type=simple
-ExecStart=/usr/sbin/picoaide serve -listen :80
-WorkingDirectory=/data/picoaide
-Restart=always
-RestartSec=5
-```
+完成初始化和服务启动后，通过以下步骤验证部署是否正常：
 
-## 其他命令
+1. 浏览器访问 `http://<服务器IP>/`，应自动跳转到登录页面
+2. 使用初始化时设置的超管账号登录
+3. 登录后自动进入管理后台 `/admin/dashboard`
+4. 在仪表盘页面可以看到容器状态、用户统计和系统信息
 
-### 初始化指定用户
+## 常用 CLI 命令
 
 ```bash
-picoaide init -user zhangsan
+picoaide init                    # 初始化
+picoaide init -user zhangsan     # 为已有用户准备容器目录
+picoaide serve -listen :80       # 启动服务
+picoaide serve -listen :443      # 启用 TLS
+picoaide reset-password <user>   # 重置本地用户密码
 ```
-
-用于为已有用户重新准备容器目录和工作区。
-
-### 重置密码
-
-```bash
-picoaide reset-password <username>
-```
-
-只对本地用户有效。LDAP 用户的密码不由 PicoAide 管理。
-
-## 安装浏览器插件
-
-1. 安装 `picoaide-extension`
-2. 打开扩展，输入服务器地址和普通用户账号
-3. 登录后获取 MCP token
-4. 点击「授权 AI 控制当前标签页」后，浏览器 WebSocket 执行端才会连接到服务端
-
-超管不能用于浏览器插件登录。代码里明确禁止超管登录扩展。
 
 ## 下一步
 
-- 阅读 [架构概览](/docs/architecture/) 了解系统设计
-- 配置 [浏览器扩展](/docs/browser-extension/)
-- 了解 [技能系统](/docs/skills/)
-- 参考 [配置参考](/docs/configuration/)
+完成基础部署后，根据你的角色选择后续阅读路径：
+
+**如果你是管理员**
+- 阅读 [安装与部署](/docs/install-deploy/) 了解生产环境深度配置
+- 通过 [管理后台操作指南](/docs/admin-guide/) 学习创建用户和管理容器
+- 配置 [认证与安全](/docs/auth-security/) 对接公司 LDAP
+
+**如果你是普通用户**
+- 阅读 [Web 面板操作指南](/docs/web-panel/) 了解个人配置中心
+- 安装 [浏览器扩展](/docs/browser-extension/) 让 AI 控制浏览器
+- 安装 [桌面客户端](/docs/desktop-client/) 让 AI 操作桌面

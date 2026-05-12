@@ -126,6 +126,51 @@ func (UserChannel) TableName() string {
   return "user_channels"
 }
 
+// SharedFolder 共享文件夹
+type SharedFolder struct {
+  ID          int64  `xorm:"pk autoincr 'id'" json:"id"`
+  Name        string `xorm:"unique notnull 'name'" json:"name"`
+  Description string `xorm:"notnull 'description'" json:"description"`
+  IsPublic    bool   `xorm:"notnull 'is_public'" json:"is_public"`
+  CreatedBy   string `xorm:"notnull 'created_by'" json:"created_by"`
+  CreatedAt   string `xorm:"notnull 'created_at'" json:"created_at"`
+  UpdatedAt   string `xorm:"notnull 'updated_at'" json:"updated_at"`
+}
+
+func (SharedFolder) TableName() string {
+  return "shared_folders"
+}
+
+// SharedFolderGroup 共享文件夹—用户组关联
+type SharedFolderGroup struct {
+  ID       int64 `xorm:"pk autoincr 'id'" json:"id"`
+  FolderID int64 `xorm:"notnull unique(folder_group) 'folder_id'" json:"folder_id"`
+  GroupID  int64 `xorm:"notnull unique(folder_group) 'group_id'" json:"group_id"`
+}
+
+func (SharedFolderGroup) TableName() string {
+  return "shared_folder_groups"
+}
+
+// SharedFolderMount 共享文件夹挂载状态（缓存）
+type SharedFolderMount struct {
+  ID        int64  `xorm:"pk autoincr 'id'" json:"id"`
+  FolderID  int64  `xorm:"notnull unique(folder_user) 'folder_id'" json:"folder_id"`
+  Username  string `xorm:"notnull unique(folder_user) 'username'" json:"username"`
+  Mounted   bool   `xorm:"notnull 'mounted'" json:"mounted"`
+  CheckedAt string `xorm:"notnull 'checked_at'" json:"checked_at"`
+}
+
+func (SharedFolderMount) TableName() string {
+  return "shared_folder_mounts"
+}
+
+// ShareMount 共享文件夹挂载规范（auth 包内部结构，供 web 层转换为 docker.Mount）
+type ShareMount struct {
+  Source string
+  Target string
+}
+
 // GroupInfo 组信息（包含成员数和绑定技能数），非数据库模型，仅用于查询结果
 type GroupInfo struct {
   ID          int64  `json:"id"`

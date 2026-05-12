@@ -640,5 +640,70 @@
 | `/admin/skills` | GET | 技能管理页 |
 | `/admin/auth` | GET | 认证配置页 |
 | `/admin/settings` | GET | 全局设置页 |
+| `/admin/teamspace` | GET | 团队空间页 |
 
 静态资源：`/css/*`、`/js/*`、`/images/*`、`/admin/modules/*`、`/admin/templates/*`、`/manage.js`、`/login.js`、`/initializing.js`、`/admin/admin.js`。
+
+---
+
+## 团队空间端点
+
+### GET /api/admin/shared-folders
+团队空间列表
+- 认证: 超管
+- 响应:
+  ```json
+  {"success":true,"folders":[{"id":1,"name":"项目文档","description":"...","is_public":false,"created_by":"admin","groups":[{"id":1,"name":"研发部"}],"member_count":12,"mounted_count":8,"orphaned":false,"members":[{"username":"user1","mounted":true,"checked_at":"..."}]}]}
+  ```
+
+### POST /api/admin/shared-folders/create
+创建共享文件夹
+- 认证: 超管，CSRF
+- 请求体: `name`、`description`(可选)、`is_public`(可选 0/1)、`group_ids`(可选，逗号分隔) (form)
+- 说明: 名称全局唯一，使用 `SafePathSegment` 验证
+
+### POST /api/admin/shared-folders/update
+修改共享文件夹
+- 认证: 超管，CSRF
+- 请求体: `id`、`name`、`description`、`is_public` (form)
+- 说明: 改名时自动 mv 主机目录并重启容器；is_public 切换时自动处理增减用户
+
+### POST /api/admin/shared-folders/delete
+删除共享文件夹
+- 认证: 超管，CSRF
+- 请求体: `id` (form)
+- 说明: 归档主机文件到 archive/，删除数据库记录，自动重启所有关联用户容器
+
+### POST /api/admin/shared-folders/groups/set
+设置共享文件夹关联组（全量替换）
+- 认证: 超管，CSRF
+- 请求体: `folder_id`、`group_ids`(逗号分隔) (form)
+- 说明: 空 group_ids 清除所有关联；自动计算成员增减并重启容器
+
+### POST /api/admin/shared-folders/test
+测试用户挂载状态
+- 认证: 超管，CSRF
+- 请求体: `folder_id`、`username` (form)
+- 响应:
+  ```json
+  {"success":true,"mounted":true,"message":"用户 user1 已挂载","checked_at":"2026-05-12 10:30:00"}
+  ```
+- 说明: 检查主机目录存在 + Docker exec 验证容器内挂载
+
+### POST /api/admin/shared-folders/mount
+一键挂载共享文件夹到所有关联用户
+- 认证: 超管，CSRF
+- 请求体: `folder_id` (form)
+- 说明: 异步 task queue 执行，逐个 recreate 容器（带全部共享 mounts）
+- 响应:
+  ```json
+  {"success":true,"message":"已提交挂载任务，共 N 个用户","task_id":"mount-sf-xxx"}
+  ```
+
+### GET /api/shared-folders
+当前用户可访问的共享文件夹列表
+- 认证: 普通用户
+- 响应:
+  ```json
+  {"success":true,"folders":[{"id":1,"name":"项目文档","description":"...","is_public":false,"member_count":12,"container_path":"workspace/share/项目文档/"}]}
+  ```

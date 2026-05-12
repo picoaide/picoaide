@@ -52,3 +52,106 @@ function showMsg(el, text, ok) {
   el.className = text ? ('msg ' + (ok ? 'msg-ok' : 'msg-err')) : 'msg';
   if (text) setTimeout(function() { el.textContent = ''; el.className = 'msg'; }, 4000);
 }
+
+// 模态框组件：showModal({title, body, footer, width}) → Promise<buttonValue>
+// body: HTML string
+// footer: [{label, value, primary, danger}]
+// 返回 Promise，resolve(buttonValue) 或 reject('cancel')
+function showModal(opts) {
+  var prev = document.querySelector('.modal-overlay');
+  if (prev) prev.remove();
+  return new Promise(function(resolve, reject) {
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    var footerHtml = '';
+    if (opts.footer) {
+      footerHtml = '<div class="modal-footer">' + opts.footer.map(function(b) {
+        var cls = 'btn btn-sm';
+        if (b.primary) cls += ' btn-primary';
+        else if (b.danger) cls += ' btn-danger';
+        else cls += ' btn-outline';
+        return '<button class="' + cls + '" data-value="' + esc(b.value) + '">' + esc(b.label) + '</button>';
+      }).join('') + '</div>';
+    }
+    var widthStyle = opts.width ? ' style="max-width:' + opts.width + '"' : '';
+    overlay.innerHTML =
+      '<div class="modal"' + widthStyle + '>' +
+        '<div class="modal-header">' + esc(opts.title || '') + '<button class="modal-close-btn">&times;</button></div>' +
+        '<div class="modal-body">' + (opts.body || '') + '</div>' +
+        footerHtml +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    function close(val) {
+      overlay.remove();
+      if (val !== undefined) resolve(val);
+      else reject('cancel');
+    }
+
+    overlay.querySelector('.modal-close-btn').addEventListener('click', function() { close(); });
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) close();
+    });
+    overlay.querySelectorAll('.modal-footer .btn[data-value]').forEach(function(btn) {
+      btn.addEventListener('click', function() { close(btn.dataset.value); });
+    });
+    document.addEventListener('keydown', function handler(e) {
+      if (e.key === 'Escape') { close(); document.removeEventListener('keydown', handler); }
+    });
+  });
+}
+
+function confirmModal(msg) {
+  return showModal({
+    title: '确认操作',
+    body: '<p style="margin:0;font-size:.95rem;line-height:1.6">' + msg + '</p>',
+    footer: [
+      { label: '取消', value: 'false' },
+      { label: '确定', value: 'true', primary: true }
+    ]
+  }).then(function(v) { return v === 'true'; }).catch(function() { return false; });
+}
+
+function alertModal(msg) {
+  return showModal({
+    title: '提示',
+    body: '<p style="margin:0;font-size:.95rem;line-height:1.6">' + msg + '</p>',
+    footer: [
+      { label: '确定', value: 'true', primary: true }
+    ]
+  }).catch(function() {});
+}
+
+function promptModal(msg, defaultValue) {
+  var prev = document.querySelector('.modal-overlay');
+  if (prev) prev.remove();
+  return new Promise(function(resolve) {
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:440px">' +
+        '<div class="modal-header">输入<button class="modal-close-btn">&times;</button></div>' +
+        '<div class="modal-body" style="font-size:.95rem;line-height:1.6">' +
+          '<p style="margin:0 0 8px">' + msg + '</p>' +
+          '<input type="text" id="modal-prompt-input" value="' + esc(defaultValue || '') + '" style="width:100%;box-sizing:border-box">' +
+        '</div>' +
+        '<div class="modal-footer">' +
+          '<button class="btn btn-outline btn-sm modal-cancel-btn">取消</button>' +
+          '<button class="btn btn-primary btn-sm modal-ok-btn">确定</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    var input = overlay.querySelector('#modal-prompt-input');
+    input.focus();
+    input.select();
+    function cleanup(val) {
+      overlay.remove();
+      resolve(val);
+    }
+    overlay.querySelector('.modal-close-btn').addEventListener('click', function() { cleanup(null); });
+    overlay.querySelector('.modal-cancel-btn').addEventListener('click', function() { cleanup(null); });
+    overlay.querySelector('.modal-ok-btn').addEventListener('click', function() { cleanup(input.value); });
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) cleanup(null); });
+    input.addEventListener('keydown', function(e) { if (e.key === 'Enter') cleanup(input.value); });
+  });
+}

@@ -641,7 +641,7 @@ tbody tr:hover { background: #f8fbff; }
 .modal-header { display: flex; align-items: center; justify-content: space-between; padding: .9rem 1.1rem; border-bottom: 1px solid var(--border); font-weight: 800; font-size: .95rem; }
 .modal-header button { background: none; border: none; font-size: 1.25rem; color: var(--text-muted); cursor: pointer; line-height: 1; padding: 0; }
 .modal-header button:hover { color: var(--text); }
-.modal-body { padding: 1.1rem; overflow-y: auto; }
+.modal-body { padding: 1.1rem; overflow: visible; }
 .modal-footer { padding: .8rem 1.1rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: .5rem; }
 
 /* ===== Scrollbar ===== */
@@ -673,3 +673,42 @@ tbody tr:hover { background: #f8fbff; }
   .content { width: 100%; max-width: 100%; min-height: auto; margin-left: 0; padding: 1rem; }
   .container { padding: 1rem; }
 }
+
+/* 团队空间 — 标签选择器（替代原先的复选框） */
+.sf-tag-selector {
+  position: relative; width: 100%;
+}
+.sf-tag-chips {
+  display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .3rem;
+}
+.sf-tag-chips .chip {
+  display: inline-flex; align-items: center; gap: .25rem;
+  background: var(--primary); color: #fff; padding: .1rem .5rem .1rem .6rem;
+  border-radius: var(--radius); font-size: .8125rem; line-height: 1.6;
+}
+.sf-tag-chips .chip .chip-remove {
+  cursor: pointer; font-weight: bold; font-size: .9rem; line-height: 1; opacity: .75;
+  background: none; border: none; color: #fff; padding: 0; margin: 0;
+}
+.sf-tag-chips .chip .chip-remove:hover { opacity: 1; }
+.sf-tag-input {
+  width: 100%; padding: .35rem .5rem;
+  border: 1px solid var(--border); border-radius: var(--radius); font-size: .875rem;
+  box-sizing: border-box;
+}
+.sf-tag-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37,99,235,.2); }
+.sf-tag-dropdown {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 100;
+  max-height: 10rem; overflow-y: auto;
+  border: 1px solid var(--border); border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--bg); box-shadow: 0 4px 12px rgba(0,0,0,.1);
+  display: none;
+}
+.sf-tag-dropdown.open { display: block; }
+.sf-tag-dropdown .sf-tag-option {
+  padding: .35rem .6rem; cursor: pointer; font-size: .875rem;
+}
+.sf-tag-dropdown .sf-tag-option:hover,
+.sf-tag-dropdown .sf-tag-option.highlighted { background: var(--bg-alt, #f5f5f5); color: var(--primary); }
+.sf-tag-dropdown .sf-tag-option.disabled { color: var(--text-muted); cursor: default; }

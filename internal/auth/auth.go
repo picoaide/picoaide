@@ -230,6 +230,61 @@ func syncSchema() error {
   // 迁移：旧数据库 groups 表没有 parent_id 列
   engine.Exec(`ALTER TABLE groups ADD COLUMN parent_id INTEGER REFERENCES groups(id) ON DELETE SET NULL`)
 
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS shared_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    is_public INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT NOT NULL DEFAULT 'system',
+    created_at DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
+  )`)
+  if err != nil {
+    return err
+  }
+  // 迁移：旧数据库 shared_folders 表可能缺少某些列
+  engine.Exec(`ALTER TABLE shared_folders ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
+  engine.Exec(`ALTER TABLE shared_folders ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0`)
+  engine.Exec(`ALTER TABLE shared_folders ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'`)
+  engine.Exec(`ALTER TABLE shared_folders ADD COLUMN created_at TEXT NOT NULL DEFAULT '2000-01-01 00:00:00'`)
+  engine.Exec(`ALTER TABLE shared_folders ADD COLUMN updated_at TEXT NOT NULL DEFAULT '2000-01-01 00:00:00'`)
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS shared_folder_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    folder_id INTEGER NOT NULL REFERENCES shared_folders(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    UNIQUE(folder_id, group_id)
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_sfg_folder_id ON shared_folder_groups(folder_id)`)
+  if err != nil {
+    return err
+  }
+  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_sfg_group_id ON shared_folder_groups(group_id)`)
+  if err != nil {
+    return err
+  }
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS shared_folder_mounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    folder_id INTEGER NOT NULL REFERENCES shared_folders(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    mounted INTEGER NOT NULL DEFAULT 0,
+    checked_at DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(folder_id, username)
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_sfm_folder_id ON shared_folder_mounts(folder_id)`)
+  if err != nil {
+    return err
+  }
+  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_sfm_username ON shared_folder_mounts(username)`)
+  if err != nil {
+    return err
+  }
+
   return nil
 }
 

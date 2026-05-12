@@ -29,7 +29,7 @@ export async function init(ctx) {
 
     tbody.querySelectorAll('[data-reset]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('确定重置 ' + btn.dataset.reset + ' 的密码？')) return;
+        if (!await confirmModal('确定重置 ' + btn.dataset.reset + ' 的密码？')) return;
         showMsg('#sa-msg', '重置中...', true);
         const res = await Api.post('/api/admin/superadmins/reset', { username: btn.dataset.reset });
         if (res.success) {
@@ -42,7 +42,7 @@ export async function init(ctx) {
 
     tbody.querySelectorAll('[data-del]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('确定删除超管 ' + btn.dataset.del + '？')) return;
+        if (!await confirmModal('确定删除超管 ' + btn.dataset.del + '？')) return;
         const res = await Api.post('/api/admin/superadmins/delete', { username: btn.dataset.del });
         showMsg('#sa-msg', res.message || res.error, res.success);
         if (res.success) loadAdmins();
@@ -69,7 +69,7 @@ export async function init(ctx) {
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
     overlay.querySelector('#sa-create-btn').addEventListener('click', async () => {
       const name = ctx.$('#sa-name').value.trim();
-      if (!name) { alert('请输入用户名'); return; }
+      if (!name) { await alertModal('请输入用户名'); return; }
       showMsg('#sa-modal-msg', '创建中...', true);
       const res = await Api.post('/api/admin/superadmins/create', { username: name });
       if (res.success) {

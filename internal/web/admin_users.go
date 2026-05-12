@@ -400,6 +400,9 @@ func (s *Server) handleAdminUserDelete(c *gin.Context) {
     return
   }
 
+  // 清理共享文件夹挂载记录
+  auth.DeleteSharedFolderMountsByUser(username)
+
   logger.Audit("user.delete", "username", username, "operator", s.getSessionUser(c))
   writeSuccess(c, "用户 "+username+" 已删除并归档")
 }

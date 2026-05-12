@@ -103,7 +103,7 @@ export async function init(ctx) {
           return;
         }
         if (btn.dataset.action === 'delete-user') {
-          if (!confirm('确定删除普通用户 ' + btn.dataset.user + '？用户目录会被归档。')) return;
+          if (!await confirmModal('确定删除普通用户 ' + btn.dataset.user + '？用户目录会被归档。')) return;
           const res = await Api.post('/api/admin/users/delete', { username: btn.dataset.user });
           showMsg('#users-msg', res.message || res.error, res.success);
           if (res.success) loadUsers();
@@ -115,7 +115,7 @@ export async function init(ctx) {
           return;
         }
         if (btn.dataset.action === 'debug') {
-          if (!confirm('确定要以 Picoclaw debug 模式重启用户 ' + btn.dataset.user + ' 的容器吗？日志会更详细。')) return;
+          if (!await confirmModal('确定要以 Picoclaw debug 模式重启用户 ' + btn.dataset.user + ' 的容器吗？日志会更详细。')) return;
         }
         const res = await Api.post('/api/admin/container/' + btn.dataset.action, { username: btn.dataset.user });
         showMsg('#users-msg', res.message || res.error, res.success);

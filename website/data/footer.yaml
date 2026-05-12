@@ -3,8 +3,12 @@ columns:
     links:
       - label: 文档
         href: /docs/
-      - label: 快速开始
+      - label: 快速入门
         href: /docs/quick-start/
+      - label: 管理员手册
+        href: /docs/admin-guide/
+      - label: 用户指南
+        href: /docs/web-panel/
       - label: 博客
         href: /blog/
   - title: 社区

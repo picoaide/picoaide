@@ -64,25 +64,25 @@ features:
       description: 技能仓库支持 Git 导入、按组部署、按用户部署和上传安装，适合企业内部分层治理。
 docs:
   kicker: 文档入口
-  title: 按照真实使用顺序组织
-  summary: 先看安装与架构，再看配置、客户端、技能和 API。文档直接对应当前代码实现，不堆叠空泛概念。
+  title: 按角色分层组织
+  summary: 管理员线和用户线文档分开，各自覆盖完整的使用流程和最佳实践。
   items:
-    - title: 快速开始
-      description: 安装包、初始化向导、systemd 服务、插件接入和基础验证。
+    - title: 快速入门
+      description: 安装、初始化、systemd 服务和基础验证。
       href: /docs/quick-start/
       kicker: Start here
-    - title: 架构概览
-      description: 服务端、容器、MCP 中继、浏览器扩展、桌面客户端之间的关系。
+    - title: 架构设计
+      description: 设计哲学、五大设计决策和组件关系。
       href: /docs/architecture/
       kicker: System design
-    - title: 配置参考
-      description: 认证、技能仓库、PicoClaw 适配包、目录结构和安全配置。
-      href: /docs/configuration/
-      kicker: Ops
-    - title: 接口参考
-      description: 认证、文件、MCP、用户、技能、镜像、分组和白名单接口。
-      href: /docs/api/
-      kicker: API
+    - title: 管理后台操作指南
+      description: 用户、容器、镜像、技能和用户组的完整管理流程。
+      href: /docs/admin-guide/
+      kicker: Admin
+    - title: 用户指南
+      description: Web 面板、浏览器扩展、桌面客户端和 MCP 集成。
+      href: /docs/web-panel/
+      kicker: User
 release:
   kicker: 开源发布
   title: 适合企业内部署的 AI 工作底座
