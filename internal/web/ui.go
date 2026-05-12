@@ -95,7 +95,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
   r.GET("/admin/", func(c *gin.Context) {
     c.Redirect(http.StatusMovedPermanently, "/admin/dashboard")
   })
-  adminSections := []string{"dashboard", "superadmins", "users", "groups", "images", "picoclaw", "models", "skills", "auth", "settings"}
+  adminSections := []string{"dashboard", "superadmins", "users", "groups", "images", "picoclaw", "models", "skills", "auth", "teamspace", "settings"}
   for _, section := range adminSections {
     sectionPath := "/admin/" + section
     r.GET(sectionPath, func(c *gin.Context) {

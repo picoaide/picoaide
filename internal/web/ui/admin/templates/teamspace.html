@@ -1,0 +1,89 @@
+<section class="page-header">
+  <div>
+    <div class="page-kicker">团队协作</div>
+    <h2>团队空间</h2>
+    <p>管理共享文件夹，为团队成员提供数据协作目录。</p>
+  </div>
+  <button class="btn btn-primary" id="sf-create-btn">新建共享文件夹</button>
+</section>
+
+<!-- 新建表单（顶部 inline） -->
+<div id="sf-create-area" class="card hidden">
+  <div class="card-header">新建共享文件夹</div>
+  <div class="field"><label>名称 *</label><input type="text" id="sf-create-name" placeholder="全局唯一"></div>
+  <div class="field"><label>描述</label><textarea id="sf-create-desc" rows="2" placeholder="可选"></textarea></div>
+  <div class="field">
+    <label>类型</label>
+    <label class="toggle-switch">
+      <input type="checkbox" id="sf-create-public">
+      <span class="toggle-switch-control"></span>
+      <span class="toggle-switch-label">公共共享（所有用户可见）</span>
+    </label>
+  </div>
+  <div class="field">
+    <label>关联用户组（选填）</label>
+    <div class="sf-tag-selector">
+      <div class="sf-tag-chips" id="sf-create-chips"></div>
+      <input type="text" class="sf-tag-input" id="sf-create-input" placeholder="搜索用户组...">
+      <div class="sf-tag-dropdown" id="sf-create-dropdown"></div>
+    </div>
+  </div>
+  <div id="sf-create-msg" class="msg"></div>
+  <div class="toolbar">
+    <button class="btn btn-primary" id="sf-create-save">保存</button>
+    <button class="btn btn-outline" id="sf-create-cancel">取消</button>
+  </div>
+</div>
+
+<!-- 列表+详情 -->
+<div class="surface-panel split-panel">
+  <aside class="split-sidebar">
+    <div class="toolbar" style="margin-bottom:.6rem">
+      <div>
+        <div class="toolbar-title">共享文件夹</div>
+        <div class="toolbar-subtitle">选择一个查看详情</div>
+      </div>
+    </div>
+    <div id="sf-list" class="nav-list"></div>
+  </aside>
+
+  <section class="split-main">
+    <div id="sf-detail-placeholder" class="text-muted text-center" style="padding:3rem">请选择一个共享文件夹</div>
+
+    <div id="sf-detail" class="hidden">
+      <div class="toolbar">
+        <div>
+          <div class="toolbar-title">
+            <span id="sf-view-name"></span>
+            <span id="sf-view-badges"></span>
+          </div>
+          <div class="toolbar-subtitle" id="sf-view-desc"></div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-sm btn-outline" id="sf-btn-edit">编辑</button>
+          <button class="btn btn-sm btn-outline" id="sf-btn-check">检查挂载状态</button>
+          <button class="btn btn-sm btn-primary" id="sf-btn-mount">一键挂载</button>
+          <button class="btn btn-sm btn-danger" id="sf-btn-delete">删除</button>
+        </div>
+      </div>
+      <div id="sf-view-msg" class="msg"></div>
+
+      <div class="grid-3 mb-1">
+        <div class="stat-card"><div class="stat-value" id="sf-stat-members">-</div><div class="stat-label">成员数</div></div>
+        <div class="stat-card"><div class="stat-value" id="sf-stat-mounted">-</div><div class="stat-label">已挂载</div></div>
+        <div class="stat-card"><div class="stat-value" id="sf-stat-unmounted">-</div><div class="stat-label">未挂载</div></div>
+      </div>
+
+      <h4>关联用户组</h4>
+      <div id="sf-view-groups" class="chip-list"></div>
+
+      <h4>成员列表</h4>
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead><tr><th>用户名</th><th>挂载状态</th><th>最后检查</th><th>操作</th></tr></thead>
+          <tbody id="sf-member-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>

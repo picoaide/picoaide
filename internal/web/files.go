@@ -12,6 +12,7 @@ import (
 
   "github.com/gin-gonic/gin"
 
+  "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
 )
@@ -73,6 +74,53 @@ func (s *Server) openWorkspaceRoot(username string) (*os.Root, error) {
   return os.OpenRoot(workspaceDir)
 }
 
+// fileRoot 文件操作目标（工作区或共享文件夹）
+type fileRoot struct {
+  root     *os.Root
+  safePath string
+  isShare  bool // 共享文件夹为只读
+}
+
+// resolveFileRoot 解析文件路径，返回正确的 os.Root
+// 路径以 share/<名称>/ 开头时，路由到共享文件夹目录
+func (s *Server) resolveFileRoot(username, relPath string) (*fileRoot, error) {
+  relPath = strings.TrimPrefix(relPath, "/")
+  parts := strings.SplitN(relPath, "/", 3)
+
+  if parts[0] == "share" {
+    // 访问共享文件夹
+    shareName := parts[1]
+    sf, err := auth.GetSharedFolderByName(shareName)
+    if err != nil {
+      return nil, fmt.Errorf("共享文件夹不存在")
+    }
+    ok, err := auth.IsUserInSharedFolder(sf.ID, username)
+    if err != nil || !ok {
+      return nil, fmt.Errorf("无权限访问此共享文件夹")
+    }
+    shareDir := filepath.Join(filepath.Dir(s.cfg.UsersRoot), "shared", shareName)
+    if err := os.MkdirAll(shareDir, 0755); err != nil {
+      return nil, err
+    }
+    root, err := os.OpenRoot(shareDir)
+    if err != nil {
+      return nil, err
+    }
+    subPath := "."
+    if len(parts) == 3 && parts[2] != "" {
+      subPath = parts[2]
+    }
+    return &fileRoot{root: root, safePath: subPath, isShare: true}, nil
+  }
+
+  // 默认：工作区
+  root, err := s.openWorkspaceRoot(username)
+  if err != nil {
+    return nil, err
+  }
+  return &fileRoot{root: root, safePath: safeWorkspaceRelPath(relPath)}, nil
+}
+
 // handleFiles 文件列表 API
 func (s *Server) handleFiles(c *gin.Context) {
   username := s.requireRegularUser(c)
@@ -82,21 +130,80 @@ func (s *Server) handleFiles(c *gin.Context) {
 
   relPath := c.Query("path")
 
-  root, err := s.openWorkspaceRoot(username)
-  if err != nil {
-    writeError(c, http.StatusBadRequest, "无效路径")
+  // 根目录特殊处理：合并工作区文件和共享文件夹
+  if relPath == "" || relPath == "." || relPath == "/" {
+    root, err := s.openWorkspaceRoot(username)
+    if err != nil {
+      writeError(c, http.StatusBadRequest, "无效路径")
+      return
+    }
+    defer root.Close()
+
+    dirEntries, err := fs.ReadDir(root.FS(), ".")
+    if err != nil {
+      writeError(c, http.StatusInternalServerError, "读取目录失败")
+      return
+    }
+
+    var fileEntries []FileEntry
+    for _, e := range dirEntries {
+      fi, _ := e.Info()
+      if fi == nil {
+        continue
+      }
+      fileEntries = append(fileEntries, FileEntry{
+        Name:    e.Name(),
+        IsDir:   e.IsDir(),
+        Size:    fi.Size(),
+        SizeStr: util.FormatSize(fi.Size()),
+        ModTime: fi.ModTime().Format("2006-01-02 15:04"),
+        RelPath: e.Name(),
+      })
+    }
+
+    // 追加用户可访问的共享文件夹
+    folders, _ := auth.GetAccessibleSharedFolders(username)
+    for _, sf := range folders {
+      fileEntries = append(fileEntries, FileEntry{
+        Name:    "share/" + sf.Name,
+        IsDir:   true,
+        SizeStr: "共享文件夹",
+        ModTime: "-",
+        RelPath: "share/" + sf.Name,
+      })
+    }
+
+    sort.Slice(fileEntries, func(i, j int) bool {
+      if fileEntries[i].IsDir != fileEntries[j].IsDir {
+        return fileEntries[i].IsDir
+      }
+      return strings.ToLower(fileEntries[i].Name) < strings.ToLower(fileEntries[j].Name)
+    })
+
+    writeJSON(c, http.StatusOK, filesResponse{
+      Success: true,
+      Path:    relPath,
+      Entries: fileEntries,
+      Breadcrumb: []Crumb{{Name: "工作区", Path: ""}},
+    })
     return
   }
-  defer root.Close()
-  safeRelPath := safeWorkspaceRelPath(relPath)
 
-  info, err := root.Stat(safeRelPath)
+  // 非根路径：用 resolveFileRoot 路由到正确目录
+  fr, err := s.resolveFileRoot(username, relPath)
+  if err != nil {
+    writeError(c, http.StatusBadRequest, err.Error())
+    return
+  }
+  defer fr.root.Close()
+
+  info, err := fr.root.Stat(fr.safePath)
   if err != nil || !info.IsDir() {
     writeError(c, http.StatusNotFound, "目录不存在")
     return
   }
 
-  dirEntries, err := fs.ReadDir(root.FS(), safeRelPath)
+  dirEntries, err := fs.ReadDir(fr.root.FS(), fr.safePath)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "读取目录失败")
     return
@@ -114,7 +221,7 @@ func (s *Server) handleFiles(c *gin.Context) {
       Size:    fi.Size(),
       SizeStr: util.FormatSize(fi.Size()),
       ModTime: fi.ModTime().Format("2006-01-02 15:04"),
-      RelPath: filepath.Join(safeRelPath, e.Name()),
+      RelPath: filepath.Join(relPath, e.Name()),
     })
   }
 
@@ -166,15 +273,19 @@ func (s *Server) handleFileUpload(c *gin.Context) {
 
   relPath := c.PostForm("path")
 
-  root, err := s.openWorkspaceRoot(username)
+  fr, err := s.resolveFileRoot(username, relPath)
   if err != nil {
-    writeError(c, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  defer root.Close()
-  safeRelPath := safeWorkspaceRelPath(relPath)
+  defer fr.root.Close()
 
-  info, err := root.Stat(safeRelPath)
+  if fr.isShare {
+    writeError(c, http.StatusForbidden, "共享文件夹不支持上传操作")
+    return
+  }
+
+  info, err := fr.root.Stat(fr.safePath)
   if err != nil || !info.IsDir() {
     writeError(c, http.StatusBadRequest, "目标目录不存在")
     return
@@ -188,7 +299,7 @@ func (s *Server) handleFileUpload(c *gin.Context) {
   defer file.Close()
 
   filename := filepath.Base(header.Filename)
-  dst, err := root.OpenFile(filepath.Join(safeRelPath, filename), os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+  dst, err := fr.root.OpenFile(filepath.Join(fr.safePath, filename), os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "创建文件失败")
     return
@@ -212,29 +323,28 @@ func (s *Server) handleFileDownload(c *gin.Context) {
 
   relPath := c.Query("path")
 
-  root, err := s.openWorkspaceRoot(username)
+  fr, err := s.resolveFileRoot(username, relPath)
   if err != nil {
-    writeError(c, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  defer root.Close()
-  safeRelPath := safeWorkspaceRelPath(relPath)
+  defer fr.root.Close()
 
-  info, err := root.Stat(safeRelPath)
+  info, err := fr.root.Stat(fr.safePath)
   if err != nil || info.IsDir() {
     writeError(c, http.StatusNotFound, "文件不存在")
     return
   }
 
-  file, err := root.Open(safeRelPath)
+  file, err := fr.root.Open(fr.safePath)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "读取文件失败")
     return
   }
   defer file.Close()
 
-  c.Writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(safeRelPath)))
-  http.ServeContent(c.Writer, c.Request, filepath.Base(safeRelPath), info.ModTime(), file)
+  c.Writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(fr.safePath)))
+  http.ServeContent(c.Writer, c.Request, filepath.Base(fr.safePath), info.ModTime(), file)
 }
 
 // handleFileDelete 删除文件或目录
@@ -250,30 +360,34 @@ func (s *Server) handleFileDelete(c *gin.Context) {
 
   relPath := c.PostForm("path")
 
-  root, err := s.openWorkspaceRoot(username)
+  fr, err := s.resolveFileRoot(username, relPath)
   if err != nil {
-    writeError(c, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  defer root.Close()
-  safeRelPath := safeWorkspaceRelPath(relPath)
+  defer fr.root.Close()
 
-  if safeRelPath == "." {
+  if fr.isShare {
+    writeError(c, http.StatusForbidden, "共享文件夹不支持删除操作")
+    return
+  }
+
+  if fr.safePath == "." {
     writeError(c, http.StatusBadRequest, "不能删除工作区根目录")
     return
   }
 
-  info, err := root.Stat(safeRelPath)
+  info, err := fr.root.Stat(fr.safePath)
   if err != nil {
     writeError(c, http.StatusNotFound, "文件不存在")
     return
   }
 
-  name := filepath.Base(safeRelPath)
+  name := filepath.Base(fr.safePath)
   if info.IsDir() {
-    err = root.RemoveAll(safeRelPath)
+    err = fr.root.RemoveAll(fr.safePath)
   } else {
-    err = root.Remove(safeRelPath)
+    err = fr.root.Remove(fr.safePath)
   }
   if err != nil {
     writeError(c, http.StatusInternalServerError, "删除失败")
@@ -302,15 +416,19 @@ func (s *Server) handleFileMkdir(c *gin.Context) {
     return
   }
 
-  root, err := s.openWorkspaceRoot(username)
+  fr, err := s.resolveFileRoot(username, relPath)
   if err != nil {
-    writeError(c, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  defer root.Close()
-  safeRelPath := safeWorkspaceRelPath(relPath)
+  defer fr.root.Close()
 
-  if err := root.Mkdir(filepath.Join(safeRelPath, name), 0755); err != nil {
+  if fr.isShare {
+    writeError(c, http.StatusForbidden, "共享文件夹不支持创建目录操作")
+    return
+  }
+
+  if err := fr.root.Mkdir(filepath.Join(fr.safePath, name), 0755); err != nil {
     writeError(c, http.StatusInternalServerError, "创建目录失败")
     return
   }
@@ -331,21 +449,20 @@ func (s *Server) handleFileEditGet(c *gin.Context) {
     return
   }
 
-  root, err := s.openWorkspaceRoot(username)
+  fr, err := s.resolveFileRoot(username, relPath)
   if err != nil {
-    writeError(c, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  defer root.Close()
-  safeRelPath := safeWorkspaceRelPath(relPath)
+  defer fr.root.Close()
 
   // 只允许编辑文本文件
-  if !util.IsTextFile(safeRelPath) {
+  if !util.IsTextFile(fr.safePath) {
     writeError(c, http.StatusBadRequest, "不支持的文件类型")
     return
   }
 
-  file, err := root.Open(safeRelPath)
+  file, err := fr.root.Open(fr.safePath)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "读取文件失败")
     return
@@ -360,7 +477,7 @@ func (s *Server) handleFileEditGet(c *gin.Context) {
 
   writeJSON(c, http.StatusOK, editResponse{
     Success:  true,
-    Filename: filepath.Base(safeRelPath),
+    Filename: filepath.Base(fr.safePath),
     Content:  string(data),
     Path:     relPath,
   })
@@ -382,16 +499,20 @@ func (s *Server) handleFileEditSave(c *gin.Context) {
     return
   }
 
-  root, err := s.openWorkspaceRoot(username)
+  fr, err := s.resolveFileRoot(username, relPath)
   if err != nil {
-    writeError(c, http.StatusBadRequest, "无效路径")
+    writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  defer root.Close()
-  safeRelPath := safeWorkspaceRelPath(relPath)
+  defer fr.root.Close()
+
+  if fr.isShare {
+    writeError(c, http.StatusForbidden, "共享文件夹不支持编辑保存操作")
+    return
+  }
 
   // 只允许编辑文本文件
-  if !util.IsTextFile(safeRelPath) {
+  if !util.IsTextFile(fr.safePath) {
     writeError(c, http.StatusBadRequest, "不支持的文件类型")
     return
   }
@@ -401,7 +522,7 @@ func (s *Server) handleFileEditSave(c *gin.Context) {
     return
   }
 
-  file, err := root.OpenFile(safeRelPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+  file, err := fr.root.OpenFile(fr.safePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "保存文件失败")
     return
@@ -412,5 +533,5 @@ func (s *Server) handleFileEditSave(c *gin.Context) {
     return
   }
 
-  writeSuccess(c, fmt.Sprintf("文件 %s 已保存", filepath.Base(safeRelPath)))
+  writeSuccess(c, fmt.Sprintf("文件 %s 已保存", filepath.Base(fr.safePath)))
 }

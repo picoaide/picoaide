@@ -119,10 +119,47 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "组名不能为空")
     return
   }
+  // 删除组之前获取其成员和 ID，用于后续共享文件夹清理
+  gid, err := auth.GetGroupID(name)
+  groupMembers := []string{}
+  if err == nil {
+    groupMembers, _ = auth.GetGroupMembersForDeploy(name)
+  }
+
   if err := auth.DeleteGroup(name); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
+
+  // 共享文件夹清理：移除该组的关联
+  if gid > 0 {
+    affectedFolders, _ := auth.RemoveGroupFromAllSharedFolders(gid)
+    // 如果有孤立文件夹，通知管理员
+    if len(affectedFolders) > 0 {
+      // 需要重启的用户 = 原组成员中失去共享访问的用户
+      restartUsers := []string{}
+      for _, username := range groupMembers {
+        needsRestart := false
+        for _, folderID := range affectedFolders {
+          ok, _ := auth.IsUserInSharedFolder(folderID, username)
+          if !ok {
+            needsRestart = true
+            break
+          }
+        }
+        if needsRestart {
+          restartUsers = append(restartUsers, username)
+        }
+      }
+      restartUsers = uniqueStrings(restartUsers)
+      if len(restartUsers) > 0 {
+        enqueueTask("mount-shared-folder", restartUsers, func(username string) error {
+          return s.recreateUserContainerWithSharedMounts(username)
+        })
+      }
+    }
+  }
+
   writeSuccess(c, "组 "+name+" 已删除")
 }
 
@@ -161,6 +198,18 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
+
+  // 检查共享文件夹影响，自动重启新加入成员的容器
+  gid, err := auth.GetGroupID(groupName)
+  if err == nil {
+    affected, _ := auth.OnGroupMembersAdded(gid, usernames)
+    if len(affected) > 0 {
+      enqueueTask("mount-shared-folder", affected, func(username string) error {
+        return s.recreateUserContainerWithSharedMounts(username)
+      })
+    }
+  }
+
   writeSuccess(c, fmt.Sprintf("已添加 %d 个用户到组 %s", len(usernames), groupName))
 }
 
@@ -201,10 +250,23 @@ func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "组名和用户名不能为空")
     return
   }
+  gid, _ := auth.GetGroupID(groupName)
+
   if err := auth.RemoveUserFromGroup(groupName, username); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
+
+  // 检查共享文件夹影响，自动重启失去访问的用户容器
+  if gid > 0 {
+    affected, _ := auth.OnGroupMembersRemoved(gid, username)
+    if len(affected) > 0 {
+      enqueueTask("mount-shared-folder", affected, func(u string) error {
+        return s.recreateUserContainerWithSharedMounts(u)
+      })
+    }
+  }
+
   writeSuccess(c, "已从组 "+groupName+" 移除 "+username)
 }
 

@@ -52,3 +52,51 @@ function showMsg(el, text, ok) {
   el.className = text ? ('msg ' + (ok ? 'msg-ok' : 'msg-err')) : 'msg';
   if (text) setTimeout(function() { el.textContent = ''; el.className = 'msg'; }, 4000);
 }
+
+// 模态框组件：showModal({title, body, footer, width}) → Promise<buttonValue>
+// body: HTML string
+// footer: [{label, value, primary, danger}]
+// 返回 Promise，resolve(buttonValue) 或 reject('cancel')
+function showModal(opts) {
+  var prev = document.querySelector('.modal-overlay');
+  if (prev) prev.remove();
+  return new Promise(function(resolve, reject) {
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    var footerHtml = '';
+    if (opts.footer) {
+      footerHtml = '<div class="modal-footer">' + opts.footer.map(function(b) {
+        var cls = 'btn btn-sm';
+        if (b.primary) cls += ' btn-primary';
+        else if (b.danger) cls += ' btn-danger';
+        else cls += ' btn-outline';
+        return '<button class="' + cls + '" data-value="' + esc(b.value) + '">' + esc(b.label) + '</button>';
+      }).join('') + '</div>';
+    }
+    var widthStyle = opts.width ? ' style="max-width:' + opts.width + '"' : '';
+    overlay.innerHTML =
+      '<div class="modal"' + widthStyle + '>' +
+        '<div class="modal-header">' + esc(opts.title || '') + '<button class="modal-close-btn">&times;</button></div>' +
+        '<div class="modal-body">' + (opts.body || '') + '</div>' +
+        footerHtml +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    function close(val) {
+      overlay.remove();
+      if (val !== undefined) resolve(val);
+      else reject('cancel');
+    }
+
+    overlay.querySelector('.modal-close-btn').addEventListener('click', function() { close(); });
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) close();
+    });
+    overlay.querySelectorAll('.modal-footer .btn[data-value]').forEach(function(btn) {
+      btn.addEventListener('click', function() { close(btn.dataset.value); });
+    });
+    document.addEventListener('keydown', function handler(e) {
+      if (e.key === 'Escape') { close(); document.removeEventListener('keydown', handler); }
+    });
+  });
+}

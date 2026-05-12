@@ -164,7 +164,7 @@ func (s *Server) handleContainerAction(c *gin.Context, action string) {
       auth.UpdateContainerID(username, "")
     }
     ud := user.UserDir(s.cfg, username)
-    cid, createErr := dockerpkg.CreateContainerWithOptions(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit, true)
+    cid, createErr := dockerpkg.CreateContainerWithOptions(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit, true, nil)
     if createErr != nil {
       writeError(c, http.StatusInternalServerError, "创建调试容器失败: "+createErr.Error())
       return
