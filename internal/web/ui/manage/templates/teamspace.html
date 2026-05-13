@@ -1,3 +1,17 @@
+<style>
+.sf-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:.75rem; margin-top:.5rem }
+.sf-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow-sm); cursor:pointer; transition:box-shadow .15s,border-color .15s; display:flex; flex-direction:column }
+.sf-card:hover { box-shadow:0 2px 8px rgba(0,0,0,.08); border-color:var(--primary-light,#a5b4fc) }
+.sf-card-icon { font-size:1.6rem; line-height:1; padding:.85rem .85rem 0 }
+.sf-card-body { flex:1; padding:.5rem .85rem }
+.sf-card-title { font-weight:650; font-size:.9rem; color:var(--text); display:flex; align-items:center; gap:.4rem; margin-bottom:.2rem; flex-wrap:wrap }
+.sf-card-title .badge { font-size:.68rem }
+.sf-card-desc { font-size:.78rem; color:var(--text-muted); line-height:1.45; display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden }
+.sf-card-footer { display:flex; align-items:center; justify-content:space-between; padding:.5rem .85rem .75rem; border-top:1px solid var(--border-light) }
+.sf-card-members { font-size:.78rem; color:var(--text-muted) }
+@media(max-width:900px){.sf-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.sf-grid{grid-template-columns:1fr}}
+</style>
 <div class="card">
   <div class="card-header">团队空间</div>
   <p class="text-muted mb-1">共享文件夹挂载在容器内的 <code>workspace/share/&lt;名称&gt;/</code> 目录下，AI 助手可以直接读写这些文件以实现团队协作。</p>

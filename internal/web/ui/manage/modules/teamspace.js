@@ -20,17 +20,18 @@ export async function init(ctx) {
         return;
       }
 
-      list.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:.5rem">' + folders.map(function(f) {
+      list.innerHTML = '<div class="sf-grid">' + folders.map(function(f) {
         var desc = f.description || '';
         if (desc.length > 100) desc = desc.substring(0, 100) + '…';
         var typeLabel = f.is_public ? '<span class="badge badge-ok">公共</span>' : '<span class="badge badge-muted">组共享</span>';
-        return '<div class="card" style="cursor:pointer;min-width:220px;flex:1;margin-bottom:0" data-folder="' + esc(f.name) + '">' +
-          '<div class="card-header" style="display:flex;align-items:center;gap:.5rem">' +
-            '📁 ' + esc(f.name) + ' ' + typeLabel +
+        return '<div class="sf-card" data-folder="' + esc(f.name) + '">' +
+          '<div class="sf-card-icon">📁</div>' +
+          '<div class="sf-card-body">' +
+            '<div class="sf-card-title">' + esc(f.name) + typeLabel + '</div>' +
+            (desc ? '<div class="sf-card-desc">' + esc(desc) + '</div>' : '') +
           '</div>' +
-          (desc ? '<div class="text-sm text-muted" style="padding:0 .75rem">' + esc(desc) + '</div>' : '') +
-          '<div class="toolbar" style="padding:.4rem .75rem .6rem">' +
-            '<span class="text-sm">' + f.member_count + ' 人</span>' +
+          '<div class="sf-card-footer">' +
+            '<span class="sf-card-members">' + f.member_count + ' 人</span>' +
             '<button class="btn btn-sm btn-outline">查看成员</button>' +
           '</div>' +
         '</div>';
