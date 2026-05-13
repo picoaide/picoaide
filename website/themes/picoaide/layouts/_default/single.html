@@ -2,10 +2,10 @@
 <div class="page-shell">
   <div class="container">
     <article class="single-page">
-      <header class="page-hero page-hero--compact">
+      <header class="page-hero" style="margin-bottom:0">
         <div class="eyebrow">{{ .Section | title }}</div>
         <h1>{{ .Title }}</h1>
-        <div class="post-card-meta">
+        <div class="post-card-meta" style="margin-top:12px">
           {{ if .Date }}<time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006-01-02" }}</time>{{ end }}
           {{ with .Params.author }}<span>{{ . }}</span>{{ end }}
           {{ with .Params.tags }}<span>{{ delimit . ", " }}</span>{{ end }}
@@ -20,7 +20,7 @@
       <footer class="single-footer">
         <div class="single-tags">
           {{ range .Params.tags }}
-            <span class="badge">{{ . }}</span>
+            <span>{{ . }}</span>
           {{ end }}
         </div>
       </footer>

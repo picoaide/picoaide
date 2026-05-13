@@ -1,30 +1,22 @@
 {{ define "content" }}
 <div class="docs-shell">
+  <button class="docs-sidebar-toggle" id="docs-sidebar-toggle" aria-label="{{ i18n "toggle_docs_nav" }}" aria-expanded="false">
+    <span class="docs-sidebar-toggle-icon">
+      <span></span><span></span><span></span>
+    </span>
+    <span>{{ i18n "mobile_nav" }}</span>
+  </button>
+
   {{ partial "docs-sidebar.html" . }}
 
   <div class="docs-main-area">
-    <div class="container docs-container">
-      <article class="docs-article">
+    <div class="container docs-container" style="padding-inline:0">
+      <article>
         <header class="docs-header">
-          <button class="docs-sidebar-toggle" id="docs-sidebar-toggle" aria-label="{{ i18n "toggle_docs_nav" }}" aria-expanded="false">
-            <span class="docs-sidebar-toggle-icon">
-              <span></span>
-              <span></span>
-              <span></span>
-            </span>
-            <span>{{ i18n "mobile_nav" }}</span>
-          </button>
-
           <nav class="docs-breadcrumb" aria-label="面包屑导航">
             <a href="{{ "/" | relURL }}">{{ .Site.Title }}</a>
             <span>/</span>
             <a href="{{ "/docs/" | relURL }}">{{ .CurrentSection.Title }}</a>
-            {{ if .CurrentSection }}
-              {{ if ne .CurrentSection.RelPermalink "/docs/" }}
-              <span>/</span>
-              <a href="{{ .CurrentSection.RelPermalink }}">{{ .CurrentSection.Title }}</a>
-              {{ end }}
-            {{ end }}
             <span>/</span>
             <span class="docs-breadcrumb-current">{{ .Title }}</span>
           </nav>
@@ -33,7 +25,7 @@
         <div class="docs-layout-body">
           <div class="docs-content">
             <div class="docs-page-head">
-              <div class="eyebrow">{{ .CurrentSection.Title }}</div>
+              <div class="eyebrow" style="font-size:12px;font-weight:600;color:var(--blue);display:inline-flex;padding:3px 10px;background:var(--blue-soft);border-radius:20px">{{ .CurrentSection.Title }}</div>
               <h1>{{ .Title }}</h1>
               {{ with .Description }}<p class="docs-lead">{{ . }}</p>{{ end }}
             </div>
@@ -54,25 +46,36 @@
         </div>
         {{ end }}
 
-        {{ $parent := .Parent }}
-        {{ if and $parent (ne $parent.RelPermalink "/docs/") }}
         <nav class="docs-page-nav" aria-label="页面导航">
-          {{ with .Prev }}
+          {{ with .PrevInSection }}
           <a class="docs-page-nav-link" href="{{ .RelPermalink }}">
             <span class="docs-page-nav-label">{{ i18n "previous_page" }}</span>
             <span class="docs-page-nav-title">{{ .Title }}</span>
           </a>
           {{ end }}
-          {{ with .Next }}
+          {{ with .NextInSection }}
           <a class="docs-page-nav-link" href="{{ .RelPermalink }}">
             <span class="docs-page-nav-label">{{ i18n "next_page" }}</span>
             <span class="docs-page-nav-title">{{ .Title }}</span>
           </a>
           {{ end }}
         </nav>
-        {{ end }}
       </article>
     </div>
   </div>
 </div>
+
+<script>
+(function() {
+  var toggle = document.getElementById('docs-sidebar-toggle');
+  var sidebar = document.getElementById('docs-sidebar');
+  if (toggle && sidebar) {
+    toggle.addEventListener('click', function() {
+      var expanded = this.getAttribute('aria-expanded') === 'true';
+      this.setAttribute('aria-expanded', !expanded);
+      sidebar.classList.toggle('open');
+    });
+  }
+})();
+</script>
 {{ end }}

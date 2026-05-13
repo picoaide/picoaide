@@ -1,31 +1,42 @@
 <footer class="footer">
-  <div class="footer-container container">
-    <div class="footer-grid">
-      <div class="footer-brand">
-        <span class="footer-logo">
-          <img src="{{ "/images/logo-mark.svg" | relURL }}" alt="">
-          <span>{{ .Site.Title }}</span>
-        </span>
-        <p class="footer-tagline">{{ .Site.Params.description }}</p>
+  <div class="container">
+    <div class="ft-grid">
+      <div>
+        <a href="{{ "/" | relURL }}" style="display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:16px;color:var(--text);margin-bottom:8px;text-decoration:none">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" style="height:28px;width:auto">
+            <defs>
+              <linearGradient id="fbg" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#0f172a"/><stop offset="1" stop-color="#163b73"/>
+              </linearGradient>
+              <linearGradient id="fml" x1="13" y1="12" x2="34" y2="35" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#5eead4"/><stop offset=".55" stop-color="#60a5fa"/><stop offset="1" stop-color="#2563eb"/>
+              </linearGradient>
+            </defs>
+            <rect x="2" y="2" width="44" height="44" rx="11" fill="url(#fbg)"/>
+            <path d="M15 34V14h12.3c5 0 8.2 3.1 8.2 7.5s-3.2 7.4-8.2 7.4H21v5.1h-6Zm6-10.4h5.8c1.8 0 2.9-.8 2.9-2.2 0-1.5-1.1-2.3-2.9-2.3H21v4.5Z" fill="#f8fafc"/>
+            <path d="M13 36.5h22M13 11.5h15.5" stroke="url(#fml)" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="36" cy="13" r="3.4" fill="#5eead4"/>
+            <circle cx="36" cy="35" r="3.4" fill="#60a5fa"/>
+          </svg>
+          {{ .Site.Title }}
+        </a>
+        <p style="font-size:13px;color:var(--text-muted);max-width:28ch;line-height:1.5;margin:0">{{ .Site.Params.description }}</p>
+        <p style="font-size:12px;color:#cbd5e1;margin-top:4px">{{ .Site.Params.version }} · MIT</p>
       </div>
 
       {{ range .Site.Data.footer.columns }}
-      <div class="footer-col">
-        <h4 class="footer-col-title">{{ .title }}</h4>
-        <ul class="footer-col-list">
-          {{ range .links }}
-          <li>
-            <a href="{{ if .external }}{{ .href }}{{ else }}{{ .href | relURL }}{{ end }}"{{ if .external }} target="_blank" rel="noopener noreferrer"{{ end }}>{{ .label }}</a>
-          </li>
-          {{ end }}
-        </ul>
+      <div class="f-col">
+        <div class="f-col-title">{{ .title }}</div>
+        {{ range .links }}
+        <a href="{{ if .external }}{{ .href }}{{ else }}{{ .href | relURL }}{{ end }}"{{ if .external }} target="_blank" rel="noopener noreferrer"{{ end }}>{{ .label }}</a>
+        {{ end }}
       </div>
       {{ end }}
     </div>
 
-    <div class="footer-bottom">
-      <p class="footer-copyright">&copy; {{ now.Year }} {{ .Site.Title }}.</p>
-      <p class="footer-version">{{ .Site.Params.version }}</p>
+    <div class="f-bottom">
+      <span>&copy; {{ now.Year }} {{ .Site.Title }}. All rights reserved.</span>
+      <span>Open source · MIT</span>
     </div>
   </div>
 </footer>

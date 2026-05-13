@@ -1,122 +1,157 @@
 {{ define "content" }}
 {{ $home := .Site.Data.home }}
-<div class="home-page">
-  <section class="hero-band">
-    <div class="container hero-grid">
-      <div class="hero-copy">
-        <div class="eyebrow">{{ $home.hero.kicker }}</div>
-        <h1>{{ $home.hero.title }}</h1>
+{{ $signals := $home.signals }}
+
+<section>
+  <div class="container">
+
+    <!-- Hero -->
+    <div class="hero">
+      <div>
+        <div class="hero-tag">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          {{ $home.hero.kicker }}
+        </div>
+        <h1>{{ replace $home.hero.title "AI 操作助手" (printf `<span class="hl">%s</span>` "AI 操作助手") | safeHTML }}</h1>
         <p class="hero-lead">{{ $home.hero.description }}</p>
-        <p class="hero-sublead">{{ $home.hero.subtitle }}</p>
+        <div class="hero-tags">
+          {{ range $home.badges }}
+          <span>{{ . }}</span>
+          {{ end }}
+        </div>
         <div class="hero-actions">
           {{ range $home.hero.actions }}
           <a class="btn btn-{{ .style }}" href="{{ if .external }}{{ .href }}{{ else }}{{ .href | relURL }}{{ end }}"{{ if .external }} target="_blank" rel="noopener noreferrer"{{ end }}>{{ .label }}</a>
           {{ end }}
         </div>
-        <div class="hero-meta">
-          {{ range $home.badges }}
-          <span>{{ . }}</span>
-          {{ end }}
-        </div>
       </div>
 
-      <div class="hero-console" aria-label="PicoAide 平台概览">
+      <!-- Console -->
+      <div class="console" aria-label="PicoAide 平台概览">
         <div class="console-head">
-          <div>
-            <strong>{{ $home.signals.title }}</strong>
-            <p>{{ $home.signals.summary }}</p>
+          <div class="console-head-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+            {{ $signals.title }}
           </div>
-          <span class="status-pill status-pill--online">{{ $home.signals.status }}</span>
+          <span class="status-pill">{{ $signals.status }}</span>
         </div>
-
-        <div class="console-grid">
-          <div class="metric-card metric-card--wide metric-card--boundary">
-            <span class="metric-label">{{ $home.signals.boundary.label }}</span>
-            <strong>{{ $home.signals.boundary.value }}</strong>
-            <p>{{ $home.signals.boundary.description }}</p>
-          </div>
-          <div class="console-panel">
-            <div class="console-panel-title">{{ $home.signals.flow.title }}</div>
-            <div class="console-flow">
-              {{ range $index, $step := $home.signals.flow.steps }}
-              {{ if gt $index 0 }}<span>→</span>{{ end }}
-              <span>{{ $step }}</span>
-              {{ end }}
+        <div class="console-body">
+          <div class="console-row">
+            {{ range $home.metrics }}
+            <div class="console-item">
+              <div class="console-item-label">{{ .label }}</div>
+              <div class="console-item-value">{{ .value }}</div>
             </div>
+            {{ end }}
+          </div>
+          <div class="console-item-wide">
+            <div class="console-item-label">{{ $signals.boundary.label }}</div>
+            <div class="console-item-value">{{ $signals.boundary.value }}</div>
+            <div class="console-item-sub">{{ $signals.boundary.description }}</div>
+          </div>
+          <div class="console-flow">
+            {{ range $index, $step := $signals.flow.steps }}
+            {{ if gt $index 0 }}<span class="console-flow-arrow">→</span>{{ end }}
+            <span class="console-flow-step">{{ $step }}</span>
+            {{ end }}
+          </div>
+          <div class="console-list">
+            {{ range $signals.today.items }}
+            <div class="cli">
+              <span class="cli-dot cli-dot-green">✓</span>
+              {{ . }}
+            </div>
+            {{ end }}
           </div>
         </div>
-
-        <div class="metric-grid">
-          {{ range $home.metrics }}
-          <div class="metric-card">
-            <span class="metric-label">{{ .label }}</span>
-            <strong>{{ .value }}</strong>
-          </div>
-          {{ end }}
-        </div>
       </div>
     </div>
-  </section>
 
-  <section class="band">
-    <div class="container">
-      <div class="section-heading">
-        <div>
-          <div class="eyebrow">{{ $home.features.kicker }}</div>
-          <h2>{{ $home.features.title }}</h2>
-        </div>
-        <p class="section-lead">{{ $home.features.summary }}</p>
+    <!-- Stats -->
+    {{ with $home.stats }}
+    <div class="stats">
+      {{ range .items }}
+      <div class="stat">
+        <div class="stat-value">{{ .number }}</div>
+        <div class="stat-label">{{ .label }}</div>
       </div>
+      {{ end }}
+    </div>
+    {{ end }}
 
-      <div class="surface-grid">
-        {{ range $i, $item := $home.features.items }}
-        <article class="surface-card">
-          <div class="surface-icon">{{ printf "%02d" (add $i 1) }}</div>
-          <h3 class="surface-title">{{ $item.title }}</h3>
-          <p class="surface-desc">{{ $item.description }}</p>
-        </article>
-        {{ end }}
+  </div>
+</section>
+
+<!-- Features -->
+<section class="section section-alt">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-head-kicker">{{ $home.features.kicker }}</div>
+      <h2>{{ $home.features.title }}</h2>
+      <p>{{ $home.features.summary }}</p>
+    </div>
+
+    <div class="f-grid">
+      {{ range $i, $item := $home.features.items }}
+      <article class="f-card">
+        <div class="f-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            {{ if eq $i 0 }}
+            <rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/>
+            {{ else if eq $i 1 }}
+            <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            {{ else if eq $i 2 }}
+            <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+            {{ else }}
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            {{ end }}
+          </svg>
+        </div>
+        <h3>{{ $item.title }}</h3>
+        <p>{{ $item.description }}</p>
+      </article>
+      {{ end }}
+    </div>
+  </div>
+</section>
+
+<!-- Docs -->
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-head-kicker">{{ $home.docs.kicker }}</div>
+      <h2>{{ $home.docs.title }}</h2>
+      <p>{{ $home.docs.summary }}</p>
+    </div>
+
+    <div class="d-grid">
+      {{ range $home.docs.items }}
+      <a class="d-card" href="{{ .href | relURL }}">
+        <div class="d-card-kicker">{{ .kicker }}</div>
+        <h3>{{ .title }}</h3>
+        <p>{{ .description }}</p>
+        <span class="d-card-arrow">→</span>
+      </a>
+      {{ end }}
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="section">
+  <div class="container">
+    <div class="cta">
+      <div>
+        <div class="cta-kicker">{{ $home.release.kicker }}</div>
+        <h2>{{ $home.release.title }}</h2>
+        <p>{{ $home.release.summary }}</p>
+      </div>
+      <div class="cta-actions">
+        <a class="btn btn-primary" href="{{ $home.release.primary.href | relURL }}">{{ $home.release.primary.label }}</a>
+        <a class="btn btn-secondary" href="{{ $home.release.secondary.href }}"{{ if $home.release.secondary.external }} target="_blank" rel="noopener noreferrer"{{ end }}>{{ $home.release.secondary.label }}</a>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="band band--alt">
-    <div class="container">
-      <div class="section-heading">
-        <div>
-          <div class="eyebrow">{{ $home.docs.kicker }}</div>
-          <h2>{{ $home.docs.title }}</h2>
-        </div>
-        <p class="section-lead">{{ $home.docs.summary }}</p>
-      </div>
-
-      <div class="docs-grid">
-        {{ range $home.docs.items }}
-        <a class="docs-card" href="{{ .href | relURL }}">
-          <span class="docs-card-kicker">{{ .kicker }}</span>
-          <h3>{{ .title }}</h3>
-          <p>{{ .description }}</p>
-          <span class="docs-card-arrow">→</span>
-        </a>
-        {{ end }}
-      </div>
-    </div>
-  </section>
-
-  <section class="band band--dark">
-    <div class="container">
-      <div class="release-band">
-        <div>
-          <div class="eyebrow eyebrow--light">{{ $home.release.kicker }}</div>
-          <h2>{{ $home.release.title }}</h2>
-          <p>{{ $home.release.summary }}</p>
-        </div>
-        <div class="release-actions">
-          <a class="btn btn-primary" href="{{ $home.release.primary.href | relURL }}">{{ $home.release.primary.label }}</a>
-          <a class="btn btn-ghost btn-ghost--light" href="{{ $home.release.secondary.href }}" target="_blank" rel="noopener noreferrer">{{ $home.release.secondary.label }}</a>
-        </div>
-      </div>
-    </div>
-  </section>
-</div>
 {{ end }}

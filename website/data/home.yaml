@@ -2,7 +2,6 @@ hero:
   kicker: 企业级 AI PaaS 工作平台
   title: 让每位员工拥有自己的 AI 操作助手
   description: AI 的力量应当被释放，但数据的边界必须被守护。PicoAide 让 AI 进入企业，而不是让数据离开企业。
-  subtitle: 私有化部署 · 权限继承 · 数据不外流
   actions:
     - label: 快速开始
       href: /docs/quick-start/
@@ -21,12 +20,12 @@ badges:
   - MCP 中继
 metrics:
   - label: 认证
-    value: Local / LDAP
-  - label: MCP
+    value: Local / LDAP / OIDC
+  - label: MCP 通道
     value: Browser / Computer
-  - label: 配置
-    value: 分层合并
-  - label: 部署
+  - label: 配置策略
+    value: 分层合并 + 迁移
+  - label: 部署模式
     value: 按用户 / 按组
 signals:
   title: PicoAide Control Plane
@@ -49,13 +48,23 @@ signals:
       - 用户容器按组分发技能
       - 浏览器授权连接可随时开启或断开
       - 桌面白名单限制文件访问范围
+stats:
+  items:
+    - number: 34
+      label: MCP 工具 · 2 通道
+    - number: 400+
+      label: 单机容器节点
+    - number: 审计追溯
+      label: 配置变更全程记录
+    - number: 3 代兼容
+      label: 配置版本平滑迁移
 features:
   kicker: 能力总览
   title: 围绕企业内网协作的核心能力
   summary: PicoAide 把认证、容器、浏览器、桌面、文件和技能统一到一个控制平面里，减少碎片化工具栈。
   items:
     - title: 容器化隔离
-      description: 每位用户拥有独立 PicoClaw 容器，基于 `picoaide-net` 网络隔离，容器之间默认不可直连。
+      description: 每位用户拥有独立 PicoClaw 容器，基于 picoaide-net 网络隔离，容器之间默认不可直连。
     - title: 认证继承
       description: 支持本地认证与 LDAP 认证。浏览器和桌面插件复用用户身份，不需要为 AI 重新设计权限体系。
     - title: MCP 中继

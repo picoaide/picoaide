@@ -1,10 +1,16 @@
 <!DOCTYPE html>
-<html lang="{{ .Site.Language.Lang }}">
+<html lang="zh-CN">
 <head>
   {{ partial "head.html" . }}
   {{ block "head" . }}{{ end }}
 </head>
-<body class="body">
+<body{{ if .IsHome }} class="home"{{ end }}>
+  <a href="#main" class="sr-only" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0"
+     onfocus="this.style.position='fixed';this.style.width='auto';this.style.height='auto';this.style.padding='12px 24px';this.style.margin='0';this.style.clip='auto';this.style.background='#2563eb';this.style.color='#fff';this.style.zIndex='9999';this.style.fontSize='16px';this.style.textAlign='center'"
+     onblur="this.style.position='absolute';this.style.width='1px';this.style.height='1px';this.style.padding='0';this.style.margin='-1px';this.style.overflow='hidden';this.style.clip='rect(0,0,0,0)'">
+    {{ i18n "skip_to_content" | default "跳到主内容" }}
+  </a>
+
   {{ partial "nav.html" . }}
 
   <main class="main" id="main">
@@ -16,26 +22,23 @@
   {{ block "scripts" . }}
   <script>
   (function() {
-    // Mobile menu toggle
     var toggle = document.getElementById('nav-toggle');
-    var menu = document.getElementById('nav-menu');
-    if (toggle && menu) {
+    var mobile = document.getElementById('nav-mobile');
+    if (toggle && mobile) {
       toggle.addEventListener('click', function() {
         var expanded = this.getAttribute('aria-expanded') === 'true';
         this.setAttribute('aria-expanded', !expanded);
-        menu.classList.toggle('open');
         this.classList.toggle('active');
+        mobile.classList.toggle('open');
+      });
+      document.addEventListener('click', function(e) {
+        if (!toggle.contains(e.target) && !mobile.contains(e.target)) {
+          toggle.setAttribute('aria-expanded', 'false');
+          toggle.classList.remove('active');
+          mobile.classList.remove('open');
+        }
       });
     }
-
-    // Close mobile menu on outside click
-    document.addEventListener('click', function(e) {
-      if (toggle && menu && !toggle.contains(e.target) && !menu.contains(e.target)) {
-        toggle.setAttribute('aria-expanded', 'false');
-        menu.classList.remove('open');
-        toggle.classList.remove('active');
-      }
-    });
   })();
   </script>
   {{ end }}

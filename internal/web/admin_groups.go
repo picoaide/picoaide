@@ -199,6 +199,11 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
     return
   }
 
+  // 部署组绑定的技能到新加入成员
+  for _, username := range usernames {
+    user.DeployGroupSkillsToUser(s.cfg, username)
+  }
+
   // 检查共享文件夹影响，自动重启新加入成员的容器
   gid, err := auth.GetGroupID(groupName)
   if err == nil {

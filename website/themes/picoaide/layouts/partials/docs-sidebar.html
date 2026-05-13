@@ -1,16 +1,14 @@
 <aside class="docs-sidebar" id="docs-sidebar">
-  <div class="docs-sidebar-top">
-    <div>
-      <div class="docs-sidebar-label">{{ i18n "docs_nav" }}</div>
-      <div class="docs-version-badge">{{ i18n "version_prefix" }}{{ .Site.Params.version }}</div>
-    </div>
+  <div class="docs-sidebar-header">
+    <div class="docs-sidebar-label">{{ i18n "docs_nav" }}</div>
+    <span class="docs-version-badge">{{ .Site.Params.version }}</span>
   </div>
 
   <nav class="docs-nav" aria-label="{{ i18n "docs_nav" }}">
     {{ $current := . }}
     {{ $docsSection := .Site.GetPage "/docs" }}
     {{ if $docsSection }}
-    <a class="docs-nav-link docs-nav-link--home{{ if eq $current.RelPermalink $docsSection.RelPermalink }} active{{ end }}" href="{{ $docsSection.RelPermalink }}">{{ $docsSection.Title }}</a>
+    <a class="docs-nav-link docs-nav-link-home{{ if eq $current.RelPermalink $docsSection.RelPermalink }} active{{ end }}" href="{{ $docsSection.RelPermalink }}">{{ $docsSection.Title }}</a>
     {{ range $docsSection.Pages }}
       <a class="docs-nav-link{{ if eq $current.RelPermalink .RelPermalink }} active{{ end }}" href="{{ .RelPermalink }}">{{ .Title }}</a>
     {{ end }}

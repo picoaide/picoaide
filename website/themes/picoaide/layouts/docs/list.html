@@ -1,32 +1,53 @@
 {{ define "content" }}
-<div class="docs-shell docs-shell--landing">
+<div class="docs-shell">
+  <button class="docs-sidebar-toggle" id="docs-sidebar-toggle" aria-label="{{ i18n "toggle_docs_nav" }}" aria-expanded="false">
+    <span class="docs-sidebar-toggle-icon">
+      <span></span><span></span><span></span>
+    </span>
+    <span>{{ i18n "mobile_nav" }}</span>
+  </button>
+
   {{ partial "docs-sidebar.html" . }}
 
   <div class="docs-main-area">
-    <div class="container docs-container">
-      <section class="docs-hero">
+    <div class="container" style="padding-inline:0">
+      <section class="page-hero" style="margin-bottom:24px">
         <div class="eyebrow">{{ .Title }}</div>
         <h1>{{ .Title }}</h1>
-        {{ with .Description }}<p class="docs-lead">{{ . }}</p>{{ end }}
+        {{ with .Description }}<p>{{ . }}</p>{{ end }}
       </section>
 
       {{ with .Content }}
-      <section class="docs-prose docs-intro">
+      <section class="richtext" style="margin-bottom:24px">
         {{ . }}
       </section>
       {{ end }}
 
-      <section class="docs-catalog docs-grid">
+      <section class="docs-catalog">
         {{ range .Pages }}
-        <a class="docs-card docs-card--document" href="{{ .RelPermalink }}">
-          <span class="docs-card-kicker">{{ i18n "doc_card" }}</span>
+        <a class="d-card" href="{{ .RelPermalink }}">
+          <div class="d-card-kicker">{{ i18n "doc_card" }}</div>
           <h3>{{ .Title }}</h3>
           <p>{{ with .Description }}{{ . }}{{ else }}{{ .Summary | plainify | truncate 140 }}{{ end }}</p>
-          <span class="docs-card-arrow">→</span>
+          <span class="d-card-arrow">→</span>
         </a>
         {{ end }}
       </section>
     </div>
   </div>
 </div>
+
+<script>
+(function() {
+  var toggle = document.getElementById('docs-sidebar-toggle');
+  var sidebar = document.getElementById('docs-sidebar');
+  if (toggle && sidebar) {
+    toggle.addEventListener('click', function() {
+      var expanded = this.getAttribute('aria-expanded') === 'true';
+      this.setAttribute('aria-expanded', !expanded);
+      sidebar.classList.toggle('open');
+    });
+  }
+})();
+</script>
 {{ end }}
