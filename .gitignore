@@ -24,6 +24,7 @@ vendor/
 
 # Claude Code 配置
 .claude/
+.superpowers/
 
 # IDE
 .idea/
