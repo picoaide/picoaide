@@ -51,8 +51,8 @@ export async function init(ctx) {
     var members = folder.members || [];
     var body = members.length === 0
       ? '<p class="text-muted text-center">暂无成员</p>'
-      : '<div class="chip-list">' +
-        members.map(function(m) { return '<span class="chip">' + esc(m.username) + '</span>'; }).join(' ') +
+      : '<div class="group-tags" style="padding:.5rem 0">' +
+        members.map(function(m) { return '<span class="tag">' + esc(m.username) + '</span>'; }).join(' ') +
         '</div>';
 
     ctx.showModal({ title: '成员列表 - ' + folder.name, width: '400px', body: body, footer: [
