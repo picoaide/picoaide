@@ -20,19 +20,21 @@ export async function init(ctx) {
         return;
       }
 
-      list.innerHTML = folders.map(function(f) {
+      list.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:.5rem">' + folders.map(function(f) {
+        var desc = f.description || '';
+        if (desc.length > 100) desc = desc.substring(0, 100) + '…';
         var typeLabel = f.is_public ? '<span class="badge badge-ok">公共</span>' : '<span class="badge badge-muted">组共享</span>';
-        return '<div class="card" style="margin-bottom:.5rem;cursor:pointer" data-folder="' + esc(f.name) + '">' +
+        return '<div class="card" style="cursor:pointer;min-width:220px;flex:1;margin-bottom:0" data-folder="' + esc(f.name) + '">' +
           '<div class="card-header" style="display:flex;align-items:center;gap:.5rem">' +
             '📁 ' + esc(f.name) + ' ' + typeLabel +
           '</div>' +
-          '<div class="text-sm text-muted">' + esc(f.description || '') + '</div>' +
-          '<div class="toolbar" style="margin-top:.4rem">' +
-            '<span class="text-sm">成员: ' + f.member_count + ' 人</span>' +
+          (desc ? '<div class="text-sm text-muted" style="padding:0 .75rem">' + esc(desc) + '</div>' : '') +
+          '<div class="toolbar" style="padding:.4rem .75rem .6rem">' +
+            '<span class="text-sm">' + f.member_count + ' 人</span>' +
             '<button class="btn btn-sm btn-outline">查看成员</button>' +
           '</div>' +
         '</div>';
-      }).join('');
+      }).join('') + '</div>';
 
       list.querySelectorAll('[data-folder]').forEach(function(card) {
         card.addEventListener('click', function() {
