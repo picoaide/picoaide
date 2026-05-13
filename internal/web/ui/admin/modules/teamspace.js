@@ -266,13 +266,19 @@ export async function init(ctx) {
         description: desc, is_public: isPublic ? '1' : '0',
       });
       if (!r1.success) { showMsg('#sf-modal-msg', r1.error, false); return; }
-      var r2 = await Api.post('/api/admin/shared-folders/groups/set', {
-        folder_id: String(currentId), group_ids: groupIDs,
-      });
+      // 仅当组选择有变化时才调用 groups/set，避免不必要重启容器
+      var oldIDs = (f.groups || []).map(function(g) { return String(g.id); }).sort().join(',');
+      if (groupIDs !== oldIDs) {
+        var r2 = await Api.post('/api/admin/shared-folders/groups/set', {
+          folder_id: String(currentId), group_ids: groupIDs,
+        });
+        showMsg('#sf-view-msg', r2.message || '已保存', r2.success);
+      } else {
+        showMsg('#sf-view-msg', '已保存', true);
+      }
       // 关闭弹窗
       var overlay = document.querySelector('.modal-overlay');
       if (overlay) overlay.remove();
-      showMsg('#sf-view-msg', r2.message || '已保存', r2.success);
       if (r2.success) { await loadFolders(); }
     }
 
