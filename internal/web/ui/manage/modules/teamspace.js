@@ -51,15 +51,11 @@ export async function init(ctx) {
     var members = folder.members || [];
     var body = members.length === 0
       ? '<p class="text-muted text-center">暂无成员</p>'
-      : '<div class="table-wrap"><table class="compact-table"><thead><tr><th>用户名</th><th>挂载状态</th></tr></thead><tbody>' +
-        members.map(function(m) {
-          var c = m.mounted ? 'badge-ok' : 'badge-muted';
-          var t = m.mounted ? '✓ 已挂载' : '✗ 未挂载';
-          return '<tr><td>' + esc(m.username) + '</td><td><span class="badge ' + c + '">' + t + '</span></td></tr>';
-        }).join('') +
-        '</tbody></table></div>';
+      : '<div class="chip-list">' +
+        members.map(function(m) { return '<span class="chip">' + esc(m.username) + '</span>'; }).join(' ') +
+        '</div>';
 
-    ctx.showModal({ title: '成员列表 - ' + folder.name, width: '480px', body: body, footer: [
+    ctx.showModal({ title: '成员列表 - ' + folder.name, width: '400px', body: body, footer: [
       { label: '关闭', value: 'close' }
     ]}).catch(function() {});
   }
