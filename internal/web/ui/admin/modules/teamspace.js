@@ -245,7 +245,7 @@ export async function init(ctx) {
         '<button class="btn btn-outline" id="sf-modal-cancel-btn">取消</button>' +
       '</div>';
 
-    showModal({ title: '编辑 - ' + f.name, width: '520px', body: body, footer: [] });
+    showModal({ title: '编辑 - ' + f.name, width: '520px', body: body });
 
     // 初始化标签选择器
     setTimeout(function() {
