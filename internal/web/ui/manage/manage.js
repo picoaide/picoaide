@@ -5,7 +5,7 @@ const $$ = s => document.querySelectorAll(s);
 
 let currentUser = '';
 const sections = Array.from($$('.tabs a')).map(a => a.dataset.section);
-const defaultSection = 'channels';
+const defaultSection = 'skills';
 
 function getSectionFromPath() {
   const path = window.location.pathname.replace(/\/+$/, '');

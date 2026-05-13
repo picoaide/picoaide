@@ -78,7 +78,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
   r.GET("/manage", func(c *gin.Context) {
     c.Redirect(http.StatusMovedPermanently, "/manage/channels")
   })
-  manageSections := []string{"channels", "files", "teamspace", "password"}
+  manageSections := []string{"skills", "channels", "files", "teamspace", "password"}
   for _, section := range manageSections {
     sectionPath := "/manage/" + section
     r.GET(sectionPath, func(c *gin.Context) {

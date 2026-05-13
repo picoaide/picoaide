@@ -33,6 +33,22 @@ func UnbindSkillFromUser(username, skillName string) error {
   return err
 }
 
+// GetUserSkillSource 获取用户技能绑定的来源（"self" 或实际仓库名）
+func GetUserSkillSource(username, skillName string) (string, error) {
+  if err := ensureDB(); err != nil {
+    return "", err
+  }
+  var skill UserSkill
+  has, err := engine.Where("username = ? AND skill_name = ?", username, skillName).Get(&skill)
+  if err != nil {
+    return "", err
+  }
+  if !has {
+    return "", nil
+  }
+  return skill.Source, nil
+}
+
 // GetUserSkills 获取用户直接绑定的技能列表
 func GetUserSkills(username string) ([]string, error) {
   if err := ensureDB(); err != nil {

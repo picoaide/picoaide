@@ -446,6 +446,10 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
   r.POST("/api/admin/shared-folders/mount", s.handleAdminSharedFoldersMount)
   // 普通用户 - 团队空间
   r.GET("/api/shared-folders", s.handleSharedFolders)
+  // 普通用户 - 技能中心
+  r.GET("/api/user/skills", s.handleUserSkills)
+  r.POST("/api/user/skills/install", s.handleUserSkillsInstall)
+  r.POST("/api/user/skills/uninstall", s.handleUserSkillsUninstall)
 }
 
 // setSessionCookie 设置 session cookie
