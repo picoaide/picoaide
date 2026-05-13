@@ -11,6 +11,7 @@ import (
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/config"
+  "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
 )
@@ -199,6 +200,9 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
     return
   }
 
+  // 审计日志：记录谁添加了哪些用户到组
+  logger.Audit("group.members.add", "group", groupName, "usernames", usernames, "operator", s.getSessionUser(c))
+
   // 部署组绑定的技能到新加入成员
   for _, username := range usernames {
     user.DeployGroupSkillsToUser(s.cfg, username)
@@ -255,6 +259,9 @@ func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "组名和用户名不能为空")
     return
   }
+  // 审计日志：记录谁从组移除了用户
+  logger.Audit("group.members.remove", "group", groupName, "username", username, "operator", s.getSessionUser(c))
+
   gid, _ := auth.GetGroupID(groupName)
 
   if err := auth.RemoveUserFromGroup(groupName, username); err != nil {

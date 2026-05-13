@@ -450,6 +450,7 @@ tbody tr { transition: background var(--transition); }
 tbody tr:hover { background: #f8fbff; }
 .actions-cell { width: 1%; min-width: max-content; white-space: nowrap; overflow-wrap: normal; }
 .actions-cell .btn-group { flex-wrap: nowrap; }
+.file-tag { display: inline-block; font-size: .72rem; font-weight: 650; color: #6366f1; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 3px; padding: 1px 6px; line-height: 1.5; white-space: nowrap; }
 
 /* ===== Grid ===== */
 .row { display: flex; gap: .75rem; }

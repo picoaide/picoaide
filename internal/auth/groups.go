@@ -3,6 +3,7 @@ package auth
 import (
   "database/sql"
   "fmt"
+  "log/slog"
   "sort"
 )
 
@@ -132,6 +133,7 @@ func AddUsersToGroup(groupName string, usernames []string) error {
     // INSERT OR IGNORE 避免重复插入
     engine.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", u, gid)
   }
+  slog.Info("audit", "type", "AUDIT", "action", "group.members.add", "group", groupName, "usernames", usernames)
   return nil
 }
 
@@ -239,7 +241,11 @@ func SyncUserGroups(username string, groupNames []string, source string) error {
     session.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", username, group.ID)
   }
 
-  return session.Commit()
+  if err := session.Commit(); err != nil {
+    return err
+  }
+  slog.Info("audit", "type", "AUDIT", "action", "group.members.sync", "username", username, "groups", groupNames, "source", source)
+  return nil
 }
 
 func ReplaceGroupMembersBySource(source string, groupMembers map[string][]string) error {
@@ -283,7 +289,13 @@ func ReplaceGroupMembersBySource(source string, groupMembers map[string][]string
     }
   }
 
-  return session.Commit()
+  if err := session.Commit(); err != nil {
+    return err
+  }
+  for groupName, members := range groupMembers {
+    slog.Info("audit", "type", "AUDIT", "action", "group.members.replace", "source", source, "group", groupName, "members", members)
+  }
+  return nil
 }
 
 // BindSkillToGroup 绑定技能到组

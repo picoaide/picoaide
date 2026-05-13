@@ -256,6 +256,21 @@ function readFieldInputValue(input) {
   return input.value;
 }
 
+// 标签说明（鼠标悬停提示）
+var tagTooltips = {
+  '定时': '定时任务目录。AI 会自动执行此目录下的可执行文件（脚本或二进制），用于定时触发任务。',
+  '记忆': 'AI 长期记忆存储目录。AI 在此读写记忆文件，实现跨会话信息保持。',
+  '会话': '会话历史记录目录。记录每一次对话，用于上下文恢复和断点续聊。',
+  '状态': 'AI 运行状态目录。包含当前环境状态信息，用于故障恢复和会话连续性。',
+  '技能': 'AI 技能目录。存放技能包文件，用于扩展 AI 的能力边界。',
+  '行为': '定义 AI 代理的行为模式和角色设定。AI 启动时读取此文件确定行为规范。',
+  '心跳': 'AI 心跳检测文件。代理定期更新此文件，用于监控进程是否正常运行。',
+  '身份': 'AI 身份标识配置文件。定义 AI 的名称、版本和身份信息。',
+  '灵魂': 'AI 核心人格和价值观设定。定义 AI 的性格特质和回答风格。',
+  '偏好': '用户偏好设置。AI 读取此文件了解用户的使用习惯和偏好。',
+  '共享': '团队共享文件夹。此目录挂载了团队协作空间，所有成员共享文件。',
+};
+
 // 文件管理
 async function loadFiles(path) {
   currentPath = path;
@@ -297,7 +312,7 @@ async function loadFiles(path) {
       (function(entry) {
         var tr = document.createElement('tr');
         tr.style.cursor = 'pointer';
-        tr.innerHTML = '<td>' + (entry.is_dir ? '📁 ' : '📄 ') + esc(entry.name) + '</td><td>' + (entry.is_dir ? '' : (entry.size_str || '')) + '</td><td class="actions-cell"><div class="btn-group">' + (!entry.is_dir ? '<button class="btn btn-sm btn-outline dl-btn">下载</button>' : '') + '<button class="btn btn-sm btn-danger del-btn">删除</button></div></td>';
+        tr.innerHTML = '<td>' + (entry.is_dir ? '📁 ' : '📄 ') + esc(entry.name) + '</td><td>' + (entry.tag ? '<span class="file-tag" title="' + esc(tagTooltips[entry.tag] || '') + '">' + esc(entry.tag) + '</span>' : '') + '</td><td>' + (entry.is_dir ? '' : (entry.size_str || '')) + '</td><td class="actions-cell"><div class="btn-group">' + (!entry.is_dir ? '<button class="btn btn-sm btn-outline dl-btn">下载</button>' : '') + '<button class="btn btn-sm btn-danger del-btn">删除</button></div></td>';
 
         tr.querySelector('td:first-child').addEventListener('click', function() {
           if (entry.is_dir) loadFiles(entry.rel_path);
