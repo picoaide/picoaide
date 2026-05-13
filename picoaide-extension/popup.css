@@ -172,3 +172,70 @@ input:focus {
   border-color: #94a3b8;
   color: var(--text);
 }
+
+/* ─── 隐私政策链接 ────────────────────────────────────────── */
+.privacy-link {
+  text-align: center;
+  padding: 6px 0 2px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.privacy-link a {
+  color: var(--muted);
+  font-size: 11px;
+  text-decoration: none;
+}
+.privacy-link a:hover { color: var(--primary); text-decoration: underline; }
+
+/* ─── 确认弹窗 ────────────────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+.confirm-dialog {
+  background: #fff;
+  border-radius: 10px;
+  padding: 18px;
+  margin: 14px;
+  max-width: 290px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.22);
+}
+.confirm-title {
+  font-size: 14px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+.confirm-body {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #334155;
+  margin-bottom: 14px;
+}
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.confirm-actions .action-btn {
+  width: auto;
+  min-height: 30px;
+  padding: 5px 14px;
+  margin-bottom: 0;
+  font-size: 12px;
+}
+.confirm-actions .action-btn:first-of-type {
+  box-shadow: none;
+}
+.confirm-actions .action-btn.secondary {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+.confirm-actions .action-btn.secondary:hover {
+  background: #e2e8f0;
+}

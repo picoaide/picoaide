@@ -48,6 +48,21 @@ const logoutBtn = document.getElementById('logout-btn');
 const syncBtn = document.getElementById('sync-btn');
 const cdpBtn = document.getElementById('cdp-btn');
 const manageBtn = document.getElementById('manage-btn');
+const confirmOverlay = document.getElementById('confirm-overlay');
+const confirmTitle = document.getElementById('confirm-title');
+const confirmBody = document.getElementById('confirm-body');
+const confirmOk = document.getElementById('confirm-ok');
+const confirmCancel = document.getElementById('confirm-cancel');
+
+function showConfirm(title, body) {
+  return new Promise(resolve => {
+    confirmTitle.textContent = title;
+    confirmBody.textContent = body;
+    confirmOverlay.style.display = 'flex';
+    confirmOk.onclick = () => { confirmOverlay.style.display = 'none'; resolve(true); };
+    confirmCancel.onclick = () => { confirmOverlay.style.display = 'none'; resolve(false); };
+  });
+}
 
 function showLogin() {
   loginView.style.display = '';
@@ -125,6 +140,13 @@ syncBtn.addEventListener('click', async () => {
 
   const url = new URL(tab.url);
   const domain = url.hostname;
+
+  const ok = await showConfirm(
+    '确认同步登录状态',
+    '将读取 ' + domain + ' 的 Cookie（登录凭据）并发送到您自己的 PicoAide 服务端。发送范围：当前页面的全部 Cookie，接收方：您自行部署的服务端，不会发送给任何第三方。'
+  );
+  if (!ok) { setStatus('已取消', ''); return; }
+
   setStatus('正在同步 ' + domain + ' 的登录状态...', '');
 
   try {
@@ -188,6 +210,15 @@ function resetCdpBtn() {
 
 cdpBtn.addEventListener('click', async () => {
   setStatus('处理中...', '');
+  // 如果当前已开启，不需要同意直接关闭
+  const status = await chrome.runtime.sendMessage({ action: 'cdpStatus' }).catch(() => ({ active: false }));
+  if (!status.active) {
+    const ok = await showConfirm(
+      '确认授权AI浏览器控制',
+      '将建立 WebSocket 长连接到您自己的 PicoAide 服务端，接收 AI 代理的控制指令。AI 可以读取当前标签页的内容、截图、执行点击和输入操作。仅连接到您自行部署的服务端，不会将任何数据发送给第三方。'
+    );
+    if (!ok) { setStatus('已取消', ''); return; }
+  }
   try {
     const result = await chrome.runtime.sendMessage({ action: 'cdpToggle' });
     if (result.active) {

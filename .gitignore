@@ -2,6 +2,9 @@
 users/
 archive/
 
+# 商店审核打包
+review-package/
+
 # 配置文件（包含敏感信息）
 config.yaml
 whitelist.yaml
