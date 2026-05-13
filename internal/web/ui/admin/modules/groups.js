@@ -156,68 +156,77 @@ export async function init(ctx) {
     let candidateSearch = '';
     let candidatePage = 1;
     let candidateTotalPages = 1;
+    let hasChanges = false;
+    let saving = false;
+    let members = [];
+    let inheritedMembers = [];
+    let pendingAdds = new Set();
+    let pendingRemoves = new Set();
+    let candidateUsers = [];
+    let candidateExisting = new Set();
+
     overlay.innerHTML =
       '<div class="modal" style="max-width:760px">' +
         '<div class="modal-header">组: ' + esc(groupName) + '<button id="modal-close">&times;</button></div>' +
-        '<div class="modal-body">' +
-          '<div class="segmented mb-1">' +
-            '<button class="segment active" data-group-panel="members" type="button">成员</button>' +
-            '<button class="segment" data-group-panel="skills" type="button">绑定技能</button>' +
+        '<div class="modal-body" style="overflow-y:auto">' +
+          (!unifiedAuth ? '<div class="field"><label>添加成员</label><div class="list-search"><input type="search" id="gd-candidate-search" placeholder="搜索可添加的本地用户"><button class="btn btn-sm btn-outline" id="gd-candidate-search-btn">搜索</button></div><div id="gd-candidates" class="mt-1"></div><div class="pager" id="gd-candidates-pager"><span class="pager-info" id="gd-candidates-info"></span><button class="btn btn-sm btn-outline" id="gd-candidates-prev">上一页</button><button class="btn btn-sm btn-outline" id="gd-candidates-next">下一页</button></div></div>' : '') +
+          '<div class="field"><label>已加入成员</label>' +
+          '<div class="list-search mb-1">' +
+            '<input type="search" id="gd-member-search" placeholder="搜索成员用户名">' +
+            '<button class="btn btn-sm btn-outline" id="gd-member-search-btn">搜索</button>' +
           '</div>' +
-          '<div data-group-panel-body="members">' +
-            (!unifiedAuth ? '<div class="field"><label>添加成员</label><div class="list-search"><input type="search" id="gd-candidate-search" placeholder="搜索可添加的本地用户"><button class="btn btn-sm btn-outline" id="gd-candidate-search-btn">搜索</button></div><div id="gd-candidates" class="mt-1"></div><div class="pager" id="gd-candidates-pager"><span class="pager-info" id="gd-candidates-info"></span><button class="btn btn-sm btn-outline" id="gd-candidates-prev">上一页</button><button class="btn btn-sm btn-outline" id="gd-candidates-next">下一页</button></div></div>' : '') +
-            '<div class="field"><label>已加入成员</label>' +
-            '<div class="list-search mb-1">' +
-              '<input type="search" id="gd-member-search" placeholder="搜索成员用户名">' +
-              '<button class="btn btn-sm btn-outline" id="gd-member-search-btn">搜索</button>' +
-            '</div>' +
-            '<div id="gd-members" class="mb-1"></div>' +
-            '<div class="pager" id="gd-members-pager">' +
-              '<span class="pager-info" id="gd-members-info"></span>' +
-              '<button class="btn btn-sm btn-outline" id="gd-members-prev">上一页</button>' +
-              '<button class="btn btn-sm btn-outline" id="gd-members-next">下一页</button>' +
-            '</div>' +
-            '</div>' +
-            '<small class="text-muted">' + (unifiedAuth ? '成员由当前认证源同步' : '成员由管理员本地维护') + '</small>' +
+          '<div id="gd-members" class="mb-1"></div>' +
+          '<div class="pager" id="gd-members-pager">' +
+            '<span class="pager-info" id="gd-members-info"></span>' +
+            '<button class="btn btn-sm btn-outline" id="gd-members-prev">上一页</button>' +
+            '<button class="btn btn-sm btn-outline" id="gd-members-next">下一页</button>' +
           '</div>' +
-          '<div data-group-panel-body="skills" class="hidden">' +
-            '<div id="gd-skills" class="mb-1"></div>' +
-            '<div class="row mb-1">' +
-              '<select id="gd-skill-select" style="flex:1"></select>' +
-              '<button class="btn btn-sm btn-primary" id="gd-bind-btn">绑定并部署</button>' +
-            '</div>' +
           '</div>' +
+          '<div id="gd-staging-info" class="mt-1"></div>' +
+          '<small class="text-muted">' + (unifiedAuth ? '成员由当前认证源同步' : '成员由管理员本地维护') + '</small>' +
         '</div>' +
+        (!unifiedAuth ? '<div class="modal-footer" id="gd-modal-actions"><button class="btn btn-primary" id="gd-save-btn">保存</button><button class="btn btn-outline" id="gd-cancel-btn">取消</button></div>' : '') +
       '</div>';
     ctx.$('#content-area').appendChild(overlay);
-    overlay.querySelector('#modal-close').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-    overlay.querySelectorAll('[data-group-panel]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const name = btn.dataset.groupPanel;
-        overlay.querySelectorAll('[data-group-panel]').forEach(item => item.classList.toggle('active', item === btn));
-        overlay.querySelectorAll('[data-group-panel-body]').forEach(item => item.classList.toggle('hidden', item.dataset.groupPanelBody !== name));
-      });
+    overlay.querySelector('#modal-close').addEventListener('click', async () => {
+      if (hasChanges && !await confirmModal('有未保存的更改，确定关闭吗？')) return;
+      overlay.remove();
+    });
+    overlay.addEventListener('click', async e => {
+      if (e.target === overlay) {
+        if (hasChanges && !await confirmModal('有未保存的更改，确定关闭吗？')) return;
+        overlay.remove();
+      }
     });
 
-    let members = [];
-    let inheritedMembers = [];
-    const skillsDetail = await Api.get('/api/admin/groups/members?name=' + encodeURIComponent(groupName) + '&page=1&page_size=1');
-    const skills = (skillsDetail.success ? skillsDetail.skills : []) || [];
-
-    const skillData = await Api.get('/api/admin/skills');
-    const allSkills = (skillData.success ? skillData.skills : []) || [];
-    const skillSel = overlay.querySelector('#gd-skill-select');
-    skillSel.innerHTML = '<option value="">选择技能</option>';
-    for (const sk of allSkills) {
-      skillSel.innerHTML += '<option value="' + esc(sk.name) + '">' + esc(sk.name) + '</option>';
+    function updateStagingInfo() {
+      const el = overlay.querySelector('#gd-staging-info');
+      const parts = [];
+      if (pendingAdds.size > 0) parts.push('待添加: ' + pendingAdds.size + ' 人');
+      if (pendingRemoves.size > 0) parts.push('待移除: ' + pendingRemoves.size + ' 人');
+      hasChanges = pendingAdds.size > 0 || pendingRemoves.size > 0;
+      el.innerHTML = hasChanges ? '<div class="msg msg-info">' + parts.join('，') + '</div>' : '';
+      const saveBtn = overlay.querySelector('#gd-save-btn');
+      if (saveBtn) saveBtn.disabled = !hasChanges || saving;
     }
 
     function renderMembers() {
       const el = overlay.querySelector('#gd-members');
       let html = '';
-      if (members.length === 0) html += '<small class="text-muted">暂无直接成员</small>';
-      else html += members.map(m => '<span class="tag">' + esc(m) + (!unifiedAuth ? ' <button data-rm-member="' + esc(m) + '">&times;</button>' : '') + '</span>').join(' ');
+      const shown = members.filter(m => !pendingRemoves.has(m) || pendingAdds.has(m));
+      if (shown.length === 0 && inheritedMembers.length === 0) html += '<small class="text-muted">暂无成员</small>';
+      else {
+        html += shown.map(m => {
+          if (pendingAdds.has(m)) return '<span class="tag" style="background:#e0f2fe;border-color:#7dd3fc">' + esc(m) + ' <small style="color:#0369a1">待加入</small></span>';
+          return '<span class="tag">' + esc(m) + (!unifiedAuth ? ' <button data-rm-member="' + esc(m) + '"' + (pendingRemoves.has(m) ? ' style="color:#dc2626"' : '') + '>&times;</button>' : '') + '</span>';
+        }).join(' ');
+        if (pendingRemoves.size > 0) {
+          const removed = members.filter(m => pendingRemoves.has(m));
+          html += '<div class="mt-1"><small class="text-muted">待移除</small><div>' +
+            removed.map(m => '<span class="tag" style="text-decoration:line-through;opacity:.6;background:#fef2f2;border-color:#fecaca">' + esc(m) + '</span>').join(' ') +
+            '</div></div>';
+        }
+      }
       if (inheritedMembers.length > 0) {
         html += '<div class="mt-1"><small class="text-muted">子组成员</small><div>' +
           inheritedMembers.map(m => '<span class="tag">' + esc(m) + '</span>').join(' ') +
@@ -225,13 +234,16 @@ export async function init(ctx) {
       }
       el.innerHTML = html;
       el.querySelectorAll('[data-rm-member]').forEach(btn => {
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', () => {
           const username = btn.dataset.rmMember;
-          const res = await Api.post('/api/admin/groups/members/remove', { group_name: groupName, username });
-          if (res.success) { await loadMembers(); await loadCandidates(); loadGroups(); }
-          else await alertModal(res.error);
+          if (pendingRemoves.has(username)) pendingRemoves.delete(username);
+          else pendingRemoves.add(username);
+          renderMembers();
+          renderCandidates();
+          updateStagingInfo();
         });
       });
+      updateStagingInfo();
     }
 
     async function loadMembers() {
@@ -250,7 +262,10 @@ export async function init(ctx) {
       if (info) info.textContent = '第 ' + memberPage + ' / ' + memberTotalPages + ' 页，共 ' + (detail.total || 0) + ' 个直接成员';
       overlay.querySelector('#gd-members-prev').disabled = memberPage <= 1;
       overlay.querySelector('#gd-members-next').disabled = memberPage >= memberTotalPages;
+      pendingAdds.clear();
+      pendingRemoves.clear();
       renderMembers();
+      renderCandidates();
     }
 
     async function loadCandidates() {
@@ -265,53 +280,87 @@ export async function init(ctx) {
       });
       if (candidateSearch) params.set('search', candidateSearch);
       const data = await Api.get('/api/admin/users?' + params.toString());
-      const existing = new Set(members);
-      const users = (data.success ? (data.users || []) : []).filter(u => u.role === 'user' && u.source === 'local');
+      candidateExisting = new Set(members);
+      candidateUsers = (data.success ? (data.users || []) : []).filter(u => u.role === 'user' && u.source === 'local');
       candidatePage = data.page || candidatePage;
       candidateTotalPages = data.total_pages || 1;
       const info = overlay.querySelector('#gd-candidates-info');
       if (info) info.textContent = '第 ' + candidatePage + ' / ' + candidateTotalPages + ' 页，共 ' + (data.total || 0) + ' 个用户';
       overlay.querySelector('#gd-candidates-prev').disabled = candidatePage <= 1;
       overlay.querySelector('#gd-candidates-next').disabled = candidatePage >= candidateTotalPages;
-      if (users.length === 0) {
+      renderCandidates();
+    }
+
+    function renderCandidates() {
+      const el = overlay.querySelector('#gd-candidates');
+      if (!el) return;
+      if (candidateUsers.length === 0) {
         el.innerHTML = '<small class="text-muted">未找到可添加用户</small>';
         return;
       }
-      el.innerHTML = users.map(u => {
-        const disabled = existing.has(u.username);
-        return '<span class="tag' + (disabled ? ' tag-muted' : '') + '">' + esc(u.username) + (disabled ? ' <small>已加入</small>' : ' <button data-add-member="' + esc(u.username) + '">+</button>') + '</span>';
+      el.innerHTML = candidateUsers.map(u => {
+        const isMember = candidateExisting.has(u.username);
+        const isPendingRemove = pendingRemoves.has(u.username);
+        const isPendingAdd = pendingAdds.has(u.username);
+        if (isMember && !isPendingRemove) return '<span class="tag tag-muted">' + esc(u.username) + ' <small>已加入</small></span>';
+        if (isPendingAdd) return '<span class="tag" style="background:#e0f2fe;border-color:#7dd3fc">' + esc(u.username) + ' <small style="color:#0369a1">待加入</small> <button data-undo-add="' + esc(u.username) + '" style="color:#dc2626">&times;</button></span>';
+        return '<span class="tag">' + esc(u.username) + ' <button data-add-member="' + esc(u.username) + '">+</button></span>';
       }).join(' ');
       el.querySelectorAll('[data-add-member]').forEach(btn => {
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', () => {
           const username = btn.dataset.addMember;
-          const res = await Api.post('/api/admin/groups/members/add', { group_name: groupName, usernames: username });
-          if (res.success) {
-            await loadMembers();
-            await loadCandidates();
-            loadGroups();
-          } else {
-            await alertModal(res.error);
-          }
+          pendingAdds.add(username);
+          if (pendingRemoves.has(username)) pendingRemoves.delete(username);
+          renderMembers();
+          renderCandidates();
+          updateStagingInfo();
         });
       });
-    }
-
-    function renderSkills() {
-      const el = overlay.querySelector('#gd-skills');
-      if (skills.length === 0) { el.innerHTML = '<small class="text-muted">暂无绑定技能</small>'; return; }
-      el.innerHTML = skills.map(s => '<span class="tag">' + esc(s) + ' <button data-rm-skill="' + esc(s) + '">&times;</button></span>').join(' ');
-      el.querySelectorAll('[data-rm-skill]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const res = await Api.post('/api/admin/groups/skills/unbind', { group_name: groupName, skill_name: btn.dataset.rmSkill });
-          if (res.success) { skills.splice(skills.indexOf(btn.dataset.rmSkill), 1); renderSkills(); loadGroups(); }
-          else await alertModal(res.error);
+      el.querySelectorAll('[data-undo-add]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          pendingAdds.delete(btn.dataset.undoAdd);
+          renderMembers();
+          renderCandidates();
+          updateStagingInfo();
         });
       });
     }
 
     await loadMembers();
     await loadCandidates();
-    renderSkills();
+
+    overlay.querySelector('#gd-save-btn')?.addEventListener('click', async () => {
+      if (saving) return;
+      saving = true;
+      const saveBtn = overlay.querySelector('#gd-save-btn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = '保存中...';
+      try {
+        const toAdd = Array.from(pendingAdds);
+        const toRemove = Array.from(pendingRemoves);
+        if (toRemove.length > 0) {
+          for (const username of toRemove) {
+            const res = await Api.post('/api/admin/groups/members/remove', { group_name: groupName, username });
+            if (!res.success) { await alertModal('移除 ' + username + ' 失败: ' + (res.error || '未知错误')); saving = false; saveBtn.textContent = '保存'; saveBtn.disabled = false; return; }
+          }
+        }
+        if (toAdd.length > 0) {
+          const res = await Api.post('/api/admin/groups/members/add', { group_name: groupName, usernames: toAdd.length === 1 ? toAdd[0] : toAdd });
+          if (!res.success) { await alertModal('添加成员失败: ' + (res.error || '未知错误')); saving = false; saveBtn.textContent = '保存'; saveBtn.disabled = false; return; }
+        }
+        loadGroups();
+        overlay.remove();
+      } catch (e) {
+        await alertModal('保存失败: ' + e.message);
+        saving = false;
+        saveBtn.textContent = '保存';
+        saveBtn.disabled = false;
+      }
+    });
+
+    overlay.querySelector('#gd-cancel-btn')?.addEventListener('click', () => {
+      overlay.remove();
+    });
 
     overlay.querySelector('#gd-member-search-btn')?.addEventListener('click', async () => {
       memberSearch = overlay.querySelector('#gd-member-search').value.trim();
@@ -360,14 +409,6 @@ export async function init(ctx) {
         candidatePage++;
         await loadCandidates();
       }
-    });
-
-    overlay.querySelector('#gd-bind-btn').addEventListener('click', async () => {
-      const skillName = skillSel.value;
-      if (!skillName) { await alertModal('请选择技能'); return; }
-      const res = await Api.post('/api/admin/groups/skills/bind', { group_name: groupName, skill_name: skillName });
-      if (res.success) { if (!skills.includes(skillName)) skills.push(skillName); renderSkills(); loadGroups(); await alertModal(res.message); }
-      else await alertModal(res.error);
     });
   }
 
