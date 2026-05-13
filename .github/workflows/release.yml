@@ -1,0 +1,199 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  test:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+      - name: Go tests
+        run: go test ./internal/... -v -count=1
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Python tests
+        run: |
+          pip install pytest
+          cd picoaide-desktop && python -m pytest tests/ -v
+
+      - name: JS tests
+        run: cd picoaide-extension && node --test tests/*.test.js
+
+  build-server:
+    needs: [test]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build picoaide (${{ matrix.suffix }})
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          ext=""
+          [ "${GOOS}" = "windows" ] && ext=".exe"
+          go build -ldflags "-X github.com/picoaide/picoaide/internal/config.Version=${version}" -o picoaide-${{ matrix.suffix }}${ext} ./cmd/picoaide/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: picoaide-bin-${{ matrix.suffix }}
+          path: picoaide-${{ matrix.suffix }}*
+
+  build-extension:
+    needs: [test]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Package extension
+        run: sh scripts/package-extension.sh "${GITHUB_REF_NAME#v}" picoaide-extension.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: picoaide-extension
+          path: picoaide-extension.zip
+
+  build-desktop:
+    needs: [test]
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-amd64
+          - os: macos-latest
+            suffix: darwin-arm64
+          - os: windows-latest
+            suffix: windows-amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyinstaller -r picoaide-desktop/requirements.txt
+
+      - name: Set version and build
+        run: |
+          sh scripts/set-desktop-version.sh "${GITHUB_REF_NAME#v}" picoaide-desktop
+          cd picoaide-desktop && pyinstaller --onefile --name picoaide-desktop-${{ matrix.suffix }} main.py
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: picoaide-desktop-${{ matrix.suffix }}
+          path: |
+            picoaide-desktop/dist/picoaide-desktop-${{ matrix.suffix }}*
+            picoaide-desktop/dist/picoaide-desktop-${{ matrix.suffix }}*.exe
+
+  release:
+    needs: [build-server, build-extension, build-desktop]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd artifacts && sha256sum * > checksums.txt
+
+      - name: Generate release body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > body.md << 'BODY'
+          ## 📥 下载指南
+
+          ### 🖥 服务端 PicoAide
+          | 文件 | 平台 | 说明 |
+          |------|------|------|
+          | \`picoaide-linux-amd64\` | Linux x86_64 | 服务器部署（推荐） |
+          | \`picoaide-linux-arm64\` | Linux ARM64 | 树莓派、AWS Graviton 等 |
+          | \`picoaide-darwin-amd64\` | macOS Intel | Intel Mac |
+          | \`picoaide-darwin-arm64\` | macOS Apple Silicon | M1/M2/M3/M4 |
+          | \`picoaide-windows-amd64.exe\` | Windows x86_64 | Windows 服务器 |
+
+          ### 🖥 桌面客户端 PicoAide Desktop
+          | 文件 | 平台 |
+          |------|------|
+          | \`picoaide-desktop-linux-amd64\` | Linux |
+          | \`picoaide-desktop-darwin-arm64\` | macOS |
+          | \`picoaide-desktop-windows-amd64.exe\` | Windows |
+
+          ### 🌐 浏览器插件 PicoAide Extension
+          - \`picoaide-extension.zip\` — Chrome/Edge/Chromium 浏览器插件
+
+          ### ✅ 完整性校验
+          - \`checksums.txt\` — 所有文件的 SHA256 哈希值
+          ```bash
+          # 验证下载文件完整性
+          sha256sum -c checksums.txt --ignore-missing
+          ```
+
+          ---
+
+          ## 📋 更新内容
+
+          BODY
+
+          gh api "repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name='${{ github.ref_name }}' \
+            -f target_commitish='${{ github.sha }}' \
+            --jq '.body' >> body.md
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/*
+          body_path: body.md

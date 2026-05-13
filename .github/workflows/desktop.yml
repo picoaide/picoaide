@@ -1,0 +1,59 @@
+name: Desktop Client CI
+
+on:
+  push:
+    paths:
+      - 'picoaide-desktop/**'
+      - 'scripts/set-desktop-version.sh'
+  workflow_dispatch:
+
+jobs:
+  test:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Python tests
+        run: |
+          pip install pytest
+          cd picoaide-desktop && python -m pytest tests/ -v
+
+  build:
+    needs: [test]
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-amd64
+          - os: macos-latest
+            suffix: darwin-arm64
+          - os: windows-latest
+            suffix: windows-amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyinstaller -r picoaide-desktop/requirements.txt
+
+      - name: Build desktop client (${{ matrix.suffix }})
+        run: cd picoaide-desktop && pyinstaller --onefile --name picoaide-desktop-${{ matrix.suffix }} main.py
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: picoaide-desktop-${{ matrix.suffix }}
+          path: |
+            picoaide-desktop/dist/picoaide-desktop-${{ matrix.suffix }}*
+            picoaide-desktop/dist/picoaide-desktop-${{ matrix.suffix }}*.exe

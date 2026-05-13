@@ -1,0 +1,35 @@
+name: Browser Extension CI
+
+on:
+  push:
+    paths:
+      - 'picoaide-extension/**'
+      - 'scripts/package-extension.sh'
+  workflow_dispatch:
+
+jobs:
+  test:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: JS tests
+        run: cd picoaide-extension && node --test tests/*.test.js
+
+  package:
+    needs: [test]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Package extension
+        run: cd picoaide-extension && zip -qr ../picoaide-extension.zip .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: picoaide-extension
+          path: picoaide-extension.zip

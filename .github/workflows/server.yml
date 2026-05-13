@@ -1,0 +1,80 @@
+name: Server CI
+
+on:
+  push:
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.golangci.yml'
+      - 'Makefile'
+      - 'config.yaml'
+      - 'rules/**'
+      - 'docker/**'
+      - 'scripts/**'
+  workflow_dispatch:
+
+jobs:
+  test:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+      - name: Go tests
+        run: go test ./internal/... -v -count=1
+
+  build:
+    needs: [test]
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build picoaide (${{ matrix.suffix }})
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          ext=""
+          [ "${GOOS}" = "windows" ] && ext=".exe"
+          go build -ldflags "-X github.com/picoaide/picoaide/internal/config.Version=dev" -o picoaide-${{ matrix.suffix }}${ext} ./cmd/picoaide/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: picoaide-${{ matrix.suffix }}
+          path: picoaide-${{ matrix.suffix }}*
