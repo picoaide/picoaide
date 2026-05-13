@@ -1,36 +1,66 @@
-<nav class="nav" id="nav">
-  <div class="nav-container">
+<nav class="nav">
+  <div class="nav-inner">
     <a class="nav-brand" href="{{ "/" | relURL }}">
-      <img class="nav-brand-mark" src="{{ "/images/logo.svg" | relURL }}" alt="{{ .Site.Title }}">
-      <span class="nav-brand-copy">
-        <strong>{{ .Site.Title }}</strong>
-        {{ with .Site.Params.navTagline }}<small>{{ . }}</small>{{ end }}
-      </span>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 236 48" role="img" aria-labelledby="logo-title">
+        <title id="logo-title">{{ .Site.Title }}</title>
+        <defs>
+          <linearGradient id="nbg" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#0f172a"/><stop offset="1" stop-color="#163b73"/>
+          </linearGradient>
+          <linearGradient id="nml" x1="13" y1="12" x2="34" y2="35" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#5eead4"/><stop offset=".55" stop-color="#60a5fa"/><stop offset="1" stop-color="#2563eb"/>
+          </linearGradient>
+        </defs>
+        <rect x="2" y="2" width="44" height="44" rx="11" fill="url(#nbg)"/>
+        <path d="M15 34V14h12.3c5 0 8.2 3.1 8.2 7.5s-3.2 7.4-8.2 7.4H21v5.1h-6Zm6-10.4h5.8c1.8 0 2.9-.8 2.9-2.2 0-1.5-1.1-2.3-2.9-2.3H21v4.5Z" fill="#f8fafc"/>
+        <path d="M13 36.5h22M13 11.5h15.5" stroke="url(#nml)" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="36" cy="13" r="3.4" fill="#5eead4"/>
+        <circle cx="36" cy="35" r="3.4" fill="#60a5fa"/>
+        <text x="58" y="31" font-family="Inter,Microsoft YaHei,sans-serif" font-size="24" font-weight="760" fill="#0f172a">PicoAide</text>
+      </svg>
     </a>
 
     <button class="nav-toggle" id="nav-toggle" aria-label="切换导航菜单" aria-expanded="false">
-      <span class="nav-toggle-bar"></span>
-      <span class="nav-toggle-bar"></span>
-      <span class="nav-toggle-bar"></span>
+      <span></span>
+      <span></span>
+      <span></span>
     </button>
 
-    <ul class="nav-menu" id="nav-menu">
+    <ul class="nav-links" id="nav-menu">
       {{ range .Site.Menus.main }}
-        <li class="nav-item{{ if $.IsMenuCurrent "main" . }} active{{ end }}">
+        <li>
           {{ if .Params.external }}
-            <a class="nav-link nav-link-external" href="{{ .URL }}" target="_blank" rel="noopener noreferrer">
+            <a class="nav-link" href="{{ .URL }}" target="_blank" rel="noopener noreferrer">
               {{ .Name }}
-              <svg class="nav-link-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                <polyline points="15 3 21 3 21 9"></polyline>
-                <line x1="10" y1="14" x2="21" y2="3"></line>
-              </svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
             </a>
           {{ else }}
-            <a class="nav-link" href="{{ .URL | relURL }}">{{ .Name }}</a>
+            <a class="nav-link{{ if $.IsMenuCurrent "main" . }} active{{ end }}" href="{{ .URL | relURL }}">{{ .Name }}</a>
           {{ end }}
         </li>
       {{ end }}
     </ul>
+
+    <a class="nav-gh" href="{{ .Site.Params.github }}" target="_blank" rel="noopener noreferrer">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      Star
+    </a>
+  </div>
+
+  <div class="nav-mobile" id="nav-mobile">
+    {{ range .Site.Menus.main }}
+      {{ if .Params.external }}
+        <a class="nav-link" href="{{ .URL }}" target="_blank" rel="noopener noreferrer">
+          {{ .Name }}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </a>
+      {{ else }}
+        <a class="nav-link{{ if $.IsMenuCurrent "main" . }} active{{ end }}" href="{{ .URL | relURL }}">{{ .Name }}</a>
+      {{ end }}
+    {{ end }}
+    <a class="nav-gh" href="{{ .Site.Params.github }}" target="_blank" rel="noopener noreferrer" style="display:flex">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      Star
+    </a>
   </div>
 </nav>

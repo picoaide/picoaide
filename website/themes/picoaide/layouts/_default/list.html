@@ -4,7 +4,7 @@
     <section class="page-hero">
       <div class="eyebrow">{{ .Section | title }}</div>
       <h1>{{ .Title }}</h1>
-      {{ with .Description }}<p class="page-lead">{{ . }}</p>{{ end }}
+      {{ with .Description }}<p>{{ . }}</p>{{ end }}
     </section>
 
     {{ if .Content }}
@@ -17,14 +17,12 @@
     <section class="post-grid">
       {{ range .Pages }}
       <article class="post-card">
-        <div class="post-card-body">
-          <div class="post-card-meta">
-            {{ with .Params.tags }}<span class="badge">{{ index . 0 }}</span>{{ end }}
-            {{ if .Date }}<time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006-01-02" }}</time>{{ end }}
-          </div>
-          <h2 class="post-card-title"><a href="{{ .RelPermalink }}">{{ .Title }}</a></h2>
-          <p class="post-card-desc">{{ with .Description }}{{ . }}{{ else }}{{ .Summary | plainify | truncate 160 }}{{ end }}</p>
+        <div class="post-card-meta">
+          {{ with .Params.tags }}<span class="post-card-tag">{{ index . 0 }}</span>{{ end }}
+          {{ if .Date }}<time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006-01-02" }}</time>{{ end }}
         </div>
+        <h2 class="post-card-title"><a href="{{ .RelPermalink }}">{{ .Title }}</a></h2>
+        <p class="post-card-desc">{{ with .Description }}{{ . }}{{ else }}{{ .Summary | plainify | truncate 160 }}{{ end }}</p>
       </article>
       {{ end }}
     </section>
