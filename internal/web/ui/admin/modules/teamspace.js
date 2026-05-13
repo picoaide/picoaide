@@ -228,44 +228,61 @@ export async function init(ctx) {
     var f = allFolders.find(function(x) { return x.id === currentId; });
     if (!f) return;
 
-    var tagHtml = '<div class="sf-tag-selector" id="sf-modal-tag">' +
-      '<div class="sf-tag-chips" id="sf-modal-chips"></div>' +
-      '<input type="text" class="sf-tag-input" id="sf-modal-input" placeholder="搜索用户组...">' +
-      '<div class="sf-tag-dropdown" id="sf-modal-dropdown"></div></div>';
-
     var body = '<div class="field"><label>名称 *</label><input type="text" id="sf-modal-name" value="' + esc(f.name) + '"></div>' +
       '<div class="field"><label>描述</label><textarea id="sf-modal-desc" rows="2">' + esc(f.description || '') + '</textarea></div>' +
       '<div class="field"><label>类型</label>' +
         '<label class="toggle-switch"><input type="checkbox" id="sf-modal-public"' + (f.is_public ? ' checked' : '') + '>' +
         '<span class="toggle-switch-control"></span><span class="toggle-switch-label">公共共享</span></label></div>' +
-      '<div class="field"><label>关联用户组</label>' + tagHtml + '</div>' +
-      '<div id="sf-modal-msg" class="msg"></div>';
+      '<div class="field"><label>关联用户组</label>' +
+        '<div class="sf-tag-selector" id="sf-modal-tag">' +
+          '<div class="sf-tag-chips" id="sf-modal-chips"></div>' +
+          '<input type="text" class="sf-tag-input" id="sf-modal-input" placeholder="搜索用户组...">' +
+          '<div class="sf-tag-dropdown" id="sf-modal-dropdown"></div>' +
+        '</div></div>' +
+      '<div id="sf-modal-msg" class="msg"></div>' +
+      '<div class="toolbar" style="margin-top:.75rem">' +
+        '<button class="btn btn-primary" id="sf-modal-save-btn">保存修改</button>' +
+        '<button class="btn btn-outline" id="sf-modal-cancel-btn">取消</button>' +
+      '</div>';
 
-    showModal({ title: '编辑 - ' + f.name, width: '520px', body: body, footer: [
-      { label: '保存修改', value: 'save', primary: true },
-      { label: '取消', value: 'cancel' }
-    ]}).then(async function(val) {
-      if (val !== 'save') return;
-      var name = document.getElementById('sf-modal-name').value.trim();
-      if (!name) { document.getElementById('sf-modal-msg').textContent = '名称不能为空';
-        document.getElementById('sf-modal-msg').className = 'msg msg-err'; return; }
-      var r1 = await Api.post('/api/admin/shared-folders/update', {
-        id: String(currentId), name: name,
-        description: document.getElementById('sf-modal-desc').value.trim(),
-        is_public: document.getElementById('sf-modal-public').checked ? '1' : '0',
-      });
-      if (!r1.success) { showMsg('#sf-modal-msg', r1.error, false); return; }
-      var r2 = await Api.post('/api/admin/shared-folders/groups/set', {
-        folder_id: String(currentId), group_ids: selIds('sf-modal').join(','),
-      });
-      showMsg('#sf-view-msg', r2.message || '已保存', r2.success);
-      if (r2.success) { await loadFolders(); }
-    }).catch(function() {});
+    showModal({ title: '编辑 - ' + f.name, width: '520px', body: body, footer: [] });
 
-    // 初始化模态框内的标签选择器
+    // 初始化标签选择器
     setTimeout(function() {
       initTagSel('sf-modal');
       setSel('sf-modal', f.groups || []);
+    }, 50);
+
+    async function handleSave() {
+      var name = document.getElementById('sf-modal-name').value.trim();
+      if (!name) { document.getElementById('sf-modal-msg').textContent = '名称不能为空';
+        document.getElementById('sf-modal-msg').className = 'msg msg-err'; return; }
+      var desc = document.getElementById('sf-modal-desc').value.trim();
+      var isPublic = document.getElementById('sf-modal-public').checked;
+      var groupIDs = selIds('sf-modal').join(',');
+
+      var r1 = await Api.post('/api/admin/shared-folders/update', {
+        id: String(currentId), name: name,
+        description: desc, is_public: isPublic ? '1' : '0',
+      });
+      if (!r1.success) { showMsg('#sf-modal-msg', r1.error, false); return; }
+      var r2 = await Api.post('/api/admin/shared-folders/groups/set', {
+        folder_id: String(currentId), group_ids: groupIDs,
+      });
+      // 关闭弹窗
+      var overlay = document.querySelector('.modal-overlay');
+      if (overlay) overlay.remove();
+      showMsg('#sf-view-msg', r2.message || '已保存', r2.success);
+      if (r2.success) { await loadFolders(); }
+    }
+
+    // 延迟绑定，确保元素已渲染
+    setTimeout(function() {
+      document.getElementById('sf-modal-save-btn').addEventListener('click', handleSave);
+      document.getElementById('sf-modal-cancel-btn').addEventListener('click', function() {
+        var overlay = document.querySelector('.modal-overlay');
+        if (overlay) overlay.remove();
+      });
     }, 50);
   }
 
