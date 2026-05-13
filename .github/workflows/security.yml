@@ -2,7 +2,6 @@ name: Security Analysis
 
 on:
   push:
-  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -26,14 +25,3 @@ jobs:
       - uses: github/codeql-action/autobuild@v4
 
       - uses: github/codeql-action/analyze@v4
-
-  dependency-review:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/dependency-review-action@v5
