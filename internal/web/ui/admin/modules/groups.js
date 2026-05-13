@@ -293,7 +293,7 @@ export async function init(ctx) {
             await alertModal(res.error);
           }
         });
-      }
+      });
     }
 
     function renderSkills() {

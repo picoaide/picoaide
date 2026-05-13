@@ -227,6 +227,28 @@ func RemoveAllUserData(cfg *config.GlobalConfig) error {
 // Cookie 与安全配置
 // ============================================================
 
+// DeployGroupSkillsToUser 部署用户所属组绑定的技能到用户目录
+func DeployGroupSkillsToUser(cfg *config.GlobalConfig, username string) {
+  groups, err := auth.GetGroupsForUser(username)
+  if err != nil {
+    return
+  }
+  skillsDir := config.SkillsDirPath()
+  targetSkillsDir := filepath.Join(UserDir(cfg, username), ".picoclaw", "workspace", "skills")
+
+  for _, groupName := range groups {
+    skills, err := auth.GetGroupSkills(groupName)
+    if err != nil {
+      continue
+    }
+    for _, skillName := range skills {
+      srcPath := filepath.Join(skillsDir, skillName)
+      dstPath := filepath.Join(targetSkillsDir, skillName)
+      _ = util.CopyDir(srcPath, dstPath)
+    }
+  }
+}
+
 // SyncCookies 将域名对应的 Cookie 字符串写入用户的 .security.yml
 // 格式：cookies: { domain.com: "name1=val1; name2=val2" }
 func SyncCookies(cfg *config.GlobalConfig, username, domain, cookieStr string) error {
