@@ -17,11 +17,9 @@ export async function init(ctx) {
     }
 
     if (arrow) arrow.addEventListener('mousedown', function(e) { e.preventDefault(); toggleDrop(); });
-    if (wrap) wrap.addEventListener('mousedown', function(e) {
-      if (e.target === wrap) { e.preventDefault(); input.focus(); }
-    });
+    if (wrap) wrap.addEventListener('mousedown', function(e) { e.preventDefault(); input.focus(); });
     input.addEventListener('focus', function() { if (!dd.classList.contains('open')) toggleDrop(true); });
-    input.addEventListener('blur', function() { setTimeout(function() { toggleDrop(false); }, 200); });
+    input.addEventListener('blur', function() { toggleDrop(false); });
     input.addEventListener('input', render);
     input.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') { toggleDrop(false); input.blur(); return; }
