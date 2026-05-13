@@ -3,6 +3,7 @@ package user
 import (
   "encoding/json"
   "fmt"
+  "log/slog"
   "os"
   "path/filepath"
   "regexp"
@@ -244,7 +245,10 @@ func DeployGroupSkillsToUser(cfg *config.GlobalConfig, username string) {
     for _, skillName := range skills {
       srcPath := filepath.Join(skillsDir, skillName)
       dstPath := filepath.Join(targetSkillsDir, skillName)
-      _ = util.CopyDir(srcPath, dstPath)
+      os.RemoveAll(dstPath)
+      if err := util.CopyDir(srcPath, dstPath); err != nil {
+        slog.Warn("部署技能到用户失败", "skill", skillName, "username", username, "error", err)
+      }
     }
   }
 }

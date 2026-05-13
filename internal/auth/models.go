@@ -99,17 +99,6 @@ func (UserGroup) TableName() string {
   return "user_groups"
 }
 
-// GroupSkill 组-技能关联表
-type GroupSkill struct {
-  ID        int64  `xorm:"pk autoincr 'id'"`
-  GroupID   int64  `xorm:"notnull 'group_id'"`
-  SkillName string `xorm:"notnull 'skill_name'"`
-}
-
-func (GroupSkill) TableName() string {
-  return "group_skills"
-}
-
 // UserChannel 记录用户可见渠道和启用状态。具体密钥仍存放在用户自己的 .security.yml。
 type UserChannel struct {
   ID            int64  `xorm:"pk autoincr 'id'"`
@@ -169,6 +158,43 @@ func (SharedFolderMount) TableName() string {
 type ShareMount struct {
   Source string
   Target string
+}
+
+// SkillRecord 技能元数据表
+type SkillRecord struct {
+  ID          int64  `xorm:"pk autoincr 'id'"`
+  Name        string `xorm:"unique notnull 'name'"`
+  Description string `xorm:"notnull 'description'"`
+  UpdatedAt   string `xorm:"notnull 'updated_at'"`
+}
+
+func (SkillRecord) TableName() string {
+  return "skills"
+}
+
+// UserSkill 用户-技能直接绑定表
+type UserSkill struct {
+  ID        int64  `xorm:"pk autoincr 'id'"`
+  Username  string `xorm:"notnull unique(username, skill_name) 'username'"`
+  SkillName string `xorm:"notnull 'skill_name'"`
+  Source    string `xorm:"notnull default '' 'source'"`
+  UpdatedAt string `xorm:"updated 'updated_at'"`
+}
+
+func (UserSkill) TableName() string {
+  return "user_skills"
+}
+
+// GroupSkill 组-技能关联表
+type GroupSkill struct {
+  ID        int64  `xorm:"pk autoincr 'id'"`
+  GroupID   int64  `xorm:"notnull 'group_id'"`
+  SkillName string `xorm:"notnull 'skill_name'"`
+  Source    string `xorm:"notnull default '' 'source'"`
+}
+
+func (GroupSkill) TableName() string {
+  return "group_skills"
 }
 
 // GroupInfo 组信息（包含成员数和绑定技能数），非数据库模型，仅用于查询结果

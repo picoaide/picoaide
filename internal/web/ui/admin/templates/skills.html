@@ -4,18 +4,39 @@
     <h2>技能库</h2>
     <p>统一安装、部署和回收企业 Skill，通过用户组将标准能力包交付给目标人群。</p>
   </div>
+  <div class="page-actions">
+    <button class="btn btn-primary" id="batch-deploy-btn">批量部署</button>
+  </div>
 </section>
 
-<h3>已安装技能</h3>
-<div class="list-controls">
+<div class="surface-panel" style="margin-bottom:1.2rem">
+  <div class="toolbar" style="padding:.75rem .85rem;border-bottom:1px solid var(--border-light)">
+    <div>
+      <div class="toolbar-title">技能源</div>
+      <div class="toolbar-subtitle">管理所有技能来源，可从 SkillHub 市场浏览安装，也可接入企业 Git 仓库</div>
+    </div>
+    <div>
+      <button class="btn btn-primary" id="add-git-source-btn">+ 添加 Git 源</button>
+    </div>
+  </div>
+  <div id="sources-list" style="padding:.5rem .85rem"></div>
+</div>
+
+<div class="toolbar" style="margin-bottom:.65rem">
+  <div>
+    <div class="toolbar-title">已安装技能</div>
+  </div>
+  <div id="skills-source-filter" style="display:flex;gap:.25rem"></div>
+</div>
+<div class="list-controls" style="margin-bottom:.65rem">
   <div class="list-search">
-    <input type="search" id="skills-search" placeholder="搜索技能名称">
+    <input type="search" id="skills-search" placeholder="搜索技能名称或描述">
     <button class="btn btn-outline btn-sm" id="skills-search-btn">搜索</button>
   </div>
 </div>
 <div class="table-wrap">
   <table>
-    <thead><tr><th>技能名称</th><th>文件数</th><th>大小</th><th>更新时间</th><th class="actions-cell">操作</th></tr></thead>
+    <thead><tr><th>技能名称</th><th>来源</th><th>文件数</th><th>大小</th><th>更新时间</th><th class="actions-cell">操作</th></tr></thead>
     <tbody id="skills-tbody"></tbody>
   </table>
 </div>
@@ -32,95 +53,147 @@
 <p id="skills-empty" class="text-muted text-center mt-1 hidden">暂无已安装技能</p>
 <div id="skills-msg" class="msg"></div>
 
-<h3>部署技能</h3>
-<div class="surface-panel">
-  <div class="surface-panel-body">
-    <div class="toolbar">
-      <div>
-        <div class="toolbar-title">部署目标</div>
-        <div class="toolbar-subtitle">先选择技能和范围，再执行部署</div>
-      </div>
-      <button class="btn btn-primary" id="deploy-btn">部署</button>
-    </div>
-    <div class="grid-2">
-      <div class="field">
-        <label>技能</label>
-        <select id="deploy-skill"><option value="">所有技能</option></select>
-      </div>
-      <div class="field">
-        <label>目标类型</label>
-        <select id="deploy-target-type">
-          <option value="all">所有用户</option>
-          <option value="user">按用户</option>
-          <option value="group">按组</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>搜索目标</label>
-        <div class="row">
-          <input type="search" id="deploy-target-search" placeholder="输入用户名或组名" style="flex:1">
-          <button class="btn btn-sm btn-outline" id="deploy-target-search-btn">搜索</button>
-        </div>
-        <select id="deploy-target">
-          <option value="all">所有用户</option>
-        </select>
-      </div>
-    </div>
-  </div>
-</div>
 <div id="deploy-msg" class="msg"></div>
-
 <hr>
+<div id="task-status-bar" class="hidden"></div>
 
-<h3>添加技能</h3>
-<div class="surface-panel">
-  <div class="surface-panel-body">
-    <div class="segmented mb-1">
-      <button class="segment active" data-skill-source="zip" type="button">Zip 压缩包</button>
-      <button class="segment" data-skill-source="git" type="button">Git 地址</button>
+<div id="registry-modal" class="modal-overlay hidden" style="display:none">
+  <div class="modal" style="max-width:800px;max-height:90vh;display:flex;flex-direction:column">
+    <div class="modal-header" id="registry-modal-header">
+      浏览技能市场 <button class="modal-close-btn" id="registry-modal-close">&times;</button>
     </div>
-    <input type="hidden" id="skill-source" value="zip">
-    <div class="field"><label>技能名称</label><input type="text" id="skill-name" placeholder="my-skill"></div>
-    <div id="skill-source-zip">
-      <div class="inline-file">
-        <div class="file-summary" id="skill-upload-file-name">未选择 zip 文件</div>
-        <label class="btn btn-sm btn-outline" style="cursor:pointer">选择 zip<input type="file" id="skill-upload-file" accept=".zip,application/zip" class="hidden"></label>
+    <div class="modal-body" style="flex:1;overflow-y:auto;min-height:0">
+      <div class="toolbar" style="margin-bottom:.65rem">
+        <input type="search" id="registry-search" placeholder="搜索技能..." style="flex:1;margin-right:.5rem">
+        <button class="btn btn-sm btn-outline" id="registry-search-btn">搜索</button>
       </div>
-      <p class="text-sm text-muted mt-1">压缩包可以包含一个顶层目录，上传后会安装为上方填写的技能名称。重复导入同名技能会覆盖旧内容。</p>
+      <div id="registry-list"></div>
+      <div id="registry-empty" class="text-muted text-center hidden" style="padding:2rem">暂无可用技能</div>
     </div>
-    <div id="skill-source-git" class="hidden">
-      <div class="field"><label>Git 地址</label><input type="text" id="repo-url" placeholder="https://github.com/org/repo.git"></div>
-      <div class="grid-2">
-        <div class="field"><label>分支 / Tag</label><div class="row">
-          <select id="repo-ref-type" style="min-width:120px">
-            <option value="branch">分支</option>
-            <option value="tag">Tag</option>
-          </select>
-          <input type="text" id="repo-ref" placeholder="main / v1.2.3" style="flex:1">
-        </div></div>
-        <div class="field"><label>凭据</label>
-          <label class="toggle-switch toggle-switch-field">
-            <input type="checkbox" id="repo-use-credentials">
-            <span class="toggle-switch-control" aria-hidden="true"></span>
-            <span class="toggle-switch-label">添加凭据</span>
-          </label>
-        </div>
-      </div>
-      <div id="repo-new-credentials" class="hidden">
-        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:.5rem">
-          <strong>凭据</strong>
-          <button class="btn btn-sm btn-outline" id="repo-new-add-cred">+ 添加凭据</button>
-        </div>
-        <div id="repo-new-cred-list"></div>
-      </div>
-      <p class="text-sm text-muted">不添加凭据时按公开仓库克隆。凭据方式会根据 Git 地址自动判断。</p>
-    </div>
-    <div class="card-footer">
-      <button class="btn btn-primary" id="skill-add-btn">导入技能</button>
+    <div class="modal-footer">
+      <span class="text-muted text-sm" id="registry-status"></span>
+      <button class="btn btn-outline" id="registry-modal-close-btn">关闭</button>
     </div>
   </div>
 </div>
-<div id="repo-msg" class="msg"></div>
 
-<h3>Git 技能更新</h3>
-<div id="repos-list"></div>
+<div id="deploy-wizard" class="modal-overlay" style="display:none">
+  <div class="modal" style="max-width:640px;max-height:90vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <span id="dw-title">批量部署</span>
+      <button class="modal-close-btn" id="dw-close">&times;</button>
+    </div>
+    <div class="modal-body" style="flex:1;overflow-y:auto;min-height:0">
+      <div id="dw-step-1">
+        <p class="text-muted text-sm" style="margin-bottom:.85rem">选择要部署的技能，支持多选。</p>
+        <div class="surface-panel" style="border:1px solid var(--border-light)">
+          <div style="padding:.55rem .75rem;border-bottom:1px solid var(--border-light);font-weight:700;font-size:.85rem">选择技能</div>
+          <div style="padding:.5rem .75rem;border-bottom:1px solid var(--border-light)">
+            <input type="search" id="dw-skill-search" placeholder="搜索技能..." style="width:100%;font-size:.82rem;padding:.3rem .5rem">
+          </div>
+          <div id="dw-skill-list" style="max-height:240px;overflow-y:auto;padding:.3rem .5rem"></div>
+        </div>
+      </div>
+      <div id="dw-step-2" class="hidden">
+        <p class="text-muted text-sm" style="margin-bottom:.85rem">选择部署目标。</p>
+        <div style="display:flex;gap:.35rem;margin-bottom:.65rem">
+          <button class="btn btn-sm deploy-target-mode active" data-dwmode="all" style="flex:1">所有用户</button>
+          <button class="btn btn-sm deploy-target-mode" data-dwmode="user" style="flex:1">按用户</button>
+          <button class="btn btn-sm deploy-target-mode" data-dwmode="group" style="flex:1">按组</button>
+        </div>
+        <div class="surface-panel" style="border:1px solid var(--border-light)">
+          <div style="padding:.5rem .75rem;border-bottom:1px solid var(--border-light)" id="dw-target-search-wrap" class="hidden">
+            <input type="search" id="dw-target-search" placeholder="搜索..." style="width:100%;font-size:.82rem;padding:.3rem .5rem">
+          </div>
+          <div id="dw-target-list" style="max-height:260px;overflow-y:auto;padding:.3rem .5rem">
+            <p class="text-muted text-sm" style="padding:.5rem">部署到所有用户</p>
+          </div>
+        </div>
+        <div style="margin-top:.65rem;font-size:.85rem;color:var(--text-muted)" id="dw-summary">未选择</div>
+      </div>
+      <div id="dw-step-3" class="hidden">
+        <div style="text-align:center;padding:1.5rem 0">
+          <div style="font-size:3rem;margin-bottom:.5rem">🚀</div>
+          <div style="font-weight:700;font-size:1.1rem">部署中...</div>
+          <div class="task-bar" style="margin-top:.85rem">
+            <div class="task-bar-progress">
+              <div class="task-bar-text" id="dw-progress-text">准备中</div>
+              <div class="task-bar-progress-bar" style="margin-top:.35rem">
+                <div class="task-bar-progress-fill" id="dw-progress-fill" style="width:0%"></div>
+              </div>
+            </div>
+          </div>
+          <div class="text-muted text-sm" style="margin-top:.5rem" id="dw-progress-detail"></div>
+        </div>
+      </div>
+      <div id="dw-step-4" class="hidden">
+        <div style="text-align:center;padding:1.5rem 0">
+          <div style="font-size:3rem;margin-bottom:.5rem" id="dw-done-icon">✅</div>
+          <div style="font-weight:700;font-size:1.1rem" id="dw-done-title">部署完成</div>
+          <div class="text-muted text-sm" style="margin-top:.3rem" id="dw-done-desc"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer" id="dw-footer">
+      <button class="btn btn-outline" id="dw-cancel">取消</button>
+      <button class="btn btn-primary" id="dw-next">下一步</button>
+    </div>
+  </div>
+</div>
+
+<div id="git-source-wizard" class="modal-overlay" style="display:none">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span id="wizard-title">添加 Git 源</span>
+      <button class="modal-close-btn" id="wizard-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="wizard-step-1">
+        <p class="text-muted text-sm" style="margin-bottom:1rem">输入 Git 仓库地址，PicoAide 会自动扫描其中的技能。</p>
+        <div class="field">
+          <label>源名称</label>
+          <input type="text" id="wizard-name" placeholder="如 company-tools">
+          <small class="text-muted" style="font-size:.75rem">用作文件夹名称，同时也是技能的来源标记</small>
+        </div>
+        <div class="field">
+          <label>仓库 URL</label>
+          <input type="text" id="wizard-url" placeholder="https://github.com/org/repo.git">
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label>引用类型</label>
+            <select id="wizard-ref-type">
+              <option value="branch">分支</option>
+              <option value="tag">Tag</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>引用值</label>
+            <input type="text" id="wizard-ref" placeholder="main / v1.2.3">
+          </div>
+        </div>
+        <div id="wizard-error" class="msg msg-err hidden" style="margin-top:.5rem"></div>
+      </div>
+      <div id="wizard-step-2" class="hidden">
+        <p class="text-muted text-sm" style="margin-bottom:1rem">克隆仓库并扫描技能...</p>
+        <div class="task-bar" style="margin-bottom:.5rem">
+          <div class="task-bar-progress">
+            <div class="task-bar-text" id="wizard-status">准备中</div>
+          </div>
+        </div>
+        <div id="wizard-log" style="max-height:200px;overflow-y:auto;background:#0f172a;color:#e2e8f0;border-radius:6px;padding:.65rem .85rem;font-family:monospace;font-size:.78rem;line-height:1.6;white-space:pre-wrap"></div>
+      </div>
+      <div id="wizard-step-3" class="hidden">
+        <div style="text-align:center;padding:1.5rem 0">
+          <div style="font-size:3rem;margin-bottom:.5rem">✅</div>
+          <div style="font-weight:700;font-size:1.1rem" id="wizard-done-title">添加成功</div>
+          <div class="text-muted text-sm" style="margin-top:.3rem" id="wizard-done-desc"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer" id="wizard-footer">
+      <button class="btn btn-outline" id="wizard-cancel">取消</button>
+      <button class="btn btn-primary" id="wizard-next">下一步</button>
+    </div>
+  </div>
+</div>

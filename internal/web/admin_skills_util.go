@@ -1,7 +1,7 @@
 package web
 
 import (
-  "archive/zip"
+  "errors"
   "fmt"
   "io"
   "io/fs"
@@ -10,12 +10,38 @@ import (
   "strings"
 
   "github.com/picoaide/picoaide/internal/config"
+  "github.com/picoaide/picoaide/internal/skill"
   "github.com/picoaide/picoaide/internal/util"
 )
 
+// renameFallback 先尝试原子重命名，跨文件系统时回退到复制+删除
+func renameFallback(src, dst string) error {
+  if err := os.Rename(src, dst); err == nil {
+    return nil
+  } else if errors.Is(err, os.ErrExist) {
+    return err
+  }
+  // 跨设备（EXDEV）：改用复制
+  if err := util.CopyDir(src, dst); err != nil {
+    return err
+  }
+  return os.RemoveAll(src)
+}
+
 // ============================================================
-// 技能文件操作工具
+// 技能文件操作工具（单技能仓库）
 // ============================================================
+
+func skillReposDir() string {
+  if hcfg, err := config.LoadHome(); err == nil && hcfg != nil && hcfg.WorkDir != "" {
+    return filepath.Join(hcfg.WorkDir, "skill-repos")
+  }
+  wd, err := os.Getwd()
+  if err != nil {
+    return "./skill-repos"
+  }
+  return filepath.Join(wd, "skill-repos")
+}
 
 func cleanPathSegment(value string) (string, error) {
   cleaned := filepath.Base(strings.TrimSpace(value))
@@ -63,120 +89,38 @@ func copyDirBetweenRoots(source *os.Root, sourceDir string, target *os.Root, tar
   })
 }
 
-func copySkillZipContents(reader *zip.Reader, skillName string) error {
-  skillDir := config.SkillsDirPath()
-  if err := os.MkdirAll(skillDir, 0755); err != nil {
-    return err
-  }
-  targetDir := filepath.Join(skillDir, skillName)
-  if err := os.RemoveAll(targetDir); err != nil {
-    return err
-  }
-
-  tempDir, err := os.MkdirTemp(filepath.Dir(skillDir), ".skill-upload-*")
-  if err != nil {
-    return err
-  }
-  defer os.RemoveAll(tempDir)
-  tempRoot, err := os.OpenRoot(tempDir)
-  if err != nil {
-    return err
-  }
-  defer tempRoot.Close()
-
-  prefix := commonZipRootDir(reader.File)
-  for _, file := range reader.File {
-    name := strings.TrimPrefix(filepath.ToSlash(file.Name), "/")
-    if name == "" || strings.HasSuffix(name, "/") {
-      continue
-    }
-    if prefix != "" {
-      name = strings.TrimPrefix(name, prefix+"/")
-    }
-    if name == "" {
-      continue
-    }
-    cleanName := filepath.Clean(filepath.FromSlash(name))
-    if cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(os.PathSeparator)) || filepath.IsAbs(cleanName) {
-      return fmt.Errorf("zip 包包含不安全路径: %s", file.Name)
-    }
-    if file.FileInfo().IsDir() {
-      if err := tempRoot.MkdirAll(cleanName, file.Mode()); err != nil {
-        return err
-      }
-      continue
-    }
-    if err := tempRoot.MkdirAll(filepath.Dir(cleanName), 0755); err != nil {
-      return err
-    }
-    src, err := file.Open()
-    if err != nil {
-      return err
-    }
-    dst, err := tempRoot.OpenFile(cleanName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, file.Mode())
-    if err != nil {
-      src.Close()
-      return err
-    }
-    _, copyErr := io.Copy(dst, src)
-    closeErr := dst.Close()
-    src.Close()
-    if copyErr != nil {
-      return copyErr
-    }
-    if closeErr != nil {
-      return closeErr
-    }
-  }
-  if err := os.Rename(tempDir, targetDir); err != nil {
-    return err
-  }
-  return nil
-}
-
-func commonZipRootDir(files []*zip.File) string {
-  root := ""
-  for _, file := range files {
-    name := strings.Trim(filepath.ToSlash(file.Name), "/")
-    if name == "" {
-      continue
-    }
-    first := strings.SplitN(name, "/", 2)[0]
-    if root == "" {
-      root = first
-      continue
-    }
-    if root != first {
-      return ""
-    }
-  }
-  return root
-}
-
-func syncGitRepoToSkill(repoName string) error {
+// syncGitRepoToSkill 将单技能仓库同步到 skill/ 目录，返回解析到的元数据
+func syncGitRepoToSkill(repoName string) (*skill.Metadata, error) {
   repoDir := filepath.Join(skillReposDir(), repoName)
   skillDir := config.SkillsDirPath()
   if err := os.MkdirAll(skillDir, 0755); err != nil {
-    return err
+    return nil, err
   }
-  targetDir := filepath.Join(skillDir, repoName)
+
+  meta, err := skill.ParseAndValidate(repoDir)
+  if err != nil {
+    return nil, fmt.Errorf("SKILL.md 校验失败: %w", err)
+  }
+  skillName := meta.Name
+
+  targetDir := filepath.Join(skillDir, skillName)
   if err := os.RemoveAll(targetDir); err != nil {
-    return err
+    return nil, fmt.Errorf("删除旧技能目录失败: %w", err)
   }
 
   tempDir, err := os.MkdirTemp(filepath.Dir(skillDir), ".skill-git-*")
   if err != nil {
-    return err
+    return nil, err
   }
   defer os.RemoveAll(tempDir)
 
-  err = filepath.WalkDir(repoDir, func(path string, entry os.DirEntry, err error) error {
-    if err != nil {
-      return err
+  err = filepath.WalkDir(repoDir, func(path string, entry os.DirEntry, walkErr error) error {
+    if walkErr != nil {
+      return walkErr
     }
-    relPath, err := filepath.Rel(repoDir, path)
-    if err != nil {
-      return err
+    relPath, rErr := filepath.Rel(repoDir, path)
+    if rErr != nil {
+      return rErr
     }
     if relPath == "." {
       return nil
@@ -188,28 +132,28 @@ func syncGitRepoToSkill(repoName string) error {
       }
       return nil
     }
-    info, err := entry.Info()
-    if err != nil {
-      return err
-    }
-    if info.Mode()&os.ModeSymlink != 0 {
+    if entry.Type()&os.ModeSymlink != 0 {
       return nil
+    }
+    info, iErr := entry.Info()
+    if iErr != nil {
+      return iErr
     }
     targetPath := filepath.Join(tempDir, relPath)
     if entry.IsDir() {
       return os.MkdirAll(targetPath, info.Mode())
     }
-    if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-      return err
+    if mkErr := os.MkdirAll(filepath.Dir(targetPath), 0755); mkErr != nil {
+      return mkErr
     }
-    src, err := os.Open(path)
-    if err != nil {
-      return err
+    src, sErr := os.Open(path)
+    if sErr != nil {
+      return sErr
     }
-    dst, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
-    if err != nil {
+    dst, dErr := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+    if dErr != nil {
       src.Close()
-      return err
+      return dErr
     }
     _, copyErr := io.Copy(dst, src)
     closeErr := dst.Close()
@@ -220,7 +164,11 @@ func syncGitRepoToSkill(repoName string) error {
     return closeErr
   })
   if err != nil {
-    return err
+    return nil, err
   }
-  return os.Rename(tempDir, targetDir)
+
+  if err := renameFallback(tempDir, targetDir); err != nil {
+    return nil, err
+  }
+  return meta, nil
 }

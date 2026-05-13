@@ -130,8 +130,41 @@ type SkillRepo struct {
   LastPull    string                `yaml:"last_pull" json:"last_pull"`
 }
 
+// RegistrySource 注册源（如 SkillHub）
+type RegistrySource struct {
+  Name                string `yaml:"name" json:"name"`
+  DisplayName         string `yaml:"display_name" json:"display_name"`
+  IndexURL            string `yaml:"index_url" json:"index_url"`
+  SearchURL           string `yaml:"search_url,omitempty" json:"search_url,omitempty"`
+  DownloadURLTemplate string `yaml:"download_url_template,omitempty" json:"download_url_template,omitempty"`
+  PrimaryDownloadURL  string `yaml:"primary_download_url,omitempty" json:"primary_download_url,omitempty"`
+  AuthHeader          string `yaml:"auth_header,omitempty" json:"-"`
+  Enabled             bool   `yaml:"enabled" json:"enabled"`
+  LastRefresh         string `yaml:"last_refresh" json:"last_refresh"`
+}
+
+// GitSource 以 Git 仓库为后端的技能源
+type GitSource struct {
+  Name        string                `yaml:"name" json:"name"`
+  URL         string                `yaml:"url" json:"url"`
+  Ref         string                `yaml:"ref,omitempty" json:"ref,omitempty"`
+  RefType     string                `yaml:"ref_type,omitempty" json:"ref_type,omitempty"` // "branch" | "tag"
+  Credentials []SkillRepoCredential `yaml:"credentials,omitempty" json:"credentials,omitempty"`
+  Enabled     bool                  `yaml:"enabled" json:"enabled"`
+  LastPull    string                `yaml:"last_pull" json:"last_pull"`
+}
+
+// SkillsSourceWrapper 用于 JSON/YAML 序列化分派
+type SkillsSourceWrapper struct {
+  Type   string        `yaml:"type" json:"type"`
+  Name   string        `yaml:"name" json:"name"`
+  Git    *GitSource    `yaml:",inline" json:",inline"`
+  Reg    *RegistrySource `yaml:",inline" json:",inline"`
+}
+
 type SkillsConfig struct {
-  Repos []SkillRepo `yaml:"repos"`
+  Repos   []SkillRepo          `yaml:"repos" json:"-"`
+  Sources []SkillsSourceWrapper `yaml:"sources" json:"sources"`
 }
 
 type GlobalConfig struct {
@@ -233,13 +266,16 @@ func (cfg *GlobalConfig) SyncIntervalDuration() time.Duration {
   return d
 }
 
-// SkillsDirPath 返回技能目录路径（使用工作目录）
+// SkillsDirPath 返回技能目录路径（优先使用 HomeConfig.WorkDir）
 func SkillsDirPath() string {
+  if hcfg, err := LoadHome(); err == nil && hcfg != nil && hcfg.WorkDir != "" {
+    return filepath.Join(hcfg.WorkDir, "skills")
+  }
   wd, err := os.Getwd()
   if err != nil {
-    return "./skill"
+    return "./skills"
   }
-  return filepath.Join(wd, "skill")
+  return filepath.Join(wd, "skills")
 }
 
 func RuleCacheDir() string {
@@ -483,6 +519,9 @@ func LoadFromDB() (*GlobalConfig, error) {
     if err := json.Unmarshal([]byte(v), &skills); err == nil {
       cfg.Skills = skills
     }
+  }
+  if len(cfg.Skills.Sources) == 0 {
+    cfg.Skills.Sources = DefaultGlobalConfig().Skills.Sources
   }
 
   return cfg, nil
@@ -800,7 +839,24 @@ func DefaultGlobalConfig() *GlobalConfig {
         },
       },
     },
-    Skills: SkillsConfig{Repos: []SkillRepo{}},
+    Skills: SkillsConfig{
+      Repos: []SkillRepo{},
+      Sources: []SkillsSourceWrapper{
+        {
+          Type: "registry",
+          Name: "skillhub.cn",
+          Reg: &RegistrySource{
+            Name:                "skillhub.cn",
+            DisplayName:         "SkillHub 中文技能市场",
+            IndexURL:            "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills.json",
+            SearchURL:           "https://lightmake.site/api/v1/search",
+            PrimaryDownloadURL:  "https://lightmake.site/api/v1/download?slug={slug}",
+            DownloadURLTemplate: "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/{slug}.zip",
+            Enabled:             true,
+          },
+        },
+      },
+    },
   }
 }
 

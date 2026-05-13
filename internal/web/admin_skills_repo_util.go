@@ -2,6 +2,7 @@ package web
 
 import (
   "fmt"
+  "io"
   "os"
   "os/exec"
   "path/filepath"
@@ -347,6 +348,7 @@ exec git pull --ff-only
 // gitCmdWithCredential — 统一 Git 命令执行
 // ============================================================
 
+// gitCmdWithCredential — 统一 Git 命令执行（返回输出）
 func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, gitScript string, extraEnv ...string) (string, error) {
   env := os.Environ()
   env = append(env, "GIT_TERMINAL_PROMPT=0")
@@ -378,7 +380,7 @@ func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, gitScript
       os.Remove(keyFile.Name())
       return "", err
     }
-    wrapperContent := "#!/bin/sh\nexec ssh -i \"$PICOAIDE_GIT_SSH_KEY\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no \"$@\"\n"
+    wrapperContent := "#!/bin/sh\nexec ssh -i \"" + keyFile.Name() + "\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \"$@\"\n"
     if _, err := sshWrapper.WriteString(wrapperContent); err != nil {
       sshWrapper.Close()
       os.Remove(sshWrapper.Name())
@@ -397,7 +399,6 @@ func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, gitScript
       return "", err
     }
     env = append(env, "GIT_SSH_COMMAND="+sshWrapper.Name())
-    env = append(env, "PICOAIDE_GIT_SSH_KEY="+keyFile.Name())
     cleanups = append(cleanups, func() {
       _ = os.Remove(keyFile.Name())
       _ = os.Remove(sshWrapper.Name())
@@ -473,4 +474,177 @@ func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, gitScript
     return "", fmt.Errorf("%w\n%s", err, stderr.String())
   }
   return stdout.String(), nil
+}
+
+// writeSSE 写一行 SSE data 事件
+func writeSSE(w io.Writer, flush func(), data string) {
+  fmt.Fprintf(w, "data: %s\n\n", data)
+  flush()
+}
+
+// gitCmdWithStream 执行 git 命令并流式输出 stdout/stderr 到 writer
+func gitCmdWithStream(dir string, cred config.SkillRepoCredential, gitScript string, w io.Writer, flush func(), extraEnv ...string) error {
+  env := os.Environ()
+  env = append(env, "GIT_TERMINAL_PROMPT=0")
+  env = append(env, extraEnv...)
+
+  var cleanups []func()
+
+  switch cred.Mode {
+  case "ssh":
+    keyFile, err := os.CreateTemp("", "picoaide-git-key-*")
+    if err != nil {
+      return err
+    }
+    if _, err := keyFile.WriteString(cred.Secret); err != nil {
+      keyFile.Close()
+      os.Remove(keyFile.Name())
+      return err
+    }
+    if err := keyFile.Chmod(0600); err != nil {
+      keyFile.Close()
+      os.Remove(keyFile.Name())
+      return err
+    }
+    if err := keyFile.Close(); err != nil {
+      os.Remove(keyFile.Name())
+      return err
+    }
+    sshWrapper, err := os.CreateTemp("", "picoaide-git-ssh-*")
+    if err != nil {
+      os.Remove(keyFile.Name())
+      return err
+    }
+    wrapperContent := "#!/bin/sh\nexec ssh -i \"" + keyFile.Name() + "\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \"$@\"\n"
+    if _, err := sshWrapper.WriteString(wrapperContent); err != nil {
+      sshWrapper.Close()
+      os.Remove(sshWrapper.Name())
+      os.Remove(keyFile.Name())
+      return err
+    }
+    if err := sshWrapper.Chmod(0700); err != nil {
+      sshWrapper.Close()
+      os.Remove(sshWrapper.Name())
+      os.Remove(keyFile.Name())
+      return err
+    }
+    if err := sshWrapper.Close(); err != nil {
+      os.Remove(sshWrapper.Name())
+      os.Remove(keyFile.Name())
+      return err
+    }
+    env = append(env, "GIT_SSH_COMMAND="+sshWrapper.Name())
+    cleanups = append(cleanups, func() {
+      _ = os.Remove(keyFile.Name())
+      _ = os.Remove(sshWrapper.Name())
+    })
+  default:
+    script, err := os.CreateTemp("", "picoaide-git-askpass-*")
+    if err != nil {
+      return err
+    }
+    content := "#!/bin/sh\ncase \"$1\" in\n*Username*) printf '%s' \"${PICOAIDE_GIT_USERNAME:-" + skillRepoDefaultUsername(cred.Provider) + "}\" ;;\n*) printf '%s' \"${PICOAIDE_GIT_PASSWORD:-}\" ;;\nesac\n"
+    if _, err := script.WriteString(content); err != nil {
+      script.Close()
+      os.Remove(script.Name())
+      return err
+    }
+    if err := script.Chmod(0700); err != nil {
+      script.Close()
+      os.Remove(script.Name())
+      return err
+    }
+    if err := script.Close(); err != nil {
+      os.Remove(script.Name())
+      return err
+    }
+    env = append(env, "GIT_ASKPASS="+script.Name())
+    env = append(env, "PICOAIDE_GIT_USERNAME="+cred.Username)
+    env = append(env, "PICOAIDE_GIT_PASSWORD="+cred.Secret)
+    cleanups = append(cleanups, func() { _ = os.Remove(script.Name()) })
+  }
+
+  gitWrapper, err := os.CreateTemp("", "picoaide-git-op-*")
+  if err != nil {
+    for _, cleanup := range cleanups {
+      cleanup()
+    }
+    return err
+  }
+  if _, err := gitWrapper.WriteString(gitScript); err != nil {
+    gitWrapper.Close()
+    os.Remove(gitWrapper.Name())
+    for _, cleanup := range cleanups {
+      cleanup()
+    }
+    return err
+  }
+  if err := gitWrapper.Chmod(0700); err != nil {
+    gitWrapper.Close()
+    os.Remove(gitWrapper.Name())
+    for _, cleanup := range cleanups {
+      cleanup()
+    }
+    return err
+  }
+  if err := gitWrapper.Close(); err != nil {
+    os.Remove(gitWrapper.Name())
+    for _, cleanup := range cleanups {
+      cleanup()
+    }
+    return err
+  }
+  cleanups = append(cleanups, func() { _ = os.Remove(gitWrapper.Name()) })
+  defer func() {
+    for _, cleanup := range cleanups {
+      cleanup()
+    }
+  }()
+
+  cmd := exec.Command(gitWrapper.Name())
+  cmd.Dir = dir
+  cmd.Env = env
+
+  stdoutPipe, _ := cmd.StdoutPipe()
+  stderrPipe, _ := cmd.StderrPipe()
+
+  if err := cmd.Start(); err != nil {
+    return err
+  }
+
+  // 流式读取 stdout
+  stdoutDone := make(chan struct{})
+  go func() {
+    defer close(stdoutDone)
+    buf := make([]byte, 4096)
+    for {
+      n, err := stdoutPipe.Read(buf)
+      if n > 0 {
+        writeSSE(w, flush, strings.TrimSpace(string(buf[:n])))
+      }
+      if err != nil {
+        return
+      }
+    }
+  }()
+
+  // 流式读取 stderr（git 进度信息通常在 stderr）
+  stderrDone := make(chan struct{})
+  go func() {
+    defer close(stderrDone)
+    buf := make([]byte, 4096)
+    for {
+      n, err := stderrPipe.Read(buf)
+      if n > 0 {
+        writeSSE(w, flush, strings.TrimSpace(string(buf[:n])))
+      }
+      if err != nil {
+        return
+      }
+    }
+  }()
+
+  <-stdoutDone
+  <-stderrDone
+  return cmd.Wait()
 }

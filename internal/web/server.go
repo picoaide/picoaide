@@ -24,6 +24,7 @@ import (
   "github.com/picoaide/picoaide/internal/config"
   dockerpkg "github.com/picoaide/picoaide/internal/docker"
   "github.com/picoaide/picoaide/internal/logger"
+  "github.com/picoaide/picoaide/internal/skill"
   "github.com/picoaide/picoaide/internal/user"
 )
 
@@ -291,8 +292,7 @@ func (s *Server) secureHeaders() gin.HandlerFunc {
 
     if (c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") &&
       c.Request.URL.Path != "/api/files/upload" &&
-      c.Request.URL.Path != "/api/admin/migration-rules/upload" &&
-      c.Request.URL.Path != "/api/admin/skills/upload" {
+      c.Request.URL.Path != "/api/admin/migration-rules/upload" {
       c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
     }
 
@@ -414,14 +414,18 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
   r.POST("/api/admin/skills/deploy", s.handleAdminSkillsDeploy)
   r.GET("/api/admin/skills/download", s.handleAdminSkillsDownload)
   r.POST("/api/admin/skills/remove", s.handleAdminSkillsRemove)
-  r.POST("/api/admin/skills/upload", s.handleAdminSkillsUpload)
-  // 超管 - 技能仓库
-  r.GET("/api/admin/skills/repos/list", s.handleAdminSkillsReposList)
-  r.POST("/api/admin/skills/repos/add", s.handleAdminSkillsReposAdd)
-  r.POST("/api/admin/skills/repos/save", s.handleAdminSkillsReposSave)
-  r.POST("/api/admin/skills/repos/pull", s.handleAdminSkillsReposPull)
-  r.POST("/api/admin/skills/repos/remove", s.handleAdminSkillsReposRemove)
-  r.POST("/api/admin/skills/install", s.handleAdminSkillsInstall)
+  r.POST("/api/admin/skills/user/bind", s.handleAdminSkillsUserBind)
+  r.POST("/api/admin/skills/user/unbind", s.handleAdminSkillsUserUnbind)
+  r.GET("/api/admin/skills/user/sources", s.handleAdminSkillsUserSources)
+  // 超管 - 技能源管理
+  r.GET("/api/admin/skills/sources", s.handleAdminSkillsSources)
+  r.POST("/api/admin/skills/sources/git", s.handleAdminSkillsSourcesGitAdd)
+  r.POST("/api/admin/skills/sources/remove", s.handleAdminSkillsSourcesRemove)
+  r.POST("/api/admin/skills/sources/pull", s.handleAdminSkillsSourcesPull)
+  r.POST("/api/admin/skills/sources/refresh", s.handleAdminSkillsSourcesRefresh)
+  // 超管 - 注册源技能管理
+  r.GET("/api/admin/skills/registry/list", s.handleAdminSkillsRegistryList)
+  r.POST("/api/admin/skills/registry/install", s.handleAdminSkillsRegistryInstall)
   // 超管 - 镜像管理
   r.GET("/api/admin/images", s.handleAdminImages)
   r.POST("/api/admin/images/pull", s.handleAdminImagePull)
@@ -545,6 +549,10 @@ func Serve(cfg *config.GlobalConfig, listenAddr string) error {
 
   // 定时同步（实时响应配置变更）
   s.restartSyncTimer()
+
+  // 初始扫描技能目录（仅在启动时打印日志）
+  initialSkills, _ := skill.ListAllSkills()
+  slog.Info("技能目录扫描完成", "count", len(initialSkills))
 
   gin.SetMode(gin.ReleaseMode)
   r := gin.New()

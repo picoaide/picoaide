@@ -298,24 +298,22 @@ func ReplaceGroupMembersBySource(source string, groupMembers map[string][]string
   return nil
 }
 
-// BindSkillToGroup 绑定技能到组
-func BindSkillToGroup(groupName, skillName string) error {
+// BindSkillToGroup 绑定技能到组（通过组名查找 ID）
+func BindSkillToGroup(groupName, skillName, source string) error {
   gid, err := GetGroupID(groupName)
   if err != nil {
     return err
   }
-  _, err = engine.Exec("INSERT OR IGNORE INTO group_skills (group_id, skill_name) VALUES (?, ?)", gid, skillName)
-  return err
+  return BindSkillByGroupID(gid, skillName, source)
 }
 
-// UnbindSkillFromGroup 解绑技能
+// UnbindSkillFromGroup 解绑技能（通过组名）
 func UnbindSkillFromGroup(groupName, skillName string) error {
   gid, err := GetGroupID(groupName)
   if err != nil {
     return err
   }
-  _, err = engine.Where("group_id = ? AND skill_name = ?", gid, skillName).Delete(&GroupSkill{})
-  return err
+  return UnbindSkillByGroupID(gid, skillName)
 }
 
 // GetGroupSkills 获取组绑定的技能列表

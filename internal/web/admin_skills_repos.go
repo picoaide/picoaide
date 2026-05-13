@@ -3,7 +3,7 @@ package web
 import (
   "encoding/json"
   "fmt"
-  "io/fs"
+  "log/slog"
   "net/http"
   "os"
   "os/exec"
@@ -15,14 +15,14 @@ import (
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
+  "github.com/picoaide/picoaide/internal/skill"
   "github.com/picoaide/picoaide/internal/util"
 )
 
 // ============================================================
-// 技能仓库管理（多仓库）
+// 技能仓库管理（单技能仓库）
 // ============================================================
 
-// handleAdminSkillsReposAdd 添加并克隆技能仓库
 func (s *Server) handleAdminSkillsReposAdd(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
@@ -71,22 +71,48 @@ func (s *Server) handleAdminSkillsReposAdd(c *gin.Context) {
   }
 
   os.MkdirAll(reposDir, 0755)
+
   if _, err := cloneGitRepoWithCredentials(reposDir, repo.Name, repo.URL, repo); err != nil {
-    writeError(c, http.StatusInternalServerError, "Git clone 失败: "+err.Error())
+    errStr := err.Error()
+    if strings.Contains(errStr, "Authentication failed") ||
+      strings.Contains(errStr, "Permission denied") ||
+      strings.Contains(errStr, "access denied") ||
+      strings.Contains(errStr, "401") ||
+      strings.Contains(errStr, "could not read Username") {
+      writeError(c, http.StatusBadRequest, "需要鉴权，请在仓库设置中补充凭证后重试")
+      return
+    }
+    writeError(c, http.StatusInternalServerError, "Git clone 失败: "+errStr)
     return
   }
-  if err := syncGitRepoToSkill(repo.Name); err != nil {
+
+  meta, err := syncGitRepoToSkill(repo.Name)
+  if err != nil {
     writeError(c, http.StatusInternalServerError, "安装技能失败: "+err.Error())
     return
+  }
+
+  auth.UpsertSkill(meta.Name, meta.Description)
+
+  users, _ := auth.GetUsersForSkill(meta.Name)
+  if len(users) > 0 {
+    skillName := meta.Name
+    enqueueTask("skills-deploy-auto", users, func(username string) error {
+      return s.deploySkillToUser(skillName, username)
+    })
   }
 
   repo.LastPull = time.Now().Format("2006-01-02 15:04:05")
   s.cfg.Skills.Repos = append(s.cfg.Skills.Repos, repo)
   s.saveSkillsConfig()
-  writeSuccess(c, "技能已从 Git 导入")
+
+  writeJSON(c, http.StatusOK, map[string]interface{}{
+    "success":    true,
+    "message":    fmt.Sprintf("技能 %s 已从 Git 导入", meta.Name),
+    "skill_name": meta.Name,
+  })
 }
 
-// handleAdminSkillsReposPull 拉取仓库更新
 func (s *Server) handleAdminSkillsReposPull(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
@@ -130,13 +156,25 @@ func (s *Server) handleAdminSkillsReposPull(c *gin.Context) {
     writeError(c, http.StatusInternalServerError, "Git pull 失败: "+err.Error())
     return
   }
-  if err := syncGitRepoToSkill(repo.Name); err != nil {
+
+  meta, err := syncGitRepoToSkill(repo.Name)
+  if err != nil {
     writeError(c, http.StatusInternalServerError, "同步技能失败: "+err.Error())
     return
   }
 
+  auth.UpsertSkill(meta.Name, meta.Description)
+
   s.cfg.Skills.Repos[idx].LastPull = time.Now().Format("2006-01-02 15:04:05")
   s.saveSkillsConfig()
+
+  users, _ := auth.GetUsersForSkill(meta.Name)
+  if len(users) > 0 {
+    skillName := meta.Name
+    enqueueTask("skills-deploy-auto", users, func(username string) error {
+      return s.deploySkillToUser(skillName, username)
+    })
+  }
 
   updated := !strings.Contains(out, "Already up to date")
   writeJSON(c, http.StatusOK, struct {
@@ -146,7 +184,6 @@ func (s *Server) handleAdminSkillsReposPull(c *gin.Context) {
   }{true, "技能已更新", updated})
 }
 
-// handleAdminSkillsReposRemove 删除仓库
 func (s *Server) handleAdminSkillsReposRemove(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
@@ -183,7 +220,6 @@ func (s *Server) handleAdminSkillsReposRemove(c *gin.Context) {
   writeSuccess(c, "仓库已删除")
 }
 
-// handleAdminSkillsReposSave 保存仓库配置
 func (s *Server) handleAdminSkillsReposSave(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
@@ -217,12 +253,45 @@ func (s *Server) handleAdminSkillsReposSave(c *gin.Context) {
     return
   }
   repo.LastPull = oldRepo.LastPull
+
+  if repo.URL != oldRepo.URL || !repoCredentialsEqual(repo, oldRepo) {
+    reposDir := skillReposDir()
+    repoDir := filepath.Join(reposDir, repo.Name)
+    // 先克隆到临时目录，成功后再替换旧目录
+    tmpDir, err := os.MkdirTemp(reposDir, ".clone-*")
+    if err != nil {
+      writeError(c, http.StatusInternalServerError, "创建临时目录失败: "+err.Error())
+      return
+    }
+    defer os.RemoveAll(tmpDir)
+    if _, err := cloneGitRepoWithCredentials(tmpDir, repo.Name, repo.URL, repo); err != nil {
+      writeError(c, http.StatusInternalServerError, "重新克隆失败: "+err.Error())
+      return
+    }
+    clonedDir := filepath.Join(tmpDir, repo.Name)
+    if _, err := os.Stat(filepath.Join(clonedDir, "SKILL.md")); err != nil {
+      writeError(c, http.StatusBadRequest, "克隆成功但仓库中没有 SKILL.md")
+      return
+    }
+    // 校验通过后替换
+    os.RemoveAll(repoDir)
+    if err := os.Rename(clonedDir, repoDir); err != nil {
+      writeError(c, http.StatusInternalServerError, "替换仓库目录失败: "+err.Error())
+      return
+    }
+    meta, err := syncGitRepoToSkill(repo.Name)
+    if err != nil {
+      writeError(c, http.StatusInternalServerError, "同步技能失败: "+err.Error())
+      return
+    }
+    auth.UpsertSkill(meta.Name, meta.Description)
+  }
+
   s.cfg.Skills.Repos[idx] = repo
   s.saveSkillsConfig()
   writeSuccess(c, "仓库配置已保存")
 }
 
-// handleAdminSkillsInstall 从仓库安装技能到 skill/ 目录
 func (s *Server) handleAdminSkillsInstall(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
@@ -237,7 +306,6 @@ func (s *Server) handleAdminSkillsInstall(c *gin.Context) {
   }
 
   repoName, err := cleanPathSegment(c.PostForm("repo"))
-  skillName := strings.TrimSpace(c.PostForm("skill"))
   if repoName == "" {
     writeError(c, http.StatusBadRequest, "仓库名称不能为空")
     return
@@ -246,71 +314,36 @@ func (s *Server) handleAdminSkillsInstall(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "仓库名称不合法")
     return
   }
-  if skillName != "" {
-    cleanedSkillName, err := cleanPathSegment(skillName)
-    if err != nil {
-      writeError(c, http.StatusBadRequest, "技能名称不合法")
-      return
-    }
-    skillName = cleanedSkillName
-  }
+
+  gitMutex.Lock()
+  defer gitMutex.Unlock()
 
   repoDir := filepath.Join(skillReposDir(), repoName)
-  skillDir := config.SkillsDirPath()
-  os.MkdirAll(skillDir, 0755)
-  repoRoot, err := os.OpenRoot(repoDir)
-  if err != nil {
-    writeError(c, http.StatusInternalServerError, "读取仓库失败")
-    return
-  }
-  defer repoRoot.Close()
-  skillRoot, err := os.OpenRoot(skillDir)
-  if err != nil {
-    writeError(c, http.StatusInternalServerError, "读取技能目录失败")
-    return
-  }
-  defer skillRoot.Close()
-
-  if skillName == "" {
-    // 安装仓库中所有技能
-    entries, err := fs.ReadDir(repoRoot.FS(), ".")
-    if err != nil {
-      writeError(c, http.StatusInternalServerError, "读取仓库失败")
-      return
-    }
-    count := 0
-    for _, e := range entries {
-      if !e.IsDir() || e.Name() == ".git" {
-        continue
-      }
-      if err := copyDirBetweenRoots(repoRoot, e.Name(), skillRoot, e.Name()); err != nil {
-        writeError(c, http.StatusInternalServerError, fmt.Sprintf("安装 %s 失败: %v", e.Name(), err))
-        return
-      }
-      count++
-    }
-    writeJSON(c, http.StatusOK, struct {
-      Success bool   `json:"success"`
-      Message string `json:"message"`
-      Count   int    `json:"count"`
-    }{true, fmt.Sprintf("已安装 %d 个技能", count), count})
+  if _, err := os.Stat(repoDir); err != nil {
+    writeError(c, http.StatusNotFound, "仓库不存在，请先添加仓库")
     return
   }
 
-  // 安装单个技能
-  info, err := repoRoot.Stat(skillName)
-  if err != nil || !info.IsDir() {
-    writeError(c, http.StatusNotFound, "技能在仓库中不存在")
+  meta, err := syncGitRepoToSkill(repoName)
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "安装技能失败: "+err.Error())
     return
   }
-  if err := copyDirBetweenRoots(repoRoot, skillName, skillRoot, skillName); err != nil {
-    writeError(c, http.StatusInternalServerError, "安装失败: "+err.Error())
-    return
+  if meta != nil {
+    auth.UpsertSkill(meta.Name, meta.Description)
   }
-  writeSuccess(c, "技能已安装")
+
+  skillName := ""
+  if meta != nil {
+    skillName = meta.Name
+  }
+  writeJSON(c, http.StatusOK, map[string]interface{}{
+    "success":    true,
+    "message":    fmt.Sprintf("技能 %s 已安装", skillName),
+    "skill_name": skillName,
+  })
 }
 
-// handleAdminSkillsReposList 列出仓库中的技能
 func (s *Server) handleAdminSkillsReposList(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
@@ -331,37 +364,177 @@ func (s *Server) handleAdminSkillsReposList(c *gin.Context) {
   }
 
   repoDir := filepath.Join(skillReposDir(), repoName)
-  entries, err := os.ReadDir(repoDir)
-  if err != nil {
+  if _, err := os.Stat(repoDir); err != nil {
     writeError(c, http.StatusNotFound, "仓库不存在")
     return
   }
 
-  type SkillEntry struct {
-    Name      string `json:"name"`
-    Installed bool   `json:"installed"`
+  type RepoSkillInfo struct {
+    Name        string `json:"name"`
+    Description string `json:"description"`
+    Installed   bool   `json:"installed"`
+    Valid       bool   `json:"valid"`
+    ValidateMsg string `json:"validate_msg,omitempty"`
   }
-  var skills []SkillEntry
-  skillDir := config.SkillsDirPath()
 
-  for _, e := range entries {
-    if !e.IsDir() || e.Name() == ".git" {
-      continue
-    }
-    _, installed := os.Stat(filepath.Join(skillDir, e.Name()))
-    skills = append(skills, SkillEntry{
-      Name:      e.Name(),
-      Installed: installed == nil,
-    })
+  skillEntry := RepoSkillInfo{Valid: true}
+  meta, pErr := skill.ParseAndValidate(repoDir)
+  if pErr != nil {
+    skillEntry.Name = repoName
+    skillEntry.Valid = false
+    skillEntry.ValidateMsg = pErr.Error()
+  } else {
+    skillEntry.Name = meta.Name
+    skillEntry.Description = meta.Description
   }
-  if skills == nil {
-    skills = []SkillEntry{}
+
+  if skillEntry.Valid {
+    skillDir := config.SkillsDirPath()
+    _, installed := os.Stat(filepath.Join(skillDir, skillEntry.Name))
+    skillEntry.Installed = installed == nil
   }
 
   writeJSON(c, http.StatusOK, struct {
-    Success bool         `json:"success"`
-    Skills  []SkillEntry `json:"skills"`
-  }{true, skills})
+    Success bool          `json:"success"`
+    Repo    RepoSkillInfo `json:"repo"`
+  }{true, skillEntry})
+}
+
+// handleAdminSkillsReposAddStream SSE 流式添加仓库（实时显示克隆进度）
+func (s *Server) handleAdminSkillsReposAddStream(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
+    return
+  }
+  if c.Request.Method != "POST" {
+    return
+  }
+  if !s.checkCSRF(c) {
+    return
+  }
+
+  var input skillRepoInput
+  if err := json.Unmarshal([]byte(c.PostForm("repo")), &input); err != nil {
+    input.Name = c.PostForm("name")
+    input.URL = c.PostForm("url")
+    input.Ref = c.PostForm("ref")
+    input.RefType = c.PostForm("ref_type")
+    input.Public, _ = strconv.ParseBool(c.PostForm("public"))
+  }
+  repo, err := skillRepoFromInput(input)
+  if err != nil {
+    fmt.Fprintf(c.Writer, "data: {\"error\":%q}\n\n", err.Error())
+    return
+  }
+
+  // SSE headers
+  c.Writer.Header().Set("Content-Type", "text/event-stream")
+  c.Writer.Header().Set("Cache-Control", "no-cache")
+  c.Writer.Header().Set("Connection", "keep-alive")
+  flush := func() { c.Writer.Flush() }
+
+  writeSSE(c.Writer, flush, `{"step":"check","message":"检查 Git 环境..."}`)
+
+  gitMutex.Lock()
+  defer gitMutex.Unlock()
+
+  if _, err := exec.LookPath("git"); err != nil {
+    writeSSE(c.Writer, flush, `{"step":"error","error":"Git 未安装"}`)
+    return
+  }
+
+  if _, _, ok := skillRepoByName(s.cfg.Skills.Repos, repo.Name); ok {
+    writeSSE(c.Writer, flush, `{"step":"error","error":"仓库名称已存在"}`)
+    return
+  }
+
+  reposDir := skillReposDir()
+  targetDir := filepath.Join(reposDir, repo.Name)
+  if _, err := os.Stat(targetDir); err == nil {
+    writeSSE(c.Writer, flush, `{"step":"error","error":"仓库目录已存在"}`)
+    return
+  }
+
+  os.MkdirAll(reposDir, 0755)
+  writeSSE(c.Writer, flush, `{"step":"clone","message":"正在克隆仓库..."}`)
+
+  // 尝试凭据（公共仓库无凭据时也尝试无鉴权克隆）
+  cloneErr := error(nil)
+  // 生成 clone 脚本
+  cloneScript := "#!/bin/sh\nexec git clone --depth 1"
+  if repo.Ref != "" {
+    cloneScript += " --branch \"" + repo.Ref + "\""
+  }
+  cloneScript += " \"" + repo.URL + "\" \"" + repo.Name + "\" 2>&1"
+
+  if len(repo.Credentials) > 0 {
+    for _, cred := range repo.Credentials {
+      if err := gitCmdWithStream(reposDir, cred, cloneScript, c.Writer, flush); err == nil {
+        cloneErr = nil
+        break
+      } else {
+        cloneErr = err
+        writeSSE(c.Writer, flush, `{"step":"clone_retry","message":"凭据失败，尝试下一个..."}`)
+      }
+    }
+  } else {
+    // 公共仓库
+    cloneErr = gitCmdWithStream(reposDir, config.SkillRepoCredential{Mode: "https"}, cloneScript, c.Writer, flush)
+  }
+
+  if cloneErr != nil {
+    errStr := cloneErr.Error()
+    writeSSE(c.Writer, flush, `{"step":"clone_error","message":"克隆失败","error":`+quoteJSON(errStr)+`}`)
+    if strings.Contains(errStr, "Authentication failed") ||
+      strings.Contains(errStr, "Permission denied") ||
+      strings.Contains(errStr, "access denied") ||
+      strings.Contains(errStr, "401") ||
+      strings.Contains(errStr, "could not read Username") {
+      writeSSE(c.Writer, flush, `{"step":"auth_required","message":"需要鉴权，请在仓库设置中补充凭证后重试"}`)
+    }
+    return
+  }
+
+  writeSSE(c.Writer, flush, `{"step":"validate","message":"校验 SKILL.md..."}`)
+
+  if _, err := skill.ParseAndValidate(targetDir); err != nil {
+    os.RemoveAll(targetDir)
+    writeSSE(c.Writer, flush, `{"step":"error","error":"SKILL.md 校验失败: `+quoteJSON(err.Error())+`"}`)
+    return
+  }
+
+  writeSSE(c.Writer, flush, `{"step":"sync","message":"同步到技能目录..."}`)
+
+  meta, err := syncGitRepoToSkill(repo.Name)
+  if err != nil {
+    writeSSE(c.Writer, flush, `{"step":"error","error":"安装技能失败: `+quoteJSON(err.Error())+`"}`)
+    return
+  }
+
+  auth.UpsertSkill(meta.Name, meta.Description)
+
+  repo.LastPull = time.Now().Format("2006-01-02 15:04:05")
+  s.cfg.Skills.Repos = append(s.cfg.Skills.Repos, repo)
+  s.saveSkillsConfig()
+
+  // 自动部署
+  users, _ := auth.GetUsersForSkill(meta.Name)
+  if len(users) > 0 {
+    writeSSE(c.Writer, flush, `{"step":"deploy","message":"正在部署到 `+fmt.Sprintf("%d", len(users))+` 个用户..."}`)
+    enqueueTask("skills-deploy-auto", users, func(username string) error {
+      return s.deploySkillToUser(meta.Name, username)
+    })
+  }
+
+  writeSSE(c.Writer, flush, `{"step":"done","message":"技能 `+meta.Name+` 安装成功"}`)
+}
+
+// quoteJSON 转义字符串为 JSON 安全格式（简单版）
+func quoteJSON(s string) string {
+  s = strings.ReplaceAll(s, "\\", "\\\\")
+  s = strings.ReplaceAll(s, "\"", "\\\"")
+  s = strings.ReplaceAll(s, "\n", "\\n")
+  s = strings.ReplaceAll(s, "\r", "\\r")
+  return s
 }
 
 // ============================================================
@@ -369,15 +542,33 @@ func (s *Server) handleAdminSkillsReposList(c *gin.Context) {
 // ============================================================
 
 func (s *Server) saveSkillsConfig() {
-  skillsJSON, err := json.Marshal(map[string]interface{}{
-    "repos": s.cfg.Skills.Repos,
-  })
+  skillsJSON, err := json.Marshal(s.cfg.Skills)
   if err != nil {
+    slog.Error("序列化技能配置失败", "error", err)
     return
   }
   engine, err := auth.GetEngine()
   if err != nil {
+    slog.Error("获取数据库连接失败", "error", err)
     return
   }
-  engine.Exec("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('skills', ?, datetime('now','localtime'))", string(skillsJSON))
+  if _, err := engine.Exec("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('skills', ?, datetime('now','localtime'))", string(skillsJSON)); err != nil {
+    slog.Error("保存技能配置失败", "error", err)
+  }
+}
+
+func repoCredentialsEqual(a, b config.SkillRepo) bool {
+  if len(a.Credentials) != len(b.Credentials) {
+    return false
+  }
+  for i := range a.Credentials {
+    if a.Credentials[i].Name != b.Credentials[i].Name ||
+      a.Credentials[i].Provider != b.Credentials[i].Provider ||
+      a.Credentials[i].Username != b.Credentials[i].Username ||
+      a.Credentials[i].Secret != b.Credentials[i].Secret ||
+      a.Credentials[i].Mode != b.Credentials[i].Mode {
+      return false
+    }
+  }
+  return true
 }
