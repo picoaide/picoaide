@@ -165,18 +165,53 @@ export async function init(ctx) {
     } else {
       $('#sf-view-groups').innerHTML = '<span class="text-muted">无关联组</span>';
     }
+    // 成员列表改为查看按钮
     var tb = $('#sf-member-tbody');
-    if (!f.members || !f.members.length) {
-      tb.innerHTML = '<tr><td colspan="4" class="text-center text-muted">暂无成员</td></tr>';
-    } else {
-      tb.innerHTML = f.members.map(function(m) {
-        var c = m.mounted ? 'badge-ok' : 'badge-muted', t = m.mounted ? '✓ 已挂载' : '✗ 未挂载';
-        return '<tr><td>' + esc(m.username) + '</td><td><span class="badge ' + c + '">' + t + '</span></td><td class="text-sm text-muted">' + (m.checked_at || '-') + '</td><td class="actions-cell"><button class="btn btn-sm btn-outline chk-single" data-u="' + esc(m.username) + '">检查</button></td></tr>';
-      }).join('');
-      [].forEach.call(tb.querySelectorAll('.chk-single'), function(btn) {
-        btn.addEventListener('click', function() { checkSingle(f.id, btn.dataset.u); });
-      });
+    var hasMembers = f.members && f.members.length > 0;
+    tb.innerHTML = '<tr><td colspan="4" class="text-center">' +
+      (hasMembers
+        ? '<button class="btn btn-sm btn-outline" id="sf-btn-view-members">查看成员 (' + f.member_count + ' 人)</button>'
+        : '<span class="text-muted">暂无成员</span>') +
+      '</td></tr>';
+    var viewBtn = document.getElementById('sf-btn-view-members');
+    if (viewBtn) {
+      viewBtn.addEventListener('click', function() { showMembersModal(f); });
     }
+  }
+
+  // ====== 成员弹窗 ======
+  function showMembersModal(f) {
+    var membersHtml = (!f.members || !f.members.length)
+      ? '<p class="text-muted text-center">暂无成员</p>'
+      : '<div class="table-wrap"><table class="compact-table"><thead><tr><th>用户名</th><th>挂载状态</th><th>最后检查</th><th>操作</th></tr></thead><tbody>' +
+        f.members.map(function(m) {
+          var c = m.mounted ? 'badge-ok' : 'badge-muted', t = m.mounted ? '✓ 已挂载' : '✗ 未挂载';
+          return '<tr><td>' + esc(m.username) + '</td><td><span class="badge ' + c + '">' + t + '</span></td><td class="text-sm text-muted">' + (m.checked_at || '-') + '</td><td class="actions-cell"><button class="btn btn-sm btn-outline chk-single" data-u="' + esc(m.username) + '">检查</button></td></tr>';
+        }).join('') +
+        '</tbody></table></div>';
+
+    showModal({ title: '成员列表 - ' + f.name, width: '600px', body: membersHtml, footer: [
+      { label: '关闭', value: 'close' }
+    ]}).catch(function() {});
+
+    // 为弹窗内的检查按钮绑定事件
+    setTimeout(function() {
+      document.querySelectorAll('.chk-single').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          await checkSingle(f.id, btn.dataset.u);
+          // 刷新数据后更新弹窗内容
+          var refreshed = await Api.get('/api/admin/shared-folders');
+          if (refreshed.success) {
+            var folder = (refreshed.folders || []).find(function(x) { return x.id === f.id; });
+            if (folder) {
+              // 关闭当前弹窗，重新打开
+              document.querySelector('.modal-overlay')?.remove();
+              showMembersModal(folder);
+            }
+          }
+        });
+      });
+    }, 100);
   }
 
   // ====== 新建 ======

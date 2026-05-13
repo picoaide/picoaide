@@ -466,7 +466,6 @@ async function loadTeamspace() {
         '</div>' +
         '<div class="text-sm text-muted">' + esc(f.description || '') + '</div>' +
         '<div class="text-sm mt-1">成员: ' + f.member_count + ' 人</div>' +
-        '<div class="text-sm text-muted">容器内路径: <code>workspace/share/' + esc(f.name) + '/</code></div>' +
       '</div>';
     }).join('');
   } catch (e) {
