@@ -12,6 +12,7 @@ import (
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/skill"
   "github.com/picoaide/picoaide/internal/user"
+  "github.com/picoaide/picoaide/internal/util"
 )
 
 // ============================================================
@@ -79,6 +80,10 @@ func (s *Server) handleUserSkillsInstall(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "技能名称不能为空")
     return
   }
+  if err := util.SafePathSegment(skillName); err != nil {
+    writeError(c, http.StatusBadRequest, "技能名称不合法: "+err.Error())
+    return
+  }
 
   source := findSkillSource(skillName)
   if source == "" {
@@ -120,6 +125,10 @@ func (s *Server) handleUserSkillsUninstall(c *gin.Context) {
   skillName := strings.TrimSpace(c.PostForm("skill_name"))
   if skillName == "" {
     writeError(c, http.StatusBadRequest, "技能名称不能为空")
+    return
+  }
+  if err := util.SafePathSegment(skillName); err != nil {
+    writeError(c, http.StatusBadRequest, "技能名称不合法: "+err.Error())
     return
   }
 
