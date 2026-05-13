@@ -10,16 +10,23 @@ export async function init(ctx) {
     var arrow = document.getElementById(prefix + '-arrow');
     if (!input) return;
 
-    function toggleDrop(force) {
-      var open = force !== undefined ? force : dd.classList.contains('open');
-      if (open) { dd.classList.remove('open'); if (arrow) arrow.classList.remove('open'); }
-      else { render(); dd.classList.add('open'); if (arrow) arrow.classList.add('open'); input.focus(); }
+    function toggleDrop(open) {
+      var shouldOpen = open !== undefined ? open : !dd.classList.contains('open');
+      if (shouldOpen) { render(); dd.classList.add('open'); if (arrow) arrow.classList.add('open'); input.focus(); }
+      else { dd.classList.remove('open'); if (arrow) arrow.classList.remove('open'); }
     }
 
-    if (arrow) arrow.addEventListener('mousedown', function(e) { e.preventDefault(); toggleDrop(); });
+    var blurTimer = null;
+    if (arrow) arrow.addEventListener('mousedown', function(e) { e.preventDefault(); toggleDrop(); input.focus(); });
     if (wrap) wrap.addEventListener('mousedown', function(e) { e.preventDefault(); input.focus(); });
-    input.addEventListener('focus', function() { if (!dd.classList.contains('open')) toggleDrop(true); });
-    input.addEventListener('blur', function() { toggleDrop(false); });
+    input.addEventListener('focus', function() {
+      if (blurTimer) { clearTimeout(blurTimer); blurTimer = null; return; }
+      if (!dd.classList.contains('open')) toggleDrop(true);
+    });
+    input.addEventListener('blur', function() {
+      blurTimer = setTimeout(function() { blurTimer = null; }, 100);
+      toggleDrop(false);
+    });
     input.addEventListener('input', render);
     input.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') { toggleDrop(false); input.blur(); return; }
