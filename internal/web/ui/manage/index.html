@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>PicoAide 配置管理</title>
+  <link rel="stylesheet" href="../css/common.css">
+</head>
+<body>
+  <div id="manage-layout">
+    <nav class="navbar">
+      <h1><img class="brand-mark" src="../images/logo-mark.svg" alt="">PicoAide 配置管理</h1>
+      <div class="navbar-right">
+        <span id="user-display"></span>
+        <button class="btn btn-sm btn-outline" id="logout-btn">退出</button>
+      </div>
+    </nav>
+
+    <main class="container">
+      <section class="page-header">
+        <div>
+          <div class="page-kicker">个人工作区</div>
+          <h2>配置管理</h2>
+          <p>管理你的 AI 运行配置、授权文件和本地账号密码。超管仅进入管理后台，不参与普通用户配置。</p>
+        </div>
+      </section>
+
+      <nav class="tabs" id="manage-nav">
+        <a href="/manage/channels" class="tab" data-section="channels">通讯渠道</a>
+        <a href="/manage/files" class="tab" data-section="files">文件管理</a>
+        <a href="/manage/teamspace" class="tab" data-section="teamspace">团队空间</a>
+        <a href="/manage/password" class="tab" data-section="password" id="tab-password-btn">修改密码</a>
+      </nav>
+
+      <div id="content-area"></div>
+    </main>
+  </div>
+
+  <script src="../js/common.js"></script>
+  <script src="manage.js" type="module"></script>
+</body>
+</html>
