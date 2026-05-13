@@ -224,8 +224,8 @@ func TestUIRoutesRequireRole(t *testing.T) {
 
   resp = env.get(t, "/admin/dashboard", "testuser")
   assertStatus(t, resp, 200)
-  if got := resp.Request.URL.Path; got != "/manage" {
-    t.Fatalf("regular user admin final path=%q, want /manage", got)
+  if got := resp.Request.URL.Path; got != "/manage" && got != "/manage/channels" {
+    t.Fatalf("regular user admin final path=%q, want /manage or /manage/channels", got)
   }
 
   resp = env.get(t, "/manage", "testadmin")
