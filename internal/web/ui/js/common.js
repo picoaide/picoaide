@@ -83,9 +83,10 @@ function showModal(opts) {
     document.body.appendChild(overlay);
 
     function close(val) {
-      overlay.remove();
       if (val !== undefined) resolve(val);
       else reject('cancel');
+      // 延迟移除，避免 Promise then 回调里读不到表单元素
+      setTimeout(function() { overlay.remove(); }, 0);
     }
 
     overlay.querySelector('.modal-close-btn').addEventListener('click', function() { close(); });
