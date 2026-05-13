@@ -6,16 +6,33 @@ export async function init(ctx) {
   function initTagSel(prefix) {
     var input = document.getElementById(prefix + '-input');
     var dd = document.getElementById(prefix + '-dropdown');
+    var wrap = document.getElementById(prefix + '-wrap');
+    var arrow = document.getElementById(prefix + '-arrow');
     if (!input) return;
 
-    input.addEventListener('focus', render);
-    input.addEventListener('blur', function() { setTimeout(function() { dd.classList.remove('open'); }, 200); });
+    function toggleDrop(force) {
+      var open = force !== undefined ? force : dd.classList.contains('open');
+      if (open) { dd.classList.remove('open'); if (arrow) arrow.classList.remove('open'); }
+      else { render(); dd.classList.add('open'); if (arrow) arrow.classList.add('open'); input.focus(); }
+    }
+
+    if (arrow) arrow.addEventListener('mousedown', function(e) { e.preventDefault(); toggleDrop(); });
+    if (wrap) wrap.addEventListener('mousedown', function(e) {
+      if (e.target === wrap) { e.preventDefault(); input.focus(); }
+    });
+    input.addEventListener('focus', function() { if (!dd.classList.contains('open')) toggleDrop(true); });
+    input.addEventListener('blur', function() { setTimeout(function() { toggleDrop(false); }, 200); });
     input.addEventListener('input', render);
     input.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') { e.preventDefault(); var hl = dd.querySelector('.highlighted'); if (hl) { pick(hl); render(); } }
+      if (e.key === 'Escape') { toggleDrop(false); input.blur(); return; }
+      if (e.key === 'Enter') {
+        e.preventDefault(); var hl = dd.querySelector('.highlighted');
+        if (hl) { toggleItem(hl); render(); }
+        return;
+      }
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
-        var items = dd.querySelectorAll('.sf-tag-option');
+        var items = dd.querySelectorAll('.sf-tag-option:not(.disabled)');
         if (!items.length) return;
         var cur = dd.querySelector('.highlighted'), idx = -1;
         for (var i = 0; i < items.length; i++) { if (items[i] === cur) { idx = i; break; } }
@@ -25,13 +42,14 @@ export async function init(ctx) {
       }
     });
 
-    function pick(el) {
+    function toggleItem(el) {
       var ids = JSON.parse(input.dataset.selected || '[]');
       var id = Number(el.dataset.id), name = el.dataset.name;
-      if (ids.some(function(x) { return x.id === id; })) return;
-      ids.push({id: id, name: name});
+      var idx = ids.findIndex(function(x) { return x.id === id; });
+      if (idx >= 0) ids.splice(idx, 1);
+      else ids.push({id: id, name: name});
       input.dataset.selected = JSON.stringify(ids);
-      renderChips(); input.value = ''; input.focus();
+      renderChips();
     }
 
     function render() {
@@ -39,14 +57,17 @@ export async function init(ctx) {
       var q = input.value.trim().toLowerCase();
       if (q) groups = allGroups.filter(function(g) { return g.name.toLowerCase().indexOf(q) !== -1; });
       var sel = {}; JSON.parse(input.dataset.selected || '[]').forEach(function(x) { sel[x.id] = true; });
-      var avail = groups.filter(function(g) { return !sel[g.id]; });
-      if (!avail.length) { dd.innerHTML = ''; dd.classList.remove('open'); return; }
-      dd.innerHTML = avail.map(function(g) { return '<div class="sf-tag-option" data-id="' + g.id + '" data-name="' + esc(g.name) + '">' + esc(g.name) + '</div>'; }).join('');
-      var fst = dd.querySelector('.sf-tag-option'); if (fst) fst.classList.add('highlighted');
+      if (!groups.length) { dd.innerHTML = '<div class="sf-tag-option disabled">无匹配组</div>'; dd.classList.add('open'); if (arrow) arrow.classList.add('open'); return; }
+      dd.innerHTML = groups.map(function(g) {
+        var checked = sel[g.id];
+        return '<div class="sf-tag-option' + (checked ? ' highlighted' : '') + '" data-id="' + g.id + '" data-name="' + esc(g.name) + '">' +
+          '<span class="sf-tag-opt-check' + (checked ? ' checked' : '') + '"></span>' +
+          esc(g.name) + '</div>';
+      }).join('');
       [].forEach.call(dd.querySelectorAll('.sf-tag-option'), function(el) {
-        el.addEventListener('mousedown', function(e) { e.preventDefault(); pick(el); render(); });
+        el.addEventListener('mousedown', function(e) { e.preventDefault(); toggleItem(el); render(); });
       });
-      dd.classList.add('open');
+      dd.classList.add('open'); if (arrow) arrow.classList.add('open');
     }
 
     function renderChips() {
@@ -55,14 +76,12 @@ export async function init(ctx) {
       if (!ids.length) { chips.innerHTML = '<span class="text-sm text-muted">未选择</span>'; return; }
       chips.innerHTML = ids.map(function(x) { return '<span class="chip">' + esc(x.name) + '<button type="button" class="chip-remove" data-id="' + x.id + '">&times;</button></span>'; }).join('');
       [].forEach.call(chips.querySelectorAll('.chip-remove'), function(btn) {
-        btn.addEventListener('click', function() {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
           var xid = Number(btn.dataset.id);
           var cur = JSON.parse(input.dataset.selected || '[]');
           input.dataset.selected = JSON.stringify(cur.filter(function(c) { return c.id !== xid; }));
-          var upd = document.getElementById(prefix + '-chips');
-          var remain = JSON.parse(input.dataset.selected || '[]');
-          if (!remain.length) { upd.innerHTML = '<span class="text-sm text-muted">未选择</span>'; return; }
-          upd.innerHTML = remain.map(function(x) { return '<span class="chip">' + esc(x.name) + '<button type="button" class="chip-remove" data-id="' + x.id + '">&times;</button></span>'; }).join('');
+          renderChips();
         });
       });
     }
@@ -81,7 +100,8 @@ export async function init(ctx) {
     if (!items.length) { chips.innerHTML = '<span class="text-sm text-muted">未选择</span>'; return; }
     chips.innerHTML = items.map(function(x) { return '<span class="chip">' + esc(x.name) + '<button type="button" class="chip-remove" data-id="' + x.id + '">&times;</button></span>'; }).join('');
     [].forEach.call(chips.querySelectorAll('.chip-remove'), function(btn) {
-      btn.addEventListener('click', function() {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
         var xid = Number(btn.dataset.id);
         var cur = JSON.parse(input.dataset.selected || '[]');
         input.dataset.selected = JSON.stringify(cur.filter(function(c) { return c.id !== xid; }));
@@ -236,7 +256,10 @@ export async function init(ctx) {
       '<div class="field"><label>关联用户组</label>' +
         '<div class="sf-tag-selector" id="sf-modal-tag">' +
           '<div class="sf-tag-chips" id="sf-modal-chips"></div>' +
-          '<input type="text" class="sf-tag-input" id="sf-modal-input" placeholder="搜索用户组...">' +
+          '<div class="sf-tag-input-wrap" id="sf-modal-wrap">' +
+            '<input type="text" class="sf-tag-input" id="sf-modal-input" placeholder="搜索用户组...">' +
+            '<span class="sf-tag-arrow" id="sf-modal-arrow">▾</span>' +
+          '</div>' +
           '<div class="sf-tag-dropdown" id="sf-modal-dropdown"></div>' +
         '</div></div>' +
       '<div id="sf-modal-msg" class="msg"></div>' +
