@@ -165,9 +165,9 @@ func removeUserSkillDir(cfg *config.GlobalConfig, username, skillName string) {
     slog.Error("删除技能目录时校验失败", "skill", skillName, "error", err)
     return
   }
-  targetDir := filepath.Join(user.UserDir(cfg, username), ".picoclaw", "workspace", "skills", skillName)
-  skillsBase := filepath.Join(user.UserDir(cfg, username), ".picoclaw", "workspace", "skills") + "/"
-  if !strings.HasPrefix(targetDir+"/", skillsBase) {
+  targetDir := filepath.Clean(filepath.Join(user.UserDir(cfg, username), ".picoclaw", "workspace", "skills", skillName))
+  skillsBase := filepath.Clean(filepath.Join(user.UserDir(cfg, username), ".picoclaw", "workspace", "skills"))
+  if !strings.HasPrefix(targetDir, skillsBase+string(os.PathSeparator)) {
     slog.Error("非法技能路径", "target", targetDir)
     return
   }

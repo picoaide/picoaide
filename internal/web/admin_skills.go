@@ -103,11 +103,11 @@ func (s *Server) deploySkillToUser(skillName, username string) error {
   if source == "" {
     return fmt.Errorf("技能 %s 未在任何源中找到", skillName)
   }
-  srcPath := filepath.Join(skill.SkillsRootDir(), source, skillName)
-  targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName)
-  skillsBase := filepath.Join(skill.SkillsRootDir(), source) + "/"
-  userSkillsBase := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills") + "/"
-  if !strings.HasPrefix(srcPath+"/", skillsBase) || !strings.HasPrefix(targetDir+"/", userSkillsBase) {
+  srcPath := filepath.Clean(filepath.Join(skill.SkillsRootDir(), source, skillName))
+  targetDir := filepath.Clean(filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName))
+  skillsBase := filepath.Clean(filepath.Join(skill.SkillsRootDir(), source))
+  userSkillsBase := filepath.Clean(filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills"))
+  if !strings.HasPrefix(srcPath, skillsBase+string(os.PathSeparator)) || !strings.HasPrefix(targetDir, userSkillsBase+string(os.PathSeparator)) {
     return fmt.Errorf("非法技能路径")
   }
   if err := os.RemoveAll(targetDir); err != nil {
