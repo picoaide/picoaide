@@ -53,6 +53,7 @@ export async function init(ctx) {
   });
 
   // 拉取状态轮询（解析 Docker 进度 JSON，显示百分比，拉取完毕刷新一次列表）
+
   let prevPullRunning = false;
   function parsePullProgress(msg) {
     try {
