@@ -8,7 +8,6 @@ import (
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/authsource"
-  "github.com/picoaide/picoaide/internal/config"
 )
 
 func TestWhitelist_GetEmpty(t *testing.T) {
