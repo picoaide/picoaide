@@ -85,7 +85,7 @@ func (s *Server) handleContainerAction(c *gin.Context, action string) {
     // 如果容器不存在，创建容器
     if rec.ContainerID == "" || !dockerpkg.ContainerExists(ctx, username) {
       ud := user.UserDir(s.cfg, username)
-      cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
+      cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit, rec.MCPToken)
       if createErr != nil {
         writeError(c, http.StatusInternalServerError, "创建容器失败: "+createErr.Error())
         return
@@ -130,7 +130,7 @@ func (s *Server) handleContainerAction(c *gin.Context, action string) {
       auth.UpdateContainerID(username, "")
     }
     ud := user.UserDir(s.cfg, username)
-    cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
+    cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit, rec.MCPToken)
     if createErr != nil {
       writeError(c, http.StatusInternalServerError, "创建容器失败: "+createErr.Error())
       return
@@ -164,7 +164,7 @@ func (s *Server) handleContainerAction(c *gin.Context, action string) {
       auth.UpdateContainerID(username, "")
     }
     ud := user.UserDir(s.cfg, username)
-    cid, createErr := dockerpkg.CreateContainerWithOptions(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit, true, nil)
+    cid, createErr := dockerpkg.CreateContainerWithOptions(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit, true, nil, rec.MCPToken)
     if createErr != nil {
       writeError(c, http.StatusInternalServerError, "创建调试容器失败: "+createErr.Error())
       return
@@ -211,7 +211,7 @@ func (s *Server) autoStartUserContainer(username string) {
   }
 
   ud := user.UserDir(s.cfg, username)
-  cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
+  cid, createErr := dockerpkg.CreateContainer(ctx, username, rec.Image, ud, rec.IP, rec.CPULimit, rec.MemoryLimit, rec.MCPToken)
   if createErr != nil {
     slog.Error("创建容器失败", "username", username, "error", createErr)
     return

@@ -57,7 +57,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
       return false
     }
     if !auth.IsSuperadmin(username) {
-      c.Redirect(http.StatusFound, "/manage")
+      c.Redirect(http.StatusFound, "/user")
       return false
     }
     return true
@@ -75,12 +75,15 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
     }
     serveHTML(c, "initializing.html")
   })
-  r.GET("/manage", func(c *gin.Context) {
-    c.Redirect(http.StatusMovedPermanently, "/manage/channels")
+
+  manageSections := []string{"welcome", "skills", "channels", "files", "teamspace", "authorization", "password"}
+
+  // 新路径 /user/*
+  r.GET("/user", func(c *gin.Context) {
+    c.Redirect(http.StatusMovedPermanently, "/user/welcome")
   })
-  manageSections := []string{"skills", "channels", "files", "teamspace", "password"}
   for _, section := range manageSections {
-    sectionPath := "/manage/" + section
+    sectionPath := "/user/" + section
     r.GET(sectionPath, func(c *gin.Context) {
       if !requireManageUser(c) {
         return
@@ -91,6 +94,16 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
         return
       }
       serveHTML(c, "manage/index.html")
+    })
+  }
+
+  // 旧路径 /manage/* → 301 重定向到 /user/*（向后兼容）
+  r.GET("/manage", func(c *gin.Context) {
+    c.Redirect(http.StatusMovedPermanently, "/user")
+  })
+  for _, section := range manageSections {
+    r.GET("/manage/"+section, func(c *gin.Context) {
+      c.Redirect(http.StatusMovedPermanently, "/user/"+section)
     })
   }
   r.GET("/admin", func(c *gin.Context) {
@@ -108,6 +121,26 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
       }
       serveHTML(c, "admin/index.html")
     })
+  }
+
+  // /user/ 路径的静态文件映射到 manage/ 目录
+  staticMap := map[string]string{
+    "/user/manage.js":      "/manage/manage.js",
+    "/user/templates/":     "/manage/templates/",
+    "/user/modules/":       "/manage/modules/",
+  }
+  for prefix, mapped := range staticMap {
+    if strings.HasSuffix(prefix, "/") {
+      r.GET(prefix+"*filepath", func(c *gin.Context) {
+        c.Request.URL.Path = "/" + strings.TrimPrefix(mapped, "/") + c.Param("filepath")
+        serveFile(c)
+      })
+    } else {
+      r.GET(prefix, func(c *gin.Context) {
+        c.Request.URL.Path = mapped
+        serveFile(c)
+      })
+    }
   }
 
   staticPrefixes := []string{"/css/", "/js/", "/images/", "/admin/modules/", "/admin/templates/", "/manage/modules/", "/manage/templates/"}

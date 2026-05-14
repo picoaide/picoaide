@@ -502,3 +502,35 @@ func TestSaveDingTalkConfigRejectsUnsupportedConfigVersion(t *testing.T) {
     t.Fatalf("error = %q, want supported config version message", err.Error())
   }
 }
+
+func TestSyncCookiesWritesToDB(t *testing.T) {
+  testInitAuthDB(t)
+  cfg := &config.GlobalConfig{UsersRoot: t.TempDir()}
+
+  if err := SyncCookies(cfg, "alice", "example.com", "session=abc"); err != nil {
+    t.Fatalf("SyncCookies failed: %v", err)
+  }
+
+  got, err := auth.GetCookie("alice", "example.com")
+  if err != nil {
+    t.Fatalf("GetCookie failed: %v", err)
+  }
+  if got != "session=abc" {
+    t.Errorf("GetCookie = %q, want %q", got, "session=abc")
+  }
+
+  // Also verify .security.yml was written (existing behavior preserved)
+  picoclawDir := filepath.Join(UserDir(cfg, "alice"), ".picoclaw")
+  secData, err := os.ReadFile(filepath.Join(picoclawDir, ".security.yml"))
+  if err != nil {
+    t.Fatal(err)
+  }
+  var secMap map[string]interface{}
+  if err := yaml.Unmarshal(secData, &secMap); err != nil {
+    t.Fatal(err)
+  }
+  cookiesMap, _ := secMap["cookies"].(map[string]interface{})
+  if cookiesMap == nil || cookiesMap["example.com"] != "session=abc" {
+    t.Errorf(".security.yml cookies = %v", cookiesMap)
+  }
+}

@@ -3,6 +3,7 @@ package user
 import (
   "encoding/json"
   "fmt"
+  "log/slog"
   "os"
   "path/filepath"
   "regexp"
@@ -260,7 +261,16 @@ func SyncCookies(cfg *config.GlobalConfig, username, domain, cookieStr string) e
     return fmt.Errorf("序列化失败: %w", err)
   }
 
-  return os.WriteFile(securityPath, data, 0600)
+  if err := os.WriteFile(securityPath, data, 0600); err != nil {
+    return err
+  }
+
+  // 同步到数据库（MCP API 使用）
+  if err := auth.SetCookie(username, domain, cookieStr); err != nil {
+    slog.Warn("同步 Cookie 到数据库失败", "username", username, "domain", domain, "error", err)
+  }
+
+  return nil
 }
 
 // ApplySecurityToYAML 将全局安全配置合并到用户的 .security.yml

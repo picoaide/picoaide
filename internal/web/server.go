@@ -462,6 +462,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
   r.POST("/api/files/edit", s.handleFileEditSave)
   // Cookie 同步（写入用户 .security.yml）
   r.POST("/api/cookies", s.handleCookies)
+  // 用户 Cookie 授权管理（查看已授权域名、取消授权）
+  r.GET("/api/user/cookies", s.handleUserCookies)
+  r.POST("/api/user/cookies/delete", s.handleUserCookiesDelete)
   // CSRF token
   r.GET("/api/csrf", s.handleCSRF)
   // MCP token（Extension 获取认证 token）
@@ -469,6 +472,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
   // MCP SSE 服务（参数化路由，支持 browser、computer 等服务）
   r.GET("/api/mcp/sse/:service", s.handleMCPSSEServiceGet)
   r.POST("/api/mcp/sse/:service", s.handleMCPSSEServicePost)
+  // MCP Cookie API（MCP token 认证，供容器内技能读写 cookie）
+  r.GET("/api/mcp/cookies", s.handleMCPCookiesGet)
+  r.POST("/api/mcp/cookies", s.handleMCPCookiesPost)
   // Browser Extension WebSocket
   r.GET("/api/browser/ws", s.handleBrowserWS)
   // Computer 桌面代理 WebSocket

@@ -185,6 +185,26 @@ func (UserSkill) TableName() string {
   return "user_skills"
 }
 
+// UserCookie 用户 Cookie 表
+type UserCookie struct {
+  ID        int64  `xorm:"pk autoincr 'id'"`
+  Username  string `xorm:"notnull unique(username_domain) 'username'"`
+  Domain    string `xorm:"notnull 'domain'"`
+  Cookies   string `xorm:"notnull 'cookies'"`
+  UpdatedAt string `xorm:"notnull 'updated_at'"`
+}
+
+func (UserCookie) TableName() string {
+  return "user_cookies"
+}
+
+// CookieEntry 前端展示用的 Cookie 元数据
+type CookieEntry struct {
+  Domain    string `json:"domain"`
+  Cookies   string `json:"-"` // 不暴露给前端
+  UpdatedAt string `json:"updated_at"`
+}
+
 // GroupInfo 组信息（包含成员数），非数据库模型，仅用于查询结果
 type GroupInfo struct {
   ID          int64  `json:"id"`

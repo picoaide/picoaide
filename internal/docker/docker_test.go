@@ -1,8 +1,57 @@
 package docker
 
 import (
+  "strings"
   "testing"
 )
+
+// ============================================================
+// containerEnvVars 测试
+// ============================================================
+
+func TestContainerEnvVars_WithToken(t *testing.T) {
+  env := containerEnvVars("my-test-token")
+  tokenFound := false
+  for _, e := range env {
+    if e == "PICOAIDE_MCP_TOKEN=my-test-token" {
+      tokenFound = true
+      break
+    }
+  }
+  if !tokenFound {
+    t.Errorf("env vars %v should contain PICOAIDE_MCP_TOKEN=my-test-token", env)
+  }
+
+  tzFound := false
+  for _, e := range env {
+    if strings.HasPrefix(e, "TZ=") {
+      tzFound = true
+      break
+    }
+  }
+  if !tzFound {
+    t.Errorf("env vars %v should contain TZ", env)
+  }
+}
+
+func TestContainerEnvVars_WithoutToken(t *testing.T) {
+  env := containerEnvVars("")
+  for _, e := range env {
+    if strings.HasPrefix(e, "PICOAIDE_MCP_TOKEN=") {
+      t.Errorf("env vars %v should not contain PICOAIDE_MCP_TOKEN", env)
+    }
+  }
+  tzFound := false
+  for _, e := range env {
+    if strings.HasPrefix(e, "TZ=") {
+      tzFound = true
+      break
+    }
+  }
+  if !tzFound {
+    t.Errorf("env vars %v should contain TZ", env)
+  }
+}
 
 // ============================================================
 // stripANSI 测试

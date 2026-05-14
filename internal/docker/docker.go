@@ -85,14 +85,23 @@ func EnsureNetwork(ctx context.Context) error {
   return nil
 }
 
+// containerEnvVars 构建容器环境变量列表
+func containerEnvVars(mcpToken string) []string {
+  env := []string{"TZ=Asia/Shanghai"}
+  if mcpToken != "" {
+    env = append(env, "PICOAIDE_MCP_TOKEN="+mcpToken)
+  }
+  return env
+}
+
 // CreateContainer 创建用户容器（bind mount + 静态 IP + 资源限制）
-func CreateContainer(ctx context.Context, username, imageRef, userDir, ip string, cpuLimit float64, memMB int64) (string, error) {
-  return CreateContainerWithOptions(ctx, username, imageRef, userDir, ip, cpuLimit, memMB, false, nil)
+func CreateContainer(ctx context.Context, username, imageRef, userDir, ip string, cpuLimit float64, memMB int64, mcpToken string) (string, error) {
+  return CreateContainerWithOptions(ctx, username, imageRef, userDir, ip, cpuLimit, memMB, false, nil, mcpToken)
 }
 
 // CreateContainerWithOptions 创建用户容器
 // extraMounts 为额外的 bind mount 列表（用于共享文件夹挂载）
-func CreateContainerWithOptions(ctx context.Context, username, imageRef, userDir, ip string, cpuLimit float64, memMB int64, debugGateway bool, extraMounts []mount.Mount) (string, error) {
+func CreateContainerWithOptions(ctx context.Context, username, imageRef, userDir, ip string, cpuLimit float64, memMB int64, debugGateway bool, extraMounts []mount.Mount, mcpToken string) (string, error) {
   containerName := "picoaide-" + username
 
   // 如果同名容器已存在，先移除
@@ -132,7 +141,7 @@ func CreateContainerWithOptions(ctx context.Context, username, imageRef, userDir
 
   config := &container.Config{
     Image: imageRef,
-    Env:   []string{"TZ=Asia/Shanghai"},
+    Env:   containerEnvVars(mcpToken),
   }
   if debugGateway {
     config.Cmd = []string{
