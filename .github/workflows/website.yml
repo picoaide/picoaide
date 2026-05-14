@@ -25,6 +25,7 @@ jobs:
       - name: Copy Picoclaw adapter files
         run: |
           mkdir -p website/static/rules
+          rm -rf website/static/rules/picoclaw
           cp -r internal/user/picoclaw_rules website/static/rules/picoclaw
 
       - name: Build website
