@@ -8,7 +8,6 @@ import (
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/authsource"
-  "github.com/picoaide/picoaide/internal/config"
 )
 
 func TestWhitelist_GetEmpty(t *testing.T) {
@@ -276,7 +275,7 @@ func TestGroupSkills_BindExpandsToMembers(t *testing.T) {
   }
 
   // 创建技能目录（deploy 需要实际技能文件）
-  skillDir := filepath.Join(config.DefaultWorkDir, "skills", "test-source", "test-skill")
+  skillDir := filepath.Join(auth.SkillsRootDir, "test-source", "test-skill")
   os.MkdirAll(skillDir, 0755)
   os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test\n---\n# Content\n"), 0644)
 
