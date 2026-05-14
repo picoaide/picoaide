@@ -12,6 +12,8 @@ import (
   "path/filepath"
   "strings"
   "time"
+
+  "github.com/picoaide/picoaide/internal/util"
 )
 
 // ============================================================
@@ -160,6 +162,12 @@ func SearchRegistry(searchURL, query string, limit int) ([]RegistrySkill, error)
 // DownloadAndInstall 从注册源下载 ZIP 并安装到 skills/<source>/<slug>/
 // primaryURL 优先尝试，失败后 fallback 到 fallbackTemplate（{slug} 会被替换）
 func DownloadAndInstall(source, slug, primaryURL, fallbackTemplate, expectedSha256 string) error {
+  if err := util.SafePathSegment(source); err != nil {
+    return fmt.Errorf("源名称不合法: %w", err)
+  }
+  if err := util.SafePathSegment(slug); err != nil {
+    return fmt.Errorf("技能名不合法: %w", err)
+  }
   targetDir := filepath.Join(SkillsRootDir(), source, slug)
   if _, err := os.Stat(targetDir); err == nil {
     if err := os.RemoveAll(targetDir); err != nil {
@@ -210,6 +218,14 @@ func DownloadAndInstall(source, slug, primaryURL, fallbackTemplate, expectedSha2
 }
 
 func downloadFile(downloadURL string) ([]byte, error) {
+  parsed, err := url.Parse(downloadURL)
+  if err != nil {
+    return nil, fmt.Errorf("无效下载 URL: %w", err)
+  }
+  if parsed.Scheme != "https" && parsed.Scheme != "http" {
+    return nil, fmt.Errorf("不支持的 URL 协议: %s", parsed.Scheme)
+  }
+
   client := &http.Client{Timeout: 60 * time.Second}
   req, err := http.NewRequest("GET", downloadURL, nil)
   if err != nil {

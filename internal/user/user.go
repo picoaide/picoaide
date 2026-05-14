@@ -243,6 +243,10 @@ func DeployGroupSkillsToUser(cfg *config.GlobalConfig, username string) {
       continue
     }
     for _, skillName := range skills {
+      if err := util.SafePathSegment(skillName); err != nil {
+        slog.Warn("跳过不合法技能名", "skill", skillName, "error", err)
+        continue
+      }
       srcPath := filepath.Join(skillsDir, skillName)
       dstPath := filepath.Join(targetSkillsDir, skillName)
       os.RemoveAll(dstPath)

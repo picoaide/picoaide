@@ -64,6 +64,9 @@ func ListAllSkills() ([]SkillInfo, error) {
 
 // ListSourceSkills 扫描 skills/<source>/ 下所有含 SKILL.md 的子目录
 func ListSourceSkills(source string) ([]SkillInfo, error) {
+  if err := util.SafePathSegment(source); err != nil {
+    return nil, fmt.Errorf("源名称不合法: %w", err)
+  }
   root := filepath.Join(SkillsRootDir(), source)
   entries, err := os.ReadDir(root)
   if err != nil {
@@ -117,6 +120,9 @@ func ListSourceSkills(source string) ([]SkillInfo, error) {
 
 // RescanSource 重新扫描源下的所有技能目录，返回技能名列表
 func RescanSource(source string) ([]string, error) {
+  if err := util.SafePathSegment(source); err != nil {
+    return nil, fmt.Errorf("源名称不合法: %w", err)
+  }
   root := filepath.Join(SkillsRootDir(), source)
   entries, err := os.ReadDir(root)
   if err != nil {

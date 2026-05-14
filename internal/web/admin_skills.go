@@ -23,6 +23,9 @@ import (
 
 // findSkillSource 在 skills/ 下查找技能所属的源
 func findSkillSource(skillName string) string {
+  if err := util.SafePathSegment(skillName); err != nil {
+    return ""
+  }
   root := skill.SkillsRootDir()
   entries, err := os.ReadDir(root)
   if err != nil {
@@ -93,6 +96,9 @@ func (s *Server) handleAdminSkills(c *gin.Context) {
 // ============================================================
 
 func (s *Server) deploySkillToUser(skillName, username string) error {
+  if err := util.SafePathSegment(skillName); err != nil {
+    return fmt.Errorf("技能名不合法: %w", err)
+  }
   source := findSkillSource(skillName)
   if source == "" {
     return fmt.Errorf("技能 %s 未在任何源中找到", skillName)

@@ -161,6 +161,10 @@ func (s *Server) handleAdminSkillsSourcesRemove(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "源名称不能为空")
     return
   }
+  if err := util.SafePathSegment(name); err != nil {
+    writeError(c, http.StatusBadRequest, "源名称不合法: "+err.Error())
+    return
+  }
 
   // 不允许删除 skillhub.cn
   if name == "skillhub.cn" {

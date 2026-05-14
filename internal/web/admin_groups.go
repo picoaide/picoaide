@@ -293,6 +293,9 @@ func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
 
   // 智能清理技能
   for _, skillName := range groupSkills {
+    if err := util.SafePathSegment(skillName); err != nil {
+      continue
+    }
     has, err := auth.UserHasSkillFromAnySource(username, skillName)
     if err != nil {
       continue

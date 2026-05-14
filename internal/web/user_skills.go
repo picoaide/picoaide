@@ -10,6 +10,7 @@ import (
 
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/skill"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
@@ -151,10 +152,7 @@ func (s *Server) handleUserSkillsUninstall(c *gin.Context) {
     return
   }
 
-  targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName)
-  if err := removeDir(targetDir); err != nil {
-    slog.Error("删除技能目录失败", "skill", skillName, "username", username, "error", err)
-  }
+  removeUserSkillDir(s.cfg, username, skillName)
 
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success": true,
@@ -162,9 +160,16 @@ func (s *Server) handleUserSkillsUninstall(c *gin.Context) {
   })
 }
 
-func removeDir(path string) error {
-  if _, err := os.Stat(path); os.IsNotExist(err) {
-    return nil
+func removeUserSkillDir(cfg *config.GlobalConfig, username, skillName string) {
+  if err := util.SafePathSegment(skillName); err != nil {
+    slog.Error("删除技能目录时校验失败", "skill", skillName, "error", err)
+    return
   }
-  return os.RemoveAll(path)
+  targetDir := filepath.Join(user.UserDir(cfg, username), ".picoclaw", "workspace", "skills", skillName)
+  if _, err := os.Stat(targetDir); os.IsNotExist(err) {
+    return
+  }
+  if err := os.RemoveAll(targetDir); err != nil {
+    slog.Error("删除技能目录失败", "skill", skillName, "username", username, "error", err)
+  }
 }

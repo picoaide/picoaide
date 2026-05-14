@@ -142,7 +142,7 @@ func runResetPassword(username string) error {
   if err := auth.ChangePassword(username, password); err != nil {
     return err
   }
-  fmt.Printf("用户 %s 密码已重置: %s\n", username, password)
+  fmt.Fprintf(os.Stderr, "用户 %s 密码已重置: %s\n", username, password)
   return nil
 }
 

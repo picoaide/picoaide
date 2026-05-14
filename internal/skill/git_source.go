@@ -9,6 +9,7 @@ import (
   "github.com/go-git/go-git/v5/plumbing"
 
   "github.com/go-git/go-git/v5/config"
+  "github.com/picoaide/picoaide/internal/util"
 )
 
 // ============================================================
@@ -24,6 +25,9 @@ type SyncResult struct {
 
 // CloneGitSource clone Git 仓库到 skills/<name>/
 func CloneGitSource(name, url, ref, refType string) error {
+  if err := util.SafePathSegment(name); err != nil {
+    return fmt.Errorf("源名称不合法: %w", err)
+  }
   targetDir := filepath.Join(SkillsRootDir(), name)
   if _, err := os.Stat(targetDir); err == nil {
     return fmt.Errorf("源目录已存在: %s", targetDir)
@@ -53,6 +57,9 @@ func CloneGitSource(name, url, ref, refType string) error {
 
 // PullGitSource 拉取 Git 源更新并返回变更
 func PullGitSource(name, ref, refType string) (*SyncResult, error) {
+  if err := util.SafePathSegment(name); err != nil {
+    return nil, fmt.Errorf("源名称不合法: %w", err)
+  }
   repoDir := filepath.Join(SkillsRootDir(), name)
   if _, err := os.Stat(repoDir); err != nil {
     return nil, fmt.Errorf("源目录不存在: %s", repoDir)
