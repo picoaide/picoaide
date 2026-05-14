@@ -52,19 +52,29 @@ export async function init(ctx) {
     document.querySelectorAll('#upgrade-users input[type=checkbox]').forEach(cb => cb.checked = false);
   });
 
-  // 拉取状态轮询（仅在拉取中或刚结束时刷新列表）
+  // 拉取状态轮询（解析 Docker 进度 JSON，显示百分比，拉取完毕刷新一次列表）
   let pullPollTimer = null;
   let prevPullRunning = false;
+  function parsePullProgress(msg) {
+    try {
+      var d = JSON.parse(msg);
+      var pct = '';
+      if (d.progressDetail && d.progressDetail.total > 0) {
+        pct = Math.round(d.progressDetail.current / d.progressDetail.total * 100) + '%';
+      }
+      return (d.id || '') + ' ' + (d.status || '') + (pct ? ' ' + pct : '');
+    } catch (e) {
+      return msg;
+    }
+  }
   async function checkPullStatus() {
-    const data = await Api.get('/api/admin/images/pull-status').catch(() => ({}));
+    const data = await Api.get('/api/admin/images/pull-status').catch(function() { return {}; });
     if (data.running) {
       prevPullRunning = true;
       $('#image-pull-indicator')?.classList.remove('hidden');
       $('#image-pull-indicator .pull-tag').textContent = data.tag || '';
-      $('#image-pull-indicator .pull-msg').textContent = data.message || '正在拉取...';
+      $('#image-pull-indicator .pull-msg').textContent = parsePullProgress(data.message);
       $('#image-pull-indicator .pull-time').textContent = data.started_at || '';
-      await loadLocalImages();
-      loadRegistryTags();
     } else {
       $('#image-pull-indicator')?.classList.add('hidden');
       if (prevPullRunning) {
@@ -82,8 +92,10 @@ export async function init(ctx) {
     tbody.innerHTML = '';
     localImages = data.images || [];
     if (localImages.length === 0) {
-      $('#images-local-empty')?.classList.remove('hidden');
       updatePullIndicator(data);
+      if (!isPulling) {
+        $('#images-local-empty')?.classList.remove('hidden');
+      }
       return;
     }
     $('#images-local-empty')?.classList.add('hidden');
@@ -197,67 +209,10 @@ export async function init(ctx) {
   }
 
   async function pullImage(tag) {
-    const modal = $('#image-pull-modal');
-    const progress = $('#pull-progress');
-    const nameEl = $('#pull-image-name');
-
-    nameEl.textContent = tag;
-    progress.innerHTML = '';
-    modal.classList.remove('hidden');
-
-    const csrf = await getCSRF();
-    const formData = new FormData();
-    formData.append('tag', tag);
-    formData.append('csrf_token', csrf);
-
-    try {
-      const serverBase = await getServerUrl();
-      const response = await fetch(serverBase + '/api/admin/images/pull', {
-        method: 'POST',
-        body: formData,
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        progress.innerHTML += '<div style="color:#e74c3c">拉取失败: ' + response.status + '</div>';
-        return;
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            try {
-              const obj = JSON.parse(data);
-              if (obj.status === 'done') {
-                progress.innerHTML += '<div style="color:#2ecc71">拉取完成!</div>';
-                await loadLocalImages();
-                loadRegistryTags();
-                break;
-              }
-              if (obj.status) {
-                progress.innerHTML += '<div>' + esc(obj.status) + (obj.progress ? ' ' + esc(obj.progress) : '') + '</div>';
-              }
-            } catch {
-              progress.innerHTML += '<div>' + esc(data) + '</div>';
-            }
-            progress.scrollTop = progress.scrollHeight;
-          }
-        }
-      }
-    } catch (err) {
-      progress.innerHTML += '<div style="color:#e74c3c">错误: ' + esc(err.message) + '</div>';
+    const res = await Api.post('/api/admin/images/pull', { tag: tag });
+    if (!res.success) {
+      showMsg('#images-local-msg', res.error || '拉取失败', false);
+      return;
     }
   }
 
