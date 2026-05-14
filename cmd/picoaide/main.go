@@ -211,6 +211,7 @@ func runInitSilent() {
     os.Exit(1)
   }
 
+  cfg.Web.AuthMode = "local"
   cfg.Web.Listen = ":80"
   cfg.Image.Registry = "tencent"
   if err := config.SaveToDB(cfg, "system"); err != nil {
