@@ -53,7 +53,6 @@ export async function init(ctx) {
   });
 
   // 拉取状态轮询（解析 Docker 进度 JSON，显示百分比，拉取完毕刷新一次列表）
-  let pullPollTimer = null;
   let prevPullRunning = false;
   function parsePullProgress(msg) {
     try {
@@ -84,7 +83,7 @@ export async function init(ctx) {
       }
     }
   }
-  pullPollTimer = setInterval(checkPullStatus, 3000);
+  setInterval(checkPullStatus, 3000);
 
   async function loadLocalImages() {
     const data = await Api.get('/api/admin/images').catch(() => ({ images: [], pulling: false }));

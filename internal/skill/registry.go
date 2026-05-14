@@ -276,9 +276,16 @@ func extractZipToDir(data []byte, targetDir string) error {
       return err
     }
 
-    io.Copy(out, rc)
-    out.Close()
-    rc.Close()
+    _, err = io.Copy(out, rc)
+    if cerr := out.Close(); cerr != nil && err == nil {
+      err = cerr
+    }
+    if cerr := rc.Close(); cerr != nil && err == nil {
+      err = cerr
+    }
+    if err != nil {
+      return err
+    }
   }
 
   return nil

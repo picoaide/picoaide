@@ -1,5 +1,5 @@
 export async function init(ctx) {
-  var { Api, esc, showMsg, $, $$ } = ctx;
+  var { Api, esc, showMsg, $ } = ctx;
 
   var searchQuery = '';
 
