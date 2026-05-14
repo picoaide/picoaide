@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 项目文档
+    url: https://github.com/picoaide/picoaide
+    about: 查阅项目 README 和 Wiki 获取帮助
