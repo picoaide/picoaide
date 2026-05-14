@@ -116,12 +116,18 @@ export async function init(ctx) {
         '<td>' + userBtnHtml + '</td>' +
         actionsTd;
       for (const tag of (img.repo_tags || [])) {
-        const btn = document.createElement('button');
-        btn.className = 'btn btn-sm btn-danger';
-        btn.textContent = '删除';
-        btn.dataset.image = tag;
-        btn.addEventListener('click', () => deleteImage(tag));
-        tr.querySelector('td:last-child .btn-group').appendChild(btn);
+        const changeBtn = document.createElement('button');
+        changeBtn.className = 'btn btn-sm btn-primary';
+        changeBtn.textContent = '变更版本';
+        changeBtn.dataset.change = tag;
+        changeBtn.addEventListener('click', () => openUpgradeModal(tag));
+        tr.querySelector('td:last-child .btn-group').appendChild(changeBtn);
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn btn-sm btn-danger';
+        delBtn.textContent = '删除';
+        delBtn.dataset.image = tag;
+        delBtn.addEventListener('click', () => deleteImage(tag));
+        tr.querySelector('td:last-child .btn-group').appendChild(delBtn);
       }
       tbody.appendChild(tr);
     }
@@ -180,7 +186,6 @@ export async function init(ctx) {
     for (const tag of tags) {
       const exists = localTags.has(tag);
       const isCurrentPull = isPulling && pullingTag === tag;
-      const hasOtherVersions = Array.from(localTags).some(t => t !== tag);
       const tr = document.createElement('tr');
       let statusHtml;
       if (isCurrentPull) {
@@ -190,21 +195,15 @@ export async function init(ctx) {
       } else {
         statusHtml = '<span class="badge badge-muted">未拉取</span>';
       }
-      const upgradeBtnHtml = hasOtherVersions
-        ? '<button class="btn btn-sm btn-primary" data-upgrade="' + esc(tag) + '" style="margin-left:4px">升级</button>'
-        : '';
       const pullDisabled = isPulling ? ' disabled' : '';
       tr.innerHTML =
         '<td style="font-family:monospace">' + esc(tag) + '</td>' +
         '<td>' + statusHtml + '</td>' +
-        '<td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline"' + pullDisabled + ' data-tag="' + esc(tag) + '">' + (isCurrentPull ? '拉取中...' : (exists ? '重新拉取' : '拉取')) + '</button>' + upgradeBtnHtml + '</div></td>';
+        '<td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline"' + pullDisabled + ' data-tag="' + esc(tag) + '">' + (isCurrentPull ? '拉取中...' : (exists ? '重新拉取' : '拉取')) + '</button></div></td>';
       tbody.appendChild(tr);
     }
     tbody.querySelectorAll('[data-tag]').forEach(btn => {
       btn.addEventListener('click', () => pullImage(btn.dataset.tag));
-    });
-    tbody.querySelectorAll('[data-upgrade]').forEach(btn => {
-      btn.addEventListener('click', () => openUpgradeModal(btn.dataset.upgrade));
     });
   }
 
