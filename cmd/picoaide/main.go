@@ -102,16 +102,16 @@ func main() {
       }
     }
 
-    cfg, err := config.LoadFromDB()
-    if err != nil {
-      fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
-      os.Exit(1)
-    }
-    if err := user.ReleasePicoClawMigrationRulesCache(config.RuleCacheDir()); err != nil {
-      fmt.Fprintf(os.Stderr, "警告: 初始化迁移规则缓存失败: %v\n", err)
-    }
+  cfg, err := config.LoadFromDB()
+  if err != nil {
+    fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
+    os.Exit(1)
+  }
+  if err := user.ReleasePicoClawMigrationRulesCacheIfValid(config.RuleCacheDir()); err != nil {
+    fmt.Fprintf(os.Stderr, "警告: 初始化迁移规则缓存失败: %v\n", err)
+  }
 
-    wd, _ = os.Getwd()
+  wd, _ = os.Getwd()
     retention := cfg.Web.LogRetention
     if retention == "" {
       retention = "6m"
@@ -209,6 +209,10 @@ func runInitSilent() {
   if err != nil {
     fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
     os.Exit(1)
+  }
+
+  if err := user.ReleasePicoClawMigrationRulesCache(config.RuleCacheDir()); err != nil {
+    fmt.Fprintf(os.Stderr, "警告: 初始化迁移规则缓存失败: %v\n", err)
   }
 
   cfg.Web.AuthMode = "local"

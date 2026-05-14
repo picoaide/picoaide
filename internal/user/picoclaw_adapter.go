@@ -116,11 +116,38 @@ func ReleasePicoClawAdapterCache(cacheDir string) error {
   if _, err := os.Stat(filepath.Join(targetRoot, picoclawAdapterIndexFile)); err == nil {
     return nil
   }
+  if picoclawAdapterEmbedExists() {
+    return releasePicoClawAdapterFromEmbed(targetRoot)
+  }
   bundledRoot, err := findBundledPicoClawAdapterRoot()
   if err != nil {
     return err
   }
   return copyPicoClawAdapterDir(bundledRoot, targetRoot)
+}
+
+func ForceReleasePicoClawAdapterCache(cacheDir string) error {
+  targetRoot := filepath.Join(cacheDir, picoclawAdapterDir)
+  os.RemoveAll(targetRoot)
+  if picoclawAdapterEmbedExists() {
+    return releasePicoClawAdapterFromEmbed(targetRoot)
+  }
+  bundledRoot, err := findBundledPicoClawAdapterRoot()
+  if err != nil {
+    return err
+  }
+  return copyPicoClawAdapterDir(bundledRoot, targetRoot)
+}
+
+func ReleasePicoClawAdapterCacheIfValid(cacheDir string) error {
+  targetRoot := filepath.Join(cacheDir, picoclawAdapterDir)
+  if _, err := os.Stat(filepath.Join(targetRoot, picoclawAdapterIndexFile)); err != nil {
+    return ForceReleasePicoClawAdapterCache(cacheDir)
+  }
+  if _, err := LoadPicoClawAdapterPackage(targetRoot); err != nil {
+    return ForceReleasePicoClawAdapterCache(cacheDir)
+  }
+  return nil
 }
 
 func LoadPicoClawAdapterPackage(root string) (*PicoClawAdapterPackage, error) {

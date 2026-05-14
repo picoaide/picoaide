@@ -75,6 +75,14 @@ func ReleasePicoClawMigrationRulesCache(cacheDir string) error {
   return svc.ReleaseBundledRulesCache()
 }
 
+func ForceReleasePicoClawMigrationRulesCache(cacheDir string) error {
+  return ForceReleasePicoClawAdapterCache(cacheDir)
+}
+
+func ReleasePicoClawMigrationRulesCacheIfValid(cacheDir string) error {
+  return ReleasePicoClawAdapterCacheIfValid(cacheDir)
+}
+
 func RefreshPicoClawMigrationRulesFromAdapter(cacheDir, remoteBaseURL string) error {
   _, err := RefreshPicoClawAdapterFromRemote(cacheDir, remoteBaseURL, &http.Client{Timeout: 20 * time.Second})
   return err

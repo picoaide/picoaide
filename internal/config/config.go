@@ -286,13 +286,47 @@ func RuleCacheDir() string {
 }
 
 func PicoClawAdapterRemoteBaseURL() string {
+  urls := PicoClawAdapterRemoteBaseURLs()
+  if len(urls) > 0 {
+    return urls[0]
+  }
+  return ""
+}
+
+// PicoClawAdapterRemoteBaseURLs 返回多个适配器远程 URL（支持逗号分隔的多个回退地址）
+// 优先级：数据库配置 > PICOAIDE_PICOCLAW_ADAPTER_URLS 环境变量 > PICOAIDE_PICOCLAW_ADAPTER_URL 环境变量 > 默认值
+func PicoClawAdapterRemoteBaseURLs() []string {
+  // 1. 数据库配置（逗号分隔）
   if cfg, err := LoadFromDB(); err == nil && cfg != nil && cfg.PicoClawAdapterRemoteBaseURL != "" {
-    return strings.TrimRight(cfg.PicoClawAdapterRemoteBaseURL, "/")
+    if urls := parseAdapterURLs(cfg.PicoClawAdapterRemoteBaseURL); len(urls) > 0 {
+      return urls
+    }
+  }
+  // 2. 环境变量（逗号分隔）
+  if value := os.Getenv("PICOAIDE_PICOCLAW_ADAPTER_URLS"); value != "" {
+    if urls := parseAdapterURLs(value); len(urls) > 0 {
+      return urls
+    }
   }
   if value := os.Getenv("PICOAIDE_PICOCLAW_ADAPTER_URL"); value != "" {
-    return strings.TrimRight(value, "/")
+    if urls := parseAdapterURLs(value); len(urls) > 0 {
+      return urls
+    }
   }
-  return "https://raw.githubusercontent.com/picoaide/picoaide/main/rules/picoclaw"
+  // 3. 默认
+  return []string{"https://raw.githubusercontent.com/picoaide/picoaide/main/rules/picoclaw"}
+}
+
+func parseAdapterURLs(s string) []string {
+  parts := strings.Split(s, ",")
+  var urls []string
+  for _, p := range parts {
+    p = strings.TrimSpace(p)
+    if p != "" {
+      urls = append(urls, strings.TrimRight(p, "/"))
+    }
+  }
+  return urls
 }
 
 // ============================================================
