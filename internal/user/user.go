@@ -3,6 +3,7 @@ package user
 import (
   "encoding/json"
   "fmt"
+  "log/slog"
   "os"
   "path/filepath"
   "regexp"
