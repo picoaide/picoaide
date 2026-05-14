@@ -246,6 +246,7 @@ func (s *Server) handleAuthStart(c *gin.Context) {
     Path:     "/api/login/callback",
     MaxAge:   600,
     HttpOnly: true,
+    Secure:   s.cfg.Web.TLS.Enabled,
     SameSite: http.SameSiteLaxMode,
   })
   c.Redirect(http.StatusFound, authURL)
@@ -263,7 +264,7 @@ func (s *Server) handleAuthCallback(c *gin.Context) {
     return
   }
   http.SetCookie(c.Writer, &http.Cookie{
-    Name: "auth_state", Value: "", Path: "/api/login/callback", MaxAge: -1, HttpOnly: true,
+    Name: "auth_state", Value: "", Path: "/api/login/callback", MaxAge: -1, HttpOnly: true, Secure: s.cfg.Web.TLS.Enabled,
   })
 
   identity, err := authsource.CompleteLogin(c.Request.Context(), s.cfg, c.Query("code"))
@@ -599,6 +600,9 @@ func (s *Server) handleUserInfo(c *gin.Context) {
 }
 
 func (s *Server) userEnvironmentReady(username string) bool {
+  if err := user.ValidateUsername(username); err != nil {
+    return false
+  }
   rec, _ := auth.GetContainerByUsername(username)
   if rec == nil || rec.Image == "" {
     return false
@@ -632,9 +636,11 @@ func (s *Server) handleUserInitStatus(c *gin.Context) {
       status = dockerpkg.ContainerStatus(contextWithTimeout(5), rec.ContainerID)
     }
     imageReady = rec.Image != ""
-    configPath := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "config.json")
-    _, err := os.Stat(configPath)
-    hasConfig = err == nil
+    if err := user.ValidateUsername(username); err == nil {
+      configPath := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "config.json")
+      _, err := os.Stat(configPath)
+      hasConfig = err == nil
+    }
   }
 
   writeJSON(c, http.StatusOK, struct {
