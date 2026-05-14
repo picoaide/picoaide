@@ -204,7 +204,6 @@ type CookieEntry struct {
   Cookies   string `json:"-"` // 不暴露给前端
   UpdatedAt string `json:"updated_at"`
 }
-
 // GroupInfo 组信息（包含成员数），非数据库模型，仅用于查询结果
 type GroupInfo struct {
   ID          int64  `json:"id"`
