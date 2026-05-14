@@ -52,28 +52,28 @@ export async function init(ctx) {
     document.querySelectorAll('#upgrade-users input[type=checkbox]').forEach(cb => cb.checked = false);
   });
 
-  // 拉取状态轮询
+  // 拉取状态轮询（仅在拉取中或刚结束时刷新列表）
   let pullPollTimer = null;
+  let prevPullRunning = false;
   async function checkPullStatus() {
     const data = await Api.get('/api/admin/images/pull-status').catch(() => ({}));
     if (data.running) {
+      prevPullRunning = true;
       $('#image-pull-indicator')?.classList.remove('hidden');
       $('#image-pull-indicator .pull-tag').textContent = data.tag || '';
       $('#image-pull-indicator .pull-msg').textContent = data.message || '正在拉取...';
       $('#image-pull-indicator .pull-time').textContent = data.started_at || '';
-      // 刷新本地列表和远程标签
       await loadLocalImages();
       loadRegistryTags();
     } else {
       $('#image-pull-indicator')?.classList.add('hidden');
-      // 如果之前是 running，拉取刚结束，刷新列表
-      if (pullPollTimer) {
+      if (prevPullRunning) {
+        prevPullRunning = false;
         await loadLocalImages();
         loadRegistryTags();
       }
     }
   }
-  // 启动轮询（每 3 秒）
   pullPollTimer = setInterval(checkPullStatus, 3000);
 
   async function loadLocalImages() {
