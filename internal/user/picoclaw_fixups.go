@@ -293,29 +293,7 @@ func injectMCPConfig(config map[string]interface{}, mcpToken string, cfg *config
 }
 
 func containerBaseURL(cfg *config.GlobalConfig) string {
-  listenAddr := cfg.Web.Listen
-  host := "100.64.0.1"
-  port := "80"
-  if parts := strings.SplitN(listenAddr, ":", 2); len(parts) == 2 {
-    if parts[0] != "" && parts[0] != ":" {
-      host = parts[0]
-    }
-    if parts[1] != "" {
-      port = parts[1]
-    }
-  }
-  if host == "0.0.0.0" || host == "::" || host == "[::]" {
-    host = "100.64.0.1"
-  }
-
-  scheme := "http"
-  if cfg.Web.TLS.Enabled && port == "443" {
-    port = "80"
-  } else if cfg.Web.TLS.Enabled {
-    scheme = "https"
-  }
-
-  return fmt.Sprintf("%s://%s:%s", scheme, host, port)
+  return "http://100.64.0.1:80"
 }
 
 func applyPicoClawCompatibilityFixups(cfg map[string]interface{}, targetTag string, fallbackTag string) error {

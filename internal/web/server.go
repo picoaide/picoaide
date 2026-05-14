@@ -5,6 +5,7 @@ import (
   "crypto/hmac"
   "crypto/rand"
   "crypto/sha256"
+  "crypto/tls"
   "encoding/hex"
   "fmt"
   "github.com/gin-gonic/gin"
@@ -541,6 +542,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
     admin.POST("/migration-rules/refresh", s.handleAdminMigrationRulesRefresh)
     admin.POST("/migration-rules/upload", s.handleAdminMigrationRulesUpload)
     admin.GET("/picoclaw/channels", s.handlePicoClawAdminChannelsGet)
+    // TLS 证书管理
+    admin.GET("/tls/status", s.handleAdminTLSStatus)
+    admin.POST("/tls/upload", s.handleAdminTLSUpload)
     admin.GET("/task/status", s.handleAdminTaskStatus)
   }
   // 普通用户 - 团队空间
@@ -597,11 +601,6 @@ func httpsRedirectTarget(r *http.Request) string {
 
 // Serve 创建并启动 Web 管理面板服务器
 func Serve(cfg *config.GlobalConfig) error {
-  listenAddr := cfg.Web.Listen
-  if listenAddr == "" {
-    listenAddr = ":80"
-  }
-
   // 确保工作目录存在
   wd, _ := os.Getwd()
   if wd != "" {
@@ -675,39 +674,37 @@ func Serve(cfg *config.GlobalConfig) error {
 
   var redirectServer *http.Server
 
-  if cfg.Web.TLS.Enabled && cfg.Web.TLS.CertFile != "" && cfg.Web.TLS.KeyFile != "" {
-    if _, err := os.Stat(cfg.Web.TLS.CertFile); err != nil {
-      return fmt.Errorf("证书文件不存在: %s", cfg.Web.TLS.CertFile)
+  if cfg.Web.TLS.Enabled && cfg.Web.TLS.CertPEM != "" && cfg.Web.TLS.KeyPEM != "" {
+    cert, err := tls.X509KeyPair([]byte(cfg.Web.TLS.CertPEM), []byte(cfg.Web.TLS.KeyPEM))
+    if err != nil {
+      return fmt.Errorf("解析 TLS 证书失败: %w", err)
     }
-    if _, err := os.Stat(cfg.Web.TLS.KeyFile); err != nil {
-      return fmt.Errorf("私钥文件不存在: %s", cfg.Web.TLS.KeyFile)
-    }
+    tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
 
-    if strings.HasSuffix(listenAddr, ":443") {
-      redirectMux := http.NewServeMux()
-      redirectMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        if isDockerNetworkRequest(r) {
-          appHandler.ServeHTTP(w, r)
-          return
-        }
-        http.Redirect(w, r, httpsRedirectTarget(r), http.StatusMovedPermanently)
-      })
-      redirectServer = &http.Server{Addr: ":80", Handler: redirectMux}
-      go func() {
-        slog.Info("HTTP 入口已启动", "listen", ":80", "internal", dockerpkg.NetworkSubnet, "external", "redirect-to-https")
-        if err := redirectServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-          slog.Error("HTTP 入口服务错误", "error", err)
-        }
-      }()
-    }
+    redirectMux := http.NewServeMux()
+    redirectMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+      if isDockerNetworkRequest(r) {
+        appHandler.ServeHTTP(w, r)
+        return
+      }
+      http.Redirect(w, r, httpsRedirectTarget(r), http.StatusMovedPermanently)
+    })
+    redirectServer = &http.Server{Addr: ":80", Handler: redirectMux}
+    go func() {
+      slog.Info("HTTP 入口已启动", "listen", ":80", "internal", dockerpkg.NetworkSubnet, "external", "redirect-to-https")
+      if err := redirectServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+        slog.Error("HTTP 入口服务错误", "error", err)
+      }
+    }()
 
     srv := &http.Server{
-      Addr:    listenAddr,
-      Handler: appHandler,
+      Addr:      ":443",
+      Handler:   appHandler,
+      TLSConfig: tlsCfg,
     }
     go func() {
-      slog.Info("管理面板启动", "url", "https://"+listenAddr)
-      if err := srv.ListenAndServeTLS(cfg.Web.TLS.CertFile, cfg.Web.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+      slog.Info("管理面板启动", "url", "https://:443")
+      if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
         slog.Error("服务启动失败", "error", err)
       }
     }()
@@ -718,11 +715,11 @@ func Serve(cfg *config.GlobalConfig) error {
   }
 
   srv := &http.Server{
-    Addr:    listenAddr,
+    Addr:    ":80",
     Handler: appHandler,
   }
   go func() {
-    slog.Info("管理面板启动", "url", "http://"+listenAddr)
+    slog.Info("管理面板启动", "url", "http://:80")
     if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
       slog.Error("服务启动失败", "error", err)
     }

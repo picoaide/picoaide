@@ -104,9 +104,9 @@ func (i ImageConfig) UnifiedRef(tag string) string {
 }
 
 type TLSConfig struct {
-  Enabled  bool
-  CertFile string
-  KeyFile  string
+  Enabled bool
+  CertPEM string // PEM 编码的证书内容
+  KeyPEM  string // PEM 编码的私钥内容
 }
 
 type WebConfig struct {
@@ -340,7 +340,7 @@ After=network.target docker.service
 
 [Service]
 Type=simple
-ExecStart=/usr/sbin/picoaide serve -listen {{.ListenAddr}}
+ExecStart=/usr/sbin/picoaide
 WorkingDirectory={{.WorkingDir}}
 Restart=always
 RestartSec=5
@@ -352,7 +352,6 @@ WantedBy=multi-user.target
 // ServiceTemplateData 服务模板数据
 type ServiceTemplateData struct {
   WorkingDir string
-  ListenAddr string
 }
 
 const serviceFilePath = "/etc/systemd/system/picoaide.service"
@@ -364,14 +363,8 @@ func InstallService(cfg *GlobalConfig) error {
     workDir = "/data/picoaide"
   }
 
-  listenAddr := cfg.Web.Listen
-  if listenAddr == "" {
-    listenAddr = ":80"
-  }
-
   data := ServiceTemplateData{
     WorkingDir: workDir,
-    ListenAddr: listenAddr,
   }
 
   tmpl, err := template.New("service").Parse(SystemServiceTemplate)
@@ -507,8 +500,8 @@ func LoadFromDB() (*GlobalConfig, error) {
 
   // TLS 配置
   cfg.Web.TLS.Enabled, _ = strconv.ParseBool(kv["web.tls.enabled"])
-  cfg.Web.TLS.CertFile = kv["web.tls.cert_file"]
-  cfg.Web.TLS.KeyFile = kv["web.tls.key_file"]
+  cfg.Web.TLS.CertPEM = kv["web.tls.cert_pem"]
+  cfg.Web.TLS.KeyPEM = kv["web.tls.key_pem"]
 
   // 结构化字段从 JSON 反序列化
   if v, ok := kv["picoclaw"]; ok && v != "" {
@@ -576,8 +569,8 @@ func configToKV(cfg *GlobalConfig) (map[string]string, error) {
 
   // TLS 配置
   kv["web.tls.enabled"] = strconv.FormatBool(cfg.Web.TLS.Enabled)
-  kv["web.tls.cert_file"] = cfg.Web.TLS.CertFile
-  kv["web.tls.key_file"] = cfg.Web.TLS.KeyFile
+  kv["web.tls.cert_pem"] = cfg.Web.TLS.CertPEM
+  kv["web.tls.key_pem"] = cfg.Web.TLS.KeyPEM
 
   // 结构化字段序列化为 JSON
   if cfg.PicoClaw != nil {
