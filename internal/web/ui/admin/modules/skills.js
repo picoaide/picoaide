@@ -3,7 +3,7 @@
 // ============================================================
 
 export async function init(ctx) {
-  var { Api, esc, showMsg, showModal, confirmModal, $, $$ } = ctx;
+  var { Api, esc, showMsg, showModal, confirmModal, $ } = ctx;
 
   // 自定义复选框样式
   var ckbStyle = document.createElement('style');

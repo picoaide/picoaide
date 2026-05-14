@@ -13,7 +13,7 @@ var tagTooltips = {
 };
 
 export async function init(ctx) {
-  var $ = ctx.$, $$ = ctx.$$, esc = ctx.esc, showMsg = ctx.showMsg, Api = ctx.Api;
+  var $ = ctx.$, esc = ctx.esc, showMsg = ctx.showMsg, Api = ctx.Api;
   var currentPath = '';
 
   await loadFiles('');
