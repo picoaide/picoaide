@@ -17,14 +17,7 @@ import (
 
 // SkillsRootDir 返回 skills/ 根目录
 func SkillsRootDir() string {
-  if hcfg, err := config.LoadHome(); err == nil && hcfg != nil && hcfg.WorkDir != "" {
-    return filepath.Join(hcfg.WorkDir, "skills")
-  }
-  wd, err := os.Getwd()
-  if err != nil {
-    return "./skills"
-  }
-  return filepath.Join(wd, "skills")
+  return filepath.Join(config.WorkDir(), "skills")
 }
 
 // SkillInfo 技能信息

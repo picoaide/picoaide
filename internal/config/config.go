@@ -21,6 +21,14 @@ import (
 
 const AppName = "picoaide"
 
+// DefaultWorkDir 默认工作目录
+const DefaultWorkDir = "/data/picoaide"
+
+// WorkDir 返回工作目录
+func WorkDir() string {
+  return DefaultWorkDir
+}
+
 var Version = "dev"
 
 const SessionMaxAge = 86400 // 24 hours
@@ -30,37 +38,37 @@ const SessionMaxAge = 86400 // 24 hours
 // ============================================================
 
 type LDAPConfig struct {
-  Host                 string `yaml:"host"`
-  BindDN               string `yaml:"bind_dn"`
-  BindPassword         string `yaml:"bind_password"`
-  BaseDN               string `yaml:"base_dn"`
-  Filter               string `yaml:"filter"`
-  UsernameAttribute    string `yaml:"username_attribute"`
-  GroupSearchMode      string `yaml:"group_search_mode"` // "member_of" | "group_search"
-  GroupBaseDN          string `yaml:"group_base_dn"`
-  GroupFilter          string `yaml:"group_filter"`
-  GroupMemberAttribute string `yaml:"group_member_attribute"`
-  WhitelistEnabled     bool   `yaml:"whitelist_enabled"`
-  SyncInterval         string `yaml:"sync_interval"` // "0" 禁用, "1h", "24h", "30m" 等
+  Host                 string
+  BindDN               string
+  BindPassword         string
+  BaseDN               string
+  Filter               string
+  UsernameAttribute    string
+  GroupSearchMode      string // "member_of" | "group_search"
+  GroupBaseDN          string
+  GroupFilter          string
+  GroupMemberAttribute string
+  WhitelistEnabled     bool
+  SyncInterval         string // "0" 禁用, "1h", "24h", "30m" 等
 }
 
 type OIDCConfig struct {
-  IssuerURL        string `yaml:"issuer_url"`
-  ClientID         string `yaml:"client_id"`
-  ClientSecret     string `yaml:"client_secret"`
-  RedirectURL      string `yaml:"redirect_url"`
-  Scopes           string `yaml:"scopes"`
-  UsernameClaim    string `yaml:"username_claim"`
-  GroupsClaim      string `yaml:"groups_claim"`
-  WhitelistEnabled bool   `yaml:"whitelist_enabled"`
-  SyncInterval     string `yaml:"sync_interval"`
+  IssuerURL        string
+  ClientID         string
+  ClientSecret     string
+  RedirectURL      string
+  Scopes           string
+  UsernameClaim    string
+  GroupsClaim      string
+  WhitelistEnabled bool
+  SyncInterval     string
 }
 
 type ImageConfig struct {
-  Name     string `yaml:"name"`
-  Tag      string `yaml:"tag"`
-  Timezone string `yaml:"timezone"`
-  Registry string `yaml:"registry"` // "github" | "tencent"
+  Name     string
+  Tag      string
+  Timezone string
+  Registry string // "github" | "tencent"
 }
 
 // IsTencent 是否使用腾讯云镜像仓库
@@ -96,87 +104,87 @@ func (i ImageConfig) UnifiedRef(tag string) string {
 }
 
 type TLSConfig struct {
-  Enabled  bool   `yaml:"enabled"`
-  CertFile string `yaml:"cert_file"`
-  KeyFile  string `yaml:"key_file"`
+  Enabled  bool
+  CertFile string
+  KeyFile  string
 }
 
 type WebConfig struct {
-  Listen           string    `yaml:"listen"`
-  ContainerBaseURL string    `yaml:"container_base_url"`
-  LDAPEnabled      *bool     `yaml:"ldap_enabled"`
-  AuthMode         string    `yaml:"auth_mode"`     // "ldap" | "oidc" | "local"
-  LogRetention     string    `yaml:"log_retention"` // "1m","3m","6m","1y","3y","5y","forever"
-  LogLevel         string    `yaml:"log_level"`     // "debug","info","warn","error"
-  TLS              TLSConfig `yaml:"tls"`
+  Listen           string
+  ContainerBaseURL string
+  LDAPEnabled      *bool
+  AuthMode         string    // "ldap" | "oidc" | "local"
+  LogRetention     string    // "1m","3m","6m","1y","3y","5y","forever"
+  LogLevel         string    // "debug","info","warn","error"
+  TLS              TLSConfig
 }
 
 type SkillRepoCredential struct {
-  Name     string `yaml:"name" json:"name"`
-  Provider string `yaml:"provider" json:"provider"`
-  Mode     string `yaml:"mode" json:"mode"` // "ssh" | "http" | "https"
-  Username string `yaml:"username" json:"username"`
-  Secret   string `yaml:"secret" json:"secret"`
+  Name     string `json:"name"`
+  Provider string `json:"provider"`
+  Mode     string `json:"mode"` // "ssh" | "http" | "https"
+  Username string `json:"username"`
+  Secret   string `json:"secret"`
 }
 
 type SkillRepo struct {
-  Name        string                `yaml:"name" json:"name"`
-  URL         string                `yaml:"url" json:"url"`
-  Ref         string                `yaml:"ref" json:"ref"`
-  RefType     string                `yaml:"ref_type" json:"ref_type"` // "branch" | "tag"
-  Public      bool                  `yaml:"public" json:"public"`
-  Credentials []SkillRepoCredential `yaml:"credentials" json:"credentials"`
-  LastPull    string                `yaml:"last_pull" json:"last_pull"`
+  Name        string                `json:"name"`
+  URL         string                `json:"url"`
+  Ref         string                `json:"ref"`
+  RefType     string                `json:"ref_type"` // "branch" | "tag"
+  Public      bool                  `json:"public"`
+  Credentials []SkillRepoCredential `json:"credentials"`
+  LastPull    string                `json:"last_pull"`
 }
 
 // RegistrySource 注册源（如 SkillHub）
 type RegistrySource struct {
-  Name                string `yaml:"name" json:"name"`
-  DisplayName         string `yaml:"display_name" json:"display_name"`
-  IndexURL            string `yaml:"index_url" json:"index_url"`
-  SearchURL           string `yaml:"search_url,omitempty" json:"search_url,omitempty"`
-  DownloadURLTemplate string `yaml:"download_url_template,omitempty" json:"download_url_template,omitempty"`
-  PrimaryDownloadURL  string `yaml:"primary_download_url,omitempty" json:"primary_download_url,omitempty"`
-  AuthHeader          string `yaml:"auth_header,omitempty" json:"-"`
-  Enabled             bool   `yaml:"enabled" json:"enabled"`
-  LastRefresh         string `yaml:"last_refresh" json:"last_refresh"`
+  Name                string `json:"name"`
+  DisplayName         string `json:"display_name"`
+  IndexURL            string `json:"index_url"`
+  SearchURL           string `json:"search_url,omitempty"`
+  DownloadURLTemplate string `json:"download_url_template,omitempty"`
+  PrimaryDownloadURL  string `json:"primary_download_url,omitempty"`
+  AuthHeader          string `json:"-"`
+  Enabled             bool   `json:"enabled"`
+  LastRefresh         string `json:"last_refresh"`
 }
 
 // GitSource 以 Git 仓库为后端的技能源
 type GitSource struct {
-  Name        string                `yaml:"name" json:"name"`
-  URL         string                `yaml:"url" json:"url"`
-  Ref         string                `yaml:"ref,omitempty" json:"ref,omitempty"`
-  RefType     string                `yaml:"ref_type,omitempty" json:"ref_type,omitempty"` // "branch" | "tag"
-  Credentials []SkillRepoCredential `yaml:"credentials,omitempty" json:"credentials,omitempty"`
-  Enabled     bool                  `yaml:"enabled" json:"enabled"`
-  LastPull    string                `yaml:"last_pull" json:"last_pull"`
+  Name        string                `json:"name"`
+  URL         string                `json:"url"`
+  Ref         string                `json:"ref,omitempty"`
+  RefType     string                `json:"ref_type,omitempty"` // "branch" | "tag"
+  Credentials []SkillRepoCredential `json:"credentials,omitempty"`
+  Enabled     bool                  `json:"enabled"`
+  LastPull    string                `json:"last_pull"`
 }
 
-// SkillsSourceWrapper 用于 JSON/YAML 序列化分派
+// SkillsSourceWrapper 用于 JSON 序列化分派
 type SkillsSourceWrapper struct {
-  Type   string        `yaml:"type" json:"type"`
-  Name   string        `yaml:"name" json:"name"`
-  Git    *GitSource    `yaml:",inline" json:",inline"`
-  Reg    *RegistrySource `yaml:",inline" json:",inline"`
+  Type string          `json:"type"`
+  Name string          `json:"name"`
+  Git  *GitSource      `json:",inline"`
+  Reg  *RegistrySource `json:",inline"`
 }
 
 type SkillsConfig struct {
-  Repos   []SkillRepo          `yaml:"repos" json:"-"`
-  Sources []SkillsSourceWrapper `yaml:"sources" json:"sources"`
+  Repos   []SkillRepo          `json:"-"`
+  Sources []SkillsSourceWrapper `json:"sources"`
 }
 
 type GlobalConfig struct {
-  LDAP                         LDAPConfig   `yaml:"ldap"`
-  OIDC                         OIDCConfig   `yaml:"oidc"`
-  Image                        ImageConfig  `yaml:"image"`
-  UsersRoot                    string       `yaml:"users_root"`
-  ArchiveRoot                  string       `yaml:"archive_root"`
-  PicoClawAdapterRemoteBaseURL string       `yaml:"picoclaw_adapter_remote_base_url"`
-  Web                          WebConfig    `yaml:"web"`
-  PicoClaw                     interface{}  `yaml:"picoclaw"`
-  Security                     interface{}  `yaml:"security"`
-  Skills                       SkillsConfig `yaml:"skills"`
+  LDAP                         LDAPConfig
+  OIDC                         OIDCConfig
+  Image                        ImageConfig
+  UsersRoot                    string
+  ArchiveRoot                  string
+  PicoClawAdapterRemoteBaseURL string
+  Web                          WebConfig
+  PicoClaw                     interface{}
+  Security                     interface{}
+  Skills                       SkillsConfig
 }
 
 func (cfg *GlobalConfig) GetPicoConfig() interface{} {
@@ -265,38 +273,21 @@ func (cfg *GlobalConfig) SyncIntervalDuration() time.Duration {
   return d
 }
 
-// SkillsDirPath 返回技能目录路径（优先使用 HomeConfig.WorkDir）
+// SkillsDirPath 返回技能目录路径
 func SkillsDirPath() string {
-  if hcfg, err := LoadHome(); err == nil && hcfg != nil && hcfg.WorkDir != "" {
-    return filepath.Join(hcfg.WorkDir, "skills")
-  }
-  wd, err := os.Getwd()
-  if err != nil {
-    return "./skills"
-  }
-  return filepath.Join(wd, "skills")
+  return filepath.Join(WorkDir(), "skills")
 }
 
 func RuleCacheDir() string {
   if dir := strings.TrimSpace(os.Getenv("PICOAIDE_RULE_CACHE_DIR")); dir != "" {
     return dir
   }
-  if hcfg, err := LoadHome(); err == nil && hcfg != nil && hcfg.RuleCacheDir != "" {
-    return hcfg.RuleCacheDir
-  }
-  wd, err := os.Getwd()
-  if err != nil || wd == "" {
-    return "./rules"
-  }
-  return filepath.Join(wd, "rules")
+  return filepath.Join(WorkDir(), "rules")
 }
 
 func PicoClawAdapterRemoteBaseURL() string {
   if cfg, err := LoadFromDB(); err == nil && cfg != nil && cfg.PicoClawAdapterRemoteBaseURL != "" {
     return strings.TrimRight(cfg.PicoClawAdapterRemoteBaseURL, "/")
-  }
-  if hcfg, err := LoadHome(); err == nil && hcfg != nil && hcfg.PicoClawAdapterRemoteBaseURL != "" {
-    return strings.TrimRight(hcfg.PicoClawAdapterRemoteBaseURL, "/")
   }
   if value := os.Getenv("PICOAIDE_PICOCLAW_ADAPTER_URL"); value != "" {
     return strings.TrimRight(value, "/")

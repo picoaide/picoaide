@@ -42,15 +42,9 @@ func main() {
     os.Exit(1)
   }
 
-  if hcfg, err := config.LoadHome(); err == nil && hcfg != nil && hcfg.WorkDir != "" {
-    if err := os.Chdir(hcfg.WorkDir); err != nil {
-      os.MkdirAll(hcfg.WorkDir, 0755)
-      os.Chdir(hcfg.WorkDir)
-    }
-    if hcfg.RuleCacheDir == "" {
-      hcfg.RuleCacheDir = filepath.Join(hcfg.WorkDir, "rules")
-      config.SaveHome(hcfg)
-    }
+  if err := os.Chdir(workDir); err != nil {
+    os.MkdirAll(workDir, 0755)
+    os.Chdir(workDir)
   }
 
   filteredArgs := os.Args[1:]
@@ -185,15 +179,6 @@ func runInitSilent() {
   os.MkdirAll(filepath.Join(workDir, "users"), 0755)
   os.MkdirAll(filepath.Join(workDir, "archive"), 0755)
   os.MkdirAll(filepath.Join(workDir, "rules"), 0755)
-
-  hcfg := &config.HomeConfig{
-    WorkDir:      workDir,
-    RuleCacheDir: filepath.Join(workDir, "rules"),
-  }
-  if err := config.SaveHome(hcfg); err != nil {
-    fmt.Fprintf(os.Stderr, "保存 home 配置失败: %v\n", err)
-    os.Exit(1)
-  }
 
   os.Chdir(workDir)
   if err := auth.InitDB(workDir); err != nil {
