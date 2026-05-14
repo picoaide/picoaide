@@ -263,15 +263,6 @@ func GetSuperadmins() ([]string, error) {
   return list, nil
 }
 
-// HasAnySuperadmin 检查系统中是否存在超管
-func HasAnySuperadmin() bool {
-  if ensureDB() != nil {
-    return false
-  }
-  count, _ := engine.Where("role = ?", "superadmin").Count(&LocalUser{})
-  return count > 0
-}
-
 // IsSuperadmin 检查指定用户是否是超管
 func IsSuperadmin(username string) bool {
   if ensureDB() != nil {

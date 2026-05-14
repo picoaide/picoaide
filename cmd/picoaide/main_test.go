@@ -68,9 +68,6 @@ func TestPrintUsage_ContainsAppName(t *testing.T) {
   if !contains(output, "init") {
     t.Errorf("printUsage output should contain 'init' command")
   }
-  if !contains(output, "serve") {
-    t.Errorf("printUsage output should contain 'serve' command")
-  }
   if !contains(output, "reset-password") {
     t.Errorf("printUsage output should contain 'reset-password' command")
   }

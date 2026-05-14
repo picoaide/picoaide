@@ -122,20 +122,6 @@ func ListSourceSkills(source string) ([]SkillInfo, error) {
   return skills, nil
 }
 
-// GetSkillPath 返回 skills/<source>/<name>/
-func GetSkillPath(source, name string) string {
-  return filepath.Join(SkillsRootDir(), source, name)
-}
-
-// DeleteSkill 删除技能目录及用户绑定
-func DeleteSkill(source, name string) error {
-  skillPath := GetSkillPath(source, name)
-  if _, err := os.Stat(skillPath); err != nil {
-    return fmt.Errorf("技能目录不存在: %w", err)
-  }
-  return os.RemoveAll(skillPath)
-}
-
 // RescanSource 重新扫描源下的所有技能目录，返回技能名列表
 func RescanSource(source string) ([]string, error) {
   root := filepath.Join(SkillsRootDir(), source)

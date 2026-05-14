@@ -203,30 +203,6 @@ type ProviderDescriptor struct {
   Actions      []ActionDefinition `json:"actions"`
 }
 
-// DescribeProviderFull 返回指定 provider 的完整描述（含字段和操作按钮）
-func DescribeProviderFull(name string) ProviderDescriptor {
-  providersMu.RLock()
-  defer providersMu.RUnlock()
-  p, ok := providers[name]
-  if !ok {
-    return ProviderDescriptor{Name: name, DisplayName: name}
-  }
-  d := ProviderDescriptor{Name: name, DisplayName: name}
-  _, d.HasPassword = p.(PasswordProvider)
-  _, d.HasBrowser = p.(BrowserProvider)
-  _, d.HasDirectory = p.(DirectoryProvider)
-  if desc, ok := p.(Describable); ok {
-    d.DisplayName = desc.DisplayName()
-  }
-  if cfg, ok := p.(Configurable); ok {
-    d.Fields = cfg.ConfigFields()
-  }
-  if act, ok := p.(Actionable); ok {
-    d.Actions = act.Actions()
-  }
-  return d
-}
-
 // ListProviders 返回所有已注册 provider 的描述列表
 func ListProviders() []ProviderDescriptor {
   providersMu.RLock()
@@ -315,15 +291,6 @@ func FetchUserGroups(cfg *config.GlobalConfig, username string) ([]string, error
     return nil, err
   }
   return p.FetchUserGroups(cfg, username)
-}
-
-// FetchGroups 从目录提供者获取所有组
-func FetchGroups(cfg *config.GlobalConfig) (GroupHierarchy, error) {
-  p, err := directoryProvider(cfg.AuthMode())
-  if err != nil {
-    return nil, err
-  }
-  return p.FetchGroups(cfg)
 }
 
 // HasPasswordProvider 返回当前认证源是否支持密码认证

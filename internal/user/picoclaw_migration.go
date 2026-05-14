@@ -1,7 +1,6 @@
 package user
 
 import (
-  "errors"
   "fmt"
   "net/http"
   "os"
@@ -152,52 +151,6 @@ func (s *PicoClawMigrationService) loadRules() (PicoClawMigrationRuleSet, error)
     return PicoClawMigrationRuleSet{}, fmt.Errorf("未找到本地 Picoclaw adapter，请先手动更新配置适配包: %w", err)
   }
   return pkg.ToMigrationRuleSet(), nil
-}
-
-func (r PicoClawMigrationRuleSet) Validate() error {
-  seen := make(map[string]bool)
-  maxConfigVersion := 0
-  for _, version := range r.Versions {
-    if version.Version == "" {
-      return errors.New("迁移规则版本不能为空")
-    }
-    if !validPicoClawVersion(version.Version) {
-      return fmt.Errorf("迁移规则版本格式不合法: %s", version.Version)
-    }
-    if seen[version.Version] {
-      return fmt.Errorf("迁移规则版本重复: %s", version.Version)
-    }
-    if version.ConfigVersion <= 0 {
-      return fmt.Errorf("迁移规则版本 %s 缺少 config_version", version.Version)
-    }
-    if version.ConfigChanged {
-      if version.FromConfig <= 0 || version.ToConfig <= 0 {
-        return fmt.Errorf("迁移规则版本 %s 标记了 config_changed 但缺少 from_config/to_config", version.Version)
-      }
-      if version.ToConfig != version.ConfigVersion {
-        return fmt.Errorf("迁移规则版本 %s 的 to_config=%d 必须等于 config_version=%d", version.Version, version.ToConfig, version.ConfigVersion)
-      }
-      if version.ToConfig <= version.FromConfig {
-        return fmt.Errorf("迁移规则版本 %s 的配置版本迁移必须递增", version.Version)
-      }
-      if len(version.Actions) == 0 {
-        return fmt.Errorf("迁移规则版本 %s 标记了 config_changed 但 actions 为空", version.Version)
-      }
-    } else if len(version.Actions) > 0 {
-      return fmt.Errorf("迁移规则版本 %s 未标记 config_changed 但配置了 actions", version.Version)
-    }
-    if version.ConfigVersion > maxConfigVersion {
-      maxConfigVersion = version.ConfigVersion
-    }
-    seen[version.Version] = true
-  }
-  if r.LatestSupportedConfigVersion <= 0 {
-    return errors.New("迁移规则缺少 latest_supported_config_version")
-  }
-  if maxConfigVersion > r.LatestSupportedConfigVersion {
-    return fmt.Errorf("迁移规则最高配置版本 %d 超过规则声明的 latest_supported_config_version=%d", maxConfigVersion, r.LatestSupportedConfigVersion)
-  }
-  return nil
 }
 
 func (r PicoClawMigrationRuleSet) EnsureSupportedByPicoAide() error {

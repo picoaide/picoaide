@@ -1,6 +1,7 @@
 package web
 
 import (
+  "encoding/json"
   "fmt"
   "log/slog"
   "net/http"
@@ -435,4 +436,24 @@ func updateSourceLastRefresh(sources []config.SkillsSourceWrapper, name string) 
 
 func timeNow() string {
   return time.Now().Format("2006-01-02 15:04:05")
+}
+
+// ============================================================
+// 辅助函数
+// ============================================================
+
+func (s *Server) saveSkillsConfig() {
+  skillsJSON, err := json.Marshal(s.cfg.Skills)
+  if err != nil {
+    slog.Error("序列化技能配置失败", "error", err)
+    return
+  }
+  engine, err := auth.GetEngine()
+  if err != nil {
+    slog.Error("获取数据库连接失败", "error", err)
+    return
+  }
+  if _, err := engine.Exec("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('skills', ?, datetime('now','localtime'))", string(skillsJSON)); err != nil {
+    slog.Error("保存技能配置失败", "error", err)
+  }
 }

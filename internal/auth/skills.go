@@ -49,22 +49,6 @@ func GetUserSkillSource(username, skillName string) (string, error) {
   return skill.Source, nil
 }
 
-// GetUserSkills 获取用户直接绑定的技能列表
-func GetUserSkills(username string) ([]string, error) {
-  if err := ensureDB(); err != nil {
-    return nil, err
-  }
-  var skills []UserSkill
-  if err := engine.Where("username = ?", username).OrderBy("skill_name").Find(&skills); err != nil {
-    return nil, err
-  }
-  list := make([]string, 0, len(skills))
-  for _, s := range skills {
-    list = append(list, s.SkillName)
-  }
-  return list, nil
-}
-
 // GetUsersBySkill 获取直接绑定某技能的所有用户
 func GetUsersBySkill(skillName string) ([]string, error) {
   if err := ensureDB(); err != nil {
@@ -255,26 +239,7 @@ func GetUserAllSkillSources(username, skillName string) ([]string, error) {
   return sources, nil
 }
 
-// ============================================================
-// 技能表操作（已废弃，保留空函数兼容编译）
-// ============================================================
-
-// UpsertSkill 已废弃，保留空函数兼容编译
-func UpsertSkill(name, description string) error {
-  return nil
-}
-
-// GetAllSkills 已废弃，返回空列表
-func GetAllSkills() ([]SkillRecord, error) {
-  return []SkillRecord{}, nil
-}
-
-// GetSkill 已废弃
-func GetSkill(name string) (*SkillRecord, error) {
-  return nil, fmt.Errorf("已废弃: %s", name)
-}
-
-// DeleteSkill 删除技能所有绑定关系（不删 skills 表，因为已废弃）
+// DeleteSkill 删除技能所有绑定关系
 func DeleteSkill(name string) error {
   if err := ensureDB(); err != nil {
     return err
