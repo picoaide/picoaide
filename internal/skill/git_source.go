@@ -3,13 +3,16 @@ package skill
 import (
   "fmt"
   "os"
-  "os/exec"
   "path/filepath"
-  "strings"
+
+  gogit "github.com/go-git/go-git/v5"
+  "github.com/go-git/go-git/v5/plumbing"
+
+  "github.com/go-git/go-git/v5/config"
 )
 
 // ============================================================
-// Git 源操作
+// Git 源操作（纯 Go 实现，无系统命令依赖）
 // ============================================================
 
 // SyncResult Git 源拉取更新结果
@@ -28,16 +31,22 @@ func CloneGitSource(name, url, ref, refType string) error {
 
   os.MkdirAll(filepath.Dir(targetDir), 0755)
 
-  args := []string{"clone", "--depth", "1"}
-  if ref != "" {
-    args = append(args, "--branch", ref, "--single-branch")
+  opts := &gogit.CloneOptions{
+    URL: url,
   }
-  args = append(args, url, targetDir)
+  if ref != "" {
+    refName := "refs/heads/" + ref
+    if refType == "tag" {
+      refName = "refs/tags/" + ref
+    }
+    opts.ReferenceName = plumbing.ReferenceName(refName)
+    opts.SingleBranch = true
+    opts.Depth = 1
+  }
 
-  cmd := exec.Command("git", args...)
-  output, err := cmd.CombinedOutput()
+  _, err := gogit.PlainClone(targetDir, false, opts)
   if err != nil {
-    return fmt.Errorf("git clone 失败: %s: %w", strings.TrimSpace(string(output)), err)
+    return fmt.Errorf("git clone 失败: %w", err)
   }
   return nil
 }
@@ -48,8 +57,15 @@ func PullGitSource(name, ref, refType string) (*SyncResult, error) {
   if _, err := os.Stat(repoDir); err != nil {
     return nil, fmt.Errorf("源目录不存在: %s", repoDir)
   }
-  if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
-    return nil, fmt.Errorf("不是 Git 仓库: %s", repoDir)
+
+  r, err := gogit.PlainOpen(repoDir)
+  if err != nil {
+    return nil, fmt.Errorf("打开 Git 仓库失败: %w", err)
+  }
+
+  w, err := r.Worktree()
+  if err != nil {
+    return nil, fmt.Errorf("获取工作区失败: %w", err)
   }
 
   // 记录当前技能列表
@@ -59,28 +75,33 @@ func PullGitSource(name, ref, refType string) (*SyncResult, error) {
     beforeSet[s] = true
   }
 
-  // 执行 git pull
-  var pullCmd *exec.Cmd
   if ref != "" {
     if refType == "tag" {
-      pullCmd = exec.Command("git", "fetch", "--tags", "origin")
+      err = r.Fetch(&gogit.FetchOptions{
+        RefSpecs: []config.RefSpec{"+refs/tags/*:refs/tags/*"},
+      })
     } else {
-      pullCmd = exec.Command("git", "fetch", "origin", ref)
+      err = r.Fetch(&gogit.FetchOptions{
+        RefSpecs: []config.RefSpec{config.RefSpec("+refs/heads/" + ref + ":refs/remotes/origin/" + ref)},
+      })
+    }
+    if err != nil && err != gogit.NoErrAlreadyUpToDate {
+      return nil, fmt.Errorf("git fetch 失败: %w", err)
+    }
+
+    refName := plumbing.ReferenceName("refs/tags/" + ref)
+    if refType != "tag" {
+      refName = plumbing.ReferenceName("refs/remotes/origin/" + ref)
+    }
+    if err := w.Checkout(&gogit.CheckoutOptions{
+      Branch: refName,
+      Force:  true,
+    }); err != nil {
+      return nil, fmt.Errorf("git checkout 失败: %w", err)
     }
   } else {
-    pullCmd = exec.Command("git", "pull", "--ff-only")
-  }
-  pullCmd.Dir = repoDir
-  output, err := pullCmd.CombinedOutput()
-  if err != nil {
-    return nil, fmt.Errorf("git pull 失败: %s: %w", strings.TrimSpace(string(output)), err)
-  }
-
-  if ref != "" {
-    resetCmd := exec.Command("git", "checkout", "-f", ref)
-    resetCmd.Dir = repoDir
-    if out, err := resetCmd.CombinedOutput(); err != nil {
-      return nil, fmt.Errorf("git checkout 失败: %s: %w", strings.TrimSpace(string(out)), err)
+    if err := w.Pull(&gogit.PullOptions{}); err != nil && err != gogit.NoErrAlreadyUpToDate {
+      return nil, fmt.Errorf("git pull 失败: %w", err)
     }
   }
 

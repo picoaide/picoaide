@@ -6,12 +6,13 @@ import (
   "log/slog"
   "net/http"
   "os"
-  "os/exec"
   "path/filepath"
   "strconv"
   "strings"
   "time"
 
+  gogit "github.com/go-git/go-git/v5"
+  "github.com/go-git/go-git/v5/plumbing"
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
@@ -52,11 +53,6 @@ func (s *Server) handleAdminSkillsReposAdd(c *gin.Context) {
 
   gitMutex.Lock()
   defer gitMutex.Unlock()
-
-  if _, err := exec.LookPath("git"); err != nil {
-    writeError(c, http.StatusInternalServerError, "Git 未安装")
-    return
-  }
 
   if _, _, ok := skillRepoByName(s.cfg.Skills.Repos, repo.Name); ok {
     writeError(c, http.StatusBadRequest, "仓库名称已存在")
@@ -432,15 +428,8 @@ func (s *Server) handleAdminSkillsReposAddStream(c *gin.Context) {
   c.Writer.Header().Set("Connection", "keep-alive")
   flush := func() { c.Writer.Flush() }
 
-  writeSSE(c.Writer, flush, `{"step":"check","message":"检查 Git 环境..."}`)
-
   gitMutex.Lock()
   defer gitMutex.Unlock()
-
-  if _, err := exec.LookPath("git"); err != nil {
-    writeSSE(c.Writer, flush, `{"step":"error","error":"Git 未安装"}`)
-    return
-  }
 
   if _, _, ok := skillRepoByName(s.cfg.Skills.Repos, repo.Name); ok {
     writeSSE(c.Writer, flush, `{"step":"error","error":"仓库名称已存在"}`)
@@ -459,26 +448,41 @@ func (s *Server) handleAdminSkillsReposAddStream(c *gin.Context) {
 
   // 尝试凭据（公共仓库无凭据时也尝试无鉴权克隆）
   cloneErr := error(nil)
-  // 生成 clone 脚本
-  cloneScript := "#!/bin/sh\nexec git clone --depth 1"
-  if repo.Ref != "" {
-    cloneScript += " --branch \"" + repo.Ref + "\""
-  }
-  cloneScript += " \"" + repo.URL + "\" \"" + repo.Name + "\" 2>&1"
 
-  if len(repo.Credentials) > 0 {
-    for _, cred := range repo.Credentials {
-      if err := gitCmdWithStream(reposDir, cred, cloneScript, c.Writer, flush); err == nil {
-        cloneErr = nil
-        break
-      } else {
-        cloneErr = err
-        writeSSE(c.Writer, flush, `{"step":"clone_retry","message":"凭据失败，尝试下一个..."}`)
-      }
+  attempts := repo.Credentials
+  if repo.Public || len(attempts) == 0 {
+    attempts = []config.SkillRepoCredential{{Name: "public", Mode: "https"}}
+  }
+
+  for _, cred := range attempts {
+    auth, authErr := goGitAuth(cred)
+    if authErr != nil {
+      cloneErr = authErr
+      writeSSE(c.Writer, flush, `{"step":"clone_retry","message":"凭据失败，尝试下一个..."}`)
+      continue
     }
-  } else {
-    // 公共仓库
-    cloneErr = gitCmdWithStream(reposDir, config.SkillRepoCredential{Mode: "https"}, cloneScript, c.Writer, flush)
+
+    opts := &gogit.CloneOptions{
+      URL:  repo.URL,
+      Auth: auth,
+    }
+    if repo.Ref != "" {
+      refName := "refs/heads/" + repo.Ref
+      if repo.RefType == "tag" {
+        refName = "refs/tags/" + repo.Ref
+      }
+      opts.ReferenceName = plumbing.ReferenceName(refName)
+      opts.SingleBranch = true
+      opts.Depth = 1
+    }
+
+    _, err := gogit.PlainClone(targetDir, false, opts)
+    if err == nil {
+      cloneErr = nil
+      break
+    }
+    cloneErr = err
+    writeSSE(c.Writer, flush, `{"step":"clone_retry","message":"凭据失败，尝试下一个..."}`)
   }
 
   if cloneErr != nil {

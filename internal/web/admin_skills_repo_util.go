@@ -4,19 +4,26 @@ import (
   "fmt"
   "io"
   "os"
-  "os/exec"
   "path/filepath"
   "regexp"
   "strings"
   "sync"
   "time"
 
+  gogit "github.com/go-git/go-git/v5"
+  gogitconfig "github.com/go-git/go-git/v5/config"
+  "github.com/go-git/go-git/v5/plumbing"
+  "github.com/go-git/go-git/v5/plumbing/transport"
+  githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
+  gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
+  "golang.org/x/crypto/ssh"
+
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/util"
 )
 
 // ============================================================
-// Git 仓库操作 — 凭据与命令构建
+// Git 仓库操作 — 使用 go-git（纯 Go 实现，无系统命令依赖）
 // ============================================================
 
 var gitMutex sync.Mutex
@@ -160,6 +167,40 @@ func skillRepoByName(repos []config.SkillRepo, name string) (config.SkillRepo, i
 }
 
 // ============================================================
+// go-git 认证方法
+// ============================================================
+
+func goGitAuth(cred config.SkillRepoCredential) (transport.AuthMethod, error) {
+  switch cred.Mode {
+  case "ssh":
+    signer, err := ssh.ParsePrivateKey([]byte(cred.Secret))
+    if err != nil {
+      return nil, fmt.Errorf("解析 SSH 私钥失败: %w", err)
+    }
+    return &gitssh.PublicKeys{
+      User:   "git",
+      Signer: signer,
+      HostKeyCallbackHelper: gitssh.HostKeyCallbackHelper{
+        HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+      },
+    }, nil
+  default:
+    return &githttp.BasicAuth{
+      Username: cred.Username,
+      Password: cred.Secret,
+    }, nil
+  }
+}
+
+// gitRefName 根据 ref 和 refType 返回完整的 git 引用名
+func gitRefName(ref, refType string) string {
+  if refType == "tag" {
+    return "refs/tags/" + ref
+  }
+  return "refs/heads/" + ref
+}
+
+// ============================================================
 // Git clone / pull 入口
 // ============================================================
 
@@ -168,12 +209,6 @@ func cloneGitRepoWithCredentials(reposDir, repoName, repoURL string, repo config
   if err := os.RemoveAll(destBase); err != nil {
     return "", err
   }
-  cleanups := []func(){}
-  defer func() {
-    for _, fn := range cleanups {
-      fn()
-    }
-  }()
 
   attempts := repo.Credentials
   if repo.Public || len(attempts) == 0 {
@@ -189,7 +224,27 @@ func cloneGitRepoWithCredentials(reposDir, repoName, repoURL string, repo config
         return "", err
       }
     }
-    out, err := gitCloneCmdWithCredential(reposDir, cred, repoURL, tempDest, repo.Ref)
+
+    auth, authErr := goGitAuth(cred)
+    if authErr != nil {
+      lastErr = authErr
+      if tempDest != destBase {
+        os.RemoveAll(tempDest)
+      }
+      continue
+    }
+
+    opts := &gogit.CloneOptions{
+      URL:  repoURL,
+      Auth: auth,
+    }
+    if repo.Ref != "" {
+      opts.ReferenceName = plumbing.ReferenceName(gitRefName(repo.Ref, repo.RefType))
+      opts.SingleBranch = true
+      opts.Depth = 1
+    }
+
+    _, err := gogit.PlainClone(tempDest, false, opts)
     if err == nil {
       if tempDest != destBase {
         if err := os.RemoveAll(destBase); err != nil {
@@ -199,452 +254,119 @@ func cloneGitRepoWithCredentials(reposDir, repoName, repoURL string, repo config
           return "", err
         }
       }
-      return out, nil
+      return "克隆成功", nil
     }
     lastErr = err
     if tempDest != destBase {
-      cleanups = append(cleanups, func() { _ = os.RemoveAll(tempDest) })
+      os.RemoveAll(tempDest)
     }
   }
   return "", lastErr
 }
 
 func pullGitRepoWithCredentials(repoDir string, repo config.SkillRepo) (string, error) {
+  r, err := gogit.PlainOpen(repoDir)
+  if err != nil {
+    return "", fmt.Errorf("打开 Git 仓库失败: %w", err)
+  }
+
+  w, err := r.Worktree()
+  if err != nil {
+    return "", fmt.Errorf("获取工作区失败: %w", err)
+  }
+
   attempts := repo.Credentials
   if repo.Public || len(attempts) == 0 {
     attempts = []config.SkillRepoCredential{{Name: "public", Mode: "https"}}
   }
 
-  var lastErr error
   for _, cred := range attempts {
-    if repo.RefType == "tag" && repo.Ref != "" {
-      if _, err := gitFetchTagsCmdWithCredential(repoDir, cred); err != nil {
-        lastErr = err
-        continue
-      }
-      if _, err := gitCheckoutTagCmdWithCredential(repoDir, cred, repo.Ref); err != nil {
-        lastErr = err
-        continue
-      }
-      if _, err := gitResetHardCmdWithCredential(repoDir, cred, repo.Ref); err != nil {
-        lastErr = err
-        continue
-      }
-      return "tag refreshed", nil
+    auth, authErr := goGitAuth(cred)
+    if authErr != nil {
+      continue
     }
-    if repo.Ref != "" {
-      if _, err := gitFetchRefCmdWithCredential(repoDir, cred, repo.Ref); err != nil {
-        lastErr = err
-        continue
-      }
-      if _, err := gitCheckoutBranchCmdWithCredential(repoDir, cred, repo.Ref); err != nil {
-        lastErr = err
-        continue
-      }
-      if _, err := gitResetOriginBranchCmdWithCredential(repoDir, cred, repo.Ref); err != nil {
-        lastErr = err
-        continue
-      }
-      return "branch refreshed", nil
-    }
-    out, err := gitPullCmdWithCredential(repoDir, cred)
+
+    err = pullWithRepo(r, w, repo, auth)
     if err == nil {
-      return out, nil
+      return "拉取成功", nil
     }
-    lastErr = err
+    if err == gogit.NoErrAlreadyUpToDate {
+      return "Already up to date.", nil
+    }
   }
-  return "", lastErr
+  return "", err
 }
 
-// ============================================================
-// Git 子命令构建器
-// ============================================================
-
-func gitCloneCmdWithCredential(dir string, cred config.SkillRepoCredential, repoURL, dest, ref string) (string, error) {
-  if err := validateSkillRepoRef(ref); err != nil {
-    return "", err
-  }
-  return gitCmdWithCredential(dir, cred, gitCloneScript, "PICOAIDE_GIT_URL="+repoURL, "PICOAIDE_GIT_DEST="+dest, "PICOAIDE_GIT_REF="+ref)
-}
-
-func gitFetchTagsCmdWithCredential(dir string, cred config.SkillRepoCredential) (string, error) {
-  return gitCmdWithCredential(dir, cred, gitFetchTagsScript)
-}
-
-func gitFetchRefCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
-  if err := validateSkillRepoRef(ref); err != nil {
-    return "", err
-  }
-  return gitCmdWithCredential(dir, cred, gitFetchRefScript, "PICOAIDE_GIT_REF="+ref)
-}
-
-func gitCheckoutTagCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
-  if err := validateSkillRepoRef(ref); err != nil {
-    return "", err
-  }
-  return gitCmdWithCredential(dir, cred, gitCheckoutTagScript, "PICOAIDE_GIT_REF="+ref)
-}
-
-func gitCheckoutBranchCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
-  if err := validateSkillRepoRef(ref); err != nil {
-    return "", err
-  }
-  return gitCmdWithCredential(dir, cred, gitCheckoutBranchScript, "PICOAIDE_GIT_REF="+ref)
-}
-
-func gitResetHardCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
-  if err := validateSkillRepoRef(ref); err != nil {
-    return "", err
-  }
-  return gitCmdWithCredential(dir, cred, gitResetHardScript, "PICOAIDE_GIT_REF="+ref)
-}
-
-func gitResetOriginBranchCmdWithCredential(dir string, cred config.SkillRepoCredential, ref string) (string, error) {
-  if err := validateSkillRepoRef(ref); err != nil {
-    return "", err
-  }
-  return gitCmdWithCredential(dir, cred, gitResetOriginBranchScript, "PICOAIDE_GIT_REF="+ref)
-}
-
-func gitPullCmdWithCredential(dir string, cred config.SkillRepoCredential) (string, error) {
-  return gitCmdWithCredential(dir, cred, gitPullScript)
-}
-
-// ============================================================
-// Git 脚本常量
-// ============================================================
-
-const (
-  gitCloneScript = `#!/bin/sh
-if [ -n "${PICOAIDE_GIT_REF:-}" ]; then
-  exec git clone --branch "$PICOAIDE_GIT_REF" --single-branch -- "$PICOAIDE_GIT_URL" "$PICOAIDE_GIT_DEST"
-fi
-exec git clone -- "$PICOAIDE_GIT_URL" "$PICOAIDE_GIT_DEST"
-`
-  gitFetchTagsScript = `#!/bin/sh
-exec git fetch --tags origin
-`
-  gitFetchRefScript = `#!/bin/sh
-exec git fetch origin "$PICOAIDE_GIT_REF"
-`
-  gitCheckoutTagScript = `#!/bin/sh
-exec git checkout -f "$PICOAIDE_GIT_REF"
-`
-  gitCheckoutBranchScript = `#!/bin/sh
-exec git checkout -B "$PICOAIDE_GIT_REF" "origin/$PICOAIDE_GIT_REF"
-`
-  gitResetHardScript = `#!/bin/sh
-exec git reset --hard "$PICOAIDE_GIT_REF"
-`
-  gitResetOriginBranchScript = `#!/bin/sh
-exec git reset --hard "origin/$PICOAIDE_GIT_REF"
-`
-  gitPullScript = `#!/bin/sh
-exec git pull --ff-only
-`
-)
-
-// ============================================================
-// gitCmdWithCredential — 统一 Git 命令执行
-// ============================================================
-
-// gitCmdWithCredential — 统一 Git 命令执行（返回输出）
-func gitCmdWithCredential(dir string, cred config.SkillRepoCredential, gitScript string, extraEnv ...string) (string, error) {
-  env := os.Environ()
-  env = append(env, "GIT_TERMINAL_PROMPT=0")
-  env = append(env, extraEnv...)
-
-  cleanups := []func(){}
-  switch cred.Mode {
-  case "ssh":
-    keyFile, err := os.CreateTemp("", "picoaide-git-key-*")
+func pullWithRepo(r *gogit.Repository, w *gogit.Worktree, repo config.SkillRepo, auth transport.AuthMethod) error {
+  if repo.RefType == "tag" && repo.Ref != "" {
+    if err := r.Fetch(&gogit.FetchOptions{
+      RefSpecs: []gogitconfig.RefSpec{"+refs/tags/*:refs/tags/*"},
+      Auth:     auth,
+    }); err != nil && err != gogit.NoErrAlreadyUpToDate {
+      return err
+    }
+    if err := w.Checkout(&gogit.CheckoutOptions{
+      Branch: plumbing.ReferenceName("refs/tags/" + repo.Ref),
+      Force:  true,
+    }); err != nil {
+      return err
+    }
+    tagRef, err := r.Reference(plumbing.ReferenceName("refs/tags/"+repo.Ref), true)
     if err != nil {
-      return "", err
+      return err
     }
-    if _, err := keyFile.WriteString(cred.Secret); err != nil {
-      keyFile.Close()
-      os.Remove(keyFile.Name())
-      return "", err
-    }
-    if err := keyFile.Chmod(0600); err != nil {
-      keyFile.Close()
-      os.Remove(keyFile.Name())
-      return "", err
-    }
-    if err := keyFile.Close(); err != nil {
-      os.Remove(keyFile.Name())
-      return "", err
-    }
-    sshWrapper, err := os.CreateTemp("", "picoaide-git-ssh-*")
+    commit, err := r.CommitObject(tagRef.Hash())
     if err != nil {
-      os.Remove(keyFile.Name())
-      return "", err
+      return err
     }
-    wrapperContent := "#!/bin/sh\nexec ssh -i \"" + keyFile.Name() + "\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \"$@\"\n"
-    if _, err := sshWrapper.WriteString(wrapperContent); err != nil {
-      sshWrapper.Close()
-      os.Remove(sshWrapper.Name())
-      os.Remove(keyFile.Name())
-      return "", err
-    }
-    if err := sshWrapper.Chmod(0700); err != nil {
-      sshWrapper.Close()
-      os.Remove(sshWrapper.Name())
-      os.Remove(keyFile.Name())
-      return "", err
-    }
-    if err := sshWrapper.Close(); err != nil {
-      os.Remove(sshWrapper.Name())
-      os.Remove(keyFile.Name())
-      return "", err
-    }
-    env = append(env, "GIT_SSH_COMMAND="+sshWrapper.Name())
-    cleanups = append(cleanups, func() {
-      _ = os.Remove(keyFile.Name())
-      _ = os.Remove(sshWrapper.Name())
+    return w.Reset(&gogit.ResetOptions{
+      Mode:   gogit.HardReset,
+      Commit: commit.Hash,
     })
-  default:
-    script, err := os.CreateTemp("", "picoaide-git-askpass-*")
+  }
+
+  if repo.Ref != "" {
+    refSpec := gogitconfig.RefSpec("+refs/heads/" + repo.Ref + ":refs/remotes/origin/" + repo.Ref)
+    if err := r.Fetch(&gogit.FetchOptions{
+      RefSpecs: []gogitconfig.RefSpec{refSpec},
+      Auth:     auth,
+    }); err != nil && err != gogit.NoErrAlreadyUpToDate {
+      return err
+    }
+    if err := w.Checkout(&gogit.CheckoutOptions{
+      Branch: plumbing.ReferenceName("refs/heads/" + repo.Ref),
+      Create: true,
+      Force:  true,
+    }); err != nil {
+      return err
+    }
+    originRef, err := r.Reference(plumbing.ReferenceName("refs/remotes/origin/"+repo.Ref), true)
     if err != nil {
-      return "", err
+      return err
     }
-    content := "#!/bin/sh\ncase \"$1\" in\n*Username*) printf '%s' \"${PICOAIDE_GIT_USERNAME:-" + skillRepoDefaultUsername(cred.Provider) + "}\" ;;\n*) printf '%s' \"${PICOAIDE_GIT_PASSWORD:-}\" ;;\nesac\n"
-    if _, err := script.WriteString(content); err != nil {
-      script.Close()
-      os.Remove(script.Name())
-      return "", err
+    commit, err := r.CommitObject(originRef.Hash())
+    if err != nil {
+      return err
     }
-    if err := script.Chmod(0700); err != nil {
-      script.Close()
-      os.Remove(script.Name())
-      return "", err
-    }
-    if err := script.Close(); err != nil {
-      os.Remove(script.Name())
-      return "", err
-    }
-    env = append(env, "GIT_ASKPASS="+script.Name())
-    env = append(env, "PICOAIDE_GIT_USERNAME="+cred.Username)
-    env = append(env, "PICOAIDE_GIT_PASSWORD="+cred.Secret)
-    cleanups = append(cleanups, func() { _ = os.Remove(script.Name()) })
+    return w.Reset(&gogit.ResetOptions{
+      Mode:   gogit.HardReset,
+      Commit: commit.Hash,
+    })
   }
-  gitWrapper, err := os.CreateTemp("", "picoaide-git-op-*")
-  if err != nil {
-    for _, cleanup := range cleanups {
-      cleanup()
-    }
-    return "", err
+
+  if err := w.Pull(&gogit.PullOptions{
+    Auth: auth,
+  }); err != nil && err != gogit.NoErrAlreadyUpToDate {
+    return err
   }
-  if _, err := gitWrapper.WriteString(gitScript); err != nil {
-    gitWrapper.Close()
-    os.Remove(gitWrapper.Name())
-    for _, cleanup := range cleanups {
-      cleanup()
-    }
-    return "", err
-  }
-  if err := gitWrapper.Chmod(0700); err != nil {
-    gitWrapper.Close()
-    os.Remove(gitWrapper.Name())
-    for _, cleanup := range cleanups {
-      cleanup()
-    }
-    return "", err
-  }
-  if err := gitWrapper.Close(); err != nil {
-    os.Remove(gitWrapper.Name())
-    for _, cleanup := range cleanups {
-      cleanup()
-    }
-    return "", err
-  }
-  cleanups = append(cleanups, func() { _ = os.Remove(gitWrapper.Name()) })
-  defer func() {
-    for _, cleanup := range cleanups {
-      cleanup()
-    }
-  }()
-  cmd := exec.Command(gitWrapper.Name())
-  cmd.Dir = dir
-  cmd.Env = env
-  var stdout, stderr strings.Builder
-  cmd.Stdout = &stdout
-  cmd.Stderr = &stderr
-  if err := cmd.Run(); err != nil {
-    return "", fmt.Errorf("%w\n%s", err, stderr.String())
-  }
-  return stdout.String(), nil
+  return nil
 }
 
-// writeSSE 写一行 SSE data 事件
+// ============================================================
+// 辅助
+// ============================================================
+
 func writeSSE(w io.Writer, flush func(), data string) {
   fmt.Fprintf(w, "data: %s\n\n", data)
   flush()
-}
-
-// gitCmdWithStream 执行 git 命令并流式输出 stdout/stderr 到 writer
-func gitCmdWithStream(dir string, cred config.SkillRepoCredential, gitScript string, w io.Writer, flush func(), extraEnv ...string) error {
-  env := os.Environ()
-  env = append(env, "GIT_TERMINAL_PROMPT=0")
-  env = append(env, extraEnv...)
-
-  var cleanups []func()
-
-  switch cred.Mode {
-  case "ssh":
-    keyFile, err := os.CreateTemp("", "picoaide-git-key-*")
-    if err != nil {
-      return err
-    }
-    if _, err := keyFile.WriteString(cred.Secret); err != nil {
-      keyFile.Close()
-      os.Remove(keyFile.Name())
-      return err
-    }
-    if err := keyFile.Chmod(0600); err != nil {
-      keyFile.Close()
-      os.Remove(keyFile.Name())
-      return err
-    }
-    if err := keyFile.Close(); err != nil {
-      os.Remove(keyFile.Name())
-      return err
-    }
-    sshWrapper, err := os.CreateTemp("", "picoaide-git-ssh-*")
-    if err != nil {
-      os.Remove(keyFile.Name())
-      return err
-    }
-    wrapperContent := "#!/bin/sh\nexec ssh -i \"" + keyFile.Name() + "\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \"$@\"\n"
-    if _, err := sshWrapper.WriteString(wrapperContent); err != nil {
-      sshWrapper.Close()
-      os.Remove(sshWrapper.Name())
-      os.Remove(keyFile.Name())
-      return err
-    }
-    if err := sshWrapper.Chmod(0700); err != nil {
-      sshWrapper.Close()
-      os.Remove(sshWrapper.Name())
-      os.Remove(keyFile.Name())
-      return err
-    }
-    if err := sshWrapper.Close(); err != nil {
-      os.Remove(sshWrapper.Name())
-      os.Remove(keyFile.Name())
-      return err
-    }
-    env = append(env, "GIT_SSH_COMMAND="+sshWrapper.Name())
-    cleanups = append(cleanups, func() {
-      _ = os.Remove(keyFile.Name())
-      _ = os.Remove(sshWrapper.Name())
-    })
-  default:
-    script, err := os.CreateTemp("", "picoaide-git-askpass-*")
-    if err != nil {
-      return err
-    }
-    content := "#!/bin/sh\ncase \"$1\" in\n*Username*) printf '%s' \"${PICOAIDE_GIT_USERNAME:-" + skillRepoDefaultUsername(cred.Provider) + "}\" ;;\n*) printf '%s' \"${PICOAIDE_GIT_PASSWORD:-}\" ;;\nesac\n"
-    if _, err := script.WriteString(content); err != nil {
-      script.Close()
-      os.Remove(script.Name())
-      return err
-    }
-    if err := script.Chmod(0700); err != nil {
-      script.Close()
-      os.Remove(script.Name())
-      return err
-    }
-    if err := script.Close(); err != nil {
-      os.Remove(script.Name())
-      return err
-    }
-    env = append(env, "GIT_ASKPASS="+script.Name())
-    env = append(env, "PICOAIDE_GIT_USERNAME="+cred.Username)
-    env = append(env, "PICOAIDE_GIT_PASSWORD="+cred.Secret)
-    cleanups = append(cleanups, func() { _ = os.Remove(script.Name()) })
-  }
-
-  gitWrapper, err := os.CreateTemp("", "picoaide-git-op-*")
-  if err != nil {
-    for _, cleanup := range cleanups {
-      cleanup()
-    }
-    return err
-  }
-  if _, err := gitWrapper.WriteString(gitScript); err != nil {
-    gitWrapper.Close()
-    os.Remove(gitWrapper.Name())
-    for _, cleanup := range cleanups {
-      cleanup()
-    }
-    return err
-  }
-  if err := gitWrapper.Chmod(0700); err != nil {
-    gitWrapper.Close()
-    os.Remove(gitWrapper.Name())
-    for _, cleanup := range cleanups {
-      cleanup()
-    }
-    return err
-  }
-  if err := gitWrapper.Close(); err != nil {
-    os.Remove(gitWrapper.Name())
-    for _, cleanup := range cleanups {
-      cleanup()
-    }
-    return err
-  }
-  cleanups = append(cleanups, func() { _ = os.Remove(gitWrapper.Name()) })
-  defer func() {
-    for _, cleanup := range cleanups {
-      cleanup()
-    }
-  }()
-
-  cmd := exec.Command(gitWrapper.Name())
-  cmd.Dir = dir
-  cmd.Env = env
-
-  stdoutPipe, _ := cmd.StdoutPipe()
-  stderrPipe, _ := cmd.StderrPipe()
-
-  if err := cmd.Start(); err != nil {
-    return err
-  }
-
-  // 流式读取 stdout
-  stdoutDone := make(chan struct{})
-  go func() {
-    defer close(stdoutDone)
-    buf := make([]byte, 4096)
-    for {
-      n, err := stdoutPipe.Read(buf)
-      if n > 0 {
-        writeSSE(w, flush, strings.TrimSpace(string(buf[:n])))
-      }
-      if err != nil {
-        return
-      }
-    }
-  }()
-
-  // 流式读取 stderr（git 进度信息通常在 stderr）
-  stderrDone := make(chan struct{})
-  go func() {
-    defer close(stderrDone)
-    buf := make([]byte, 4096)
-    for {
-      n, err := stderrPipe.Read(buf)
-      if n > 0 {
-        writeSSE(w, flush, strings.TrimSpace(string(buf[:n])))
-      }
-      if err != nil {
-        return
-      }
-    }
-  }()
-
-  <-stdoutDone
-  <-stderrDone
-  return cmd.Wait()
 }

@@ -5,7 +5,6 @@ import (
   "log/slog"
   "net/http"
   "os"
-  "os/exec"
   "path/filepath"
   "strings"
   "time"
@@ -98,11 +97,6 @@ func (s *Server) handleAdminSkillsSourcesGitAdd(c *gin.Context) {
   }
   if err := util.SafePathSegment(name); err != nil {
     writeError(c, http.StatusBadRequest, "名称不合法: "+err.Error())
-    return
-  }
-
-  if _, err := exec.LookPath("git"); err != nil {
-    writeError(c, http.StatusInternalServerError, "Git 未安装")
     return
   }
 
