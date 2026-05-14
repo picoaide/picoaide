@@ -88,6 +88,20 @@ func RefreshPicoClawMigrationRulesFromAdapter(cacheDir, remoteBaseURL string) er
   return err
 }
 
+func RefreshPicoClawMigrationRulesFromURLs(cacheDir string, remoteBaseURLs []string) error {
+  _, _, err := RefreshPicoClawAdapterFromRemoteIfChanged(cacheDir, remoteBaseURLs, &http.Client{Timeout: 20 * time.Second})
+  return err
+}
+
+func RefreshPicoClawMigrationRulesFromURLsCheck(cacheDir string, remoteBaseURLs []string) (bool, error) {
+  _, changed, err := RefreshPicoClawAdapterFromRemoteIfChanged(cacheDir, remoteBaseURLs, &http.Client{Timeout: 20 * time.Second})
+  return changed, err
+}
+
+func AutoRefreshPicoClawMigrationRules(cacheDir string, remoteBaseURLs []string) {
+  AutoRefreshPicoClawAdapter(cacheDir, remoteBaseURLs)
+}
+
 func LoadPicoClawMigrationRulesInfo(cacheDir string) (PicoClawMigrationRulesInfo, error) {
   pkg, err := NewPicoClawAdapterPackage(cacheDir)
   if err != nil {
@@ -112,7 +126,7 @@ func (s *PicoClawMigrationService) ReleaseBundledRulesCache() error {
   if s == nil {
     return nil
   }
-  return ReleasePicoClawAdapterCache(s.cacheDir)
+  return ReleasePicoClawAdapterCacheIfValid(s.cacheDir)
 }
 
 func (s *PicoClawMigrationService) EnsureUpgradeable(fromTag, toTag string) error {

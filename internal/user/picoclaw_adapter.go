@@ -9,6 +9,7 @@ import (
   "errors"
   "fmt"
   "io"
+  "log/slog"
   "net/http"
   "os"
   "path"
@@ -105,25 +106,10 @@ type PicoClawAdapterHashEntry struct {
 }
 
 func NewPicoClawAdapterPackage(cacheDir string) (*PicoClawAdapterPackage, error) {
-  if err := ReleasePicoClawAdapterCache(cacheDir); err != nil {
+  if err := ReleasePicoClawAdapterCacheIfValid(cacheDir); err != nil {
     return nil, err
   }
   return LoadPicoClawAdapterPackage(filepath.Join(cacheDir, picoclawAdapterDir))
-}
-
-func ReleasePicoClawAdapterCache(cacheDir string) error {
-  targetRoot := filepath.Join(cacheDir, picoclawAdapterDir)
-  if _, err := os.Stat(filepath.Join(targetRoot, picoclawAdapterIndexFile)); err == nil {
-    return nil
-  }
-  if picoclawAdapterEmbedExists() {
-    return releasePicoClawAdapterFromEmbed(targetRoot)
-  }
-  bundledRoot, err := findBundledPicoClawAdapterRoot()
-  if err != nil {
-    return err
-  }
-  return copyPicoClawAdapterDir(bundledRoot, targetRoot)
 }
 
 func ForceReleasePicoClawAdapterCache(cacheDir string) error {
@@ -219,6 +205,123 @@ func RefreshPicoClawAdapterFromRemote(cacheDir, remoteBaseURL string, client *ht
     return nil, err
   }
   return LoadPicoClawAdapterPackage(activeRoot)
+}
+
+// RefreshPicoClawAdapterFromRemoteIfChanged 仅当远程 hash 与本地不同时执行刷新
+// 返回 (pkg, true, nil) 表示已更新；(nil, false, nil) 表示无变化
+// 支持多个回退 URL，按顺序尝试，成功后立即返回
+func RefreshPicoClawAdapterFromRemoteIfChanged(cacheDir string, remoteBaseURLs []string, client *http.Client) (*PicoClawAdapterPackage, bool, error) {
+  if len(remoteBaseURLs) == 0 {
+    return nil, false, errors.New("Picoclaw adapter remote base URLs are empty")
+  }
+  if client == nil {
+    client = &http.Client{Timeout: 20 * time.Second}
+  }
+  // 读取本地 hash
+  localHashPath := filepath.Join(cacheDir, picoclawAdapterDir, picoclawAdapterHashFile)
+  localHash, localErr := os.ReadFile(localHashPath)
+
+  // 尝试每个远程 URL
+  var lastErr error
+  for _, baseURL := range remoteBaseURLs {
+    baseURL = strings.TrimRight(baseURL, "/")
+    if baseURL == "" {
+      continue
+    }
+    // 获取远程 hash
+    entries, remoteHash, err := fetchPicoClawAdapterHash(client, baseURL)
+    if err != nil {
+      lastErr = err
+      continue
+    }
+    // 比较 hash：如果本地有 hash 文件且内容一致，跳过下载
+    if localErr == nil && bytes.Equal(localHash, remoteHash) {
+      return nil, false, nil
+    }
+    // hash 不同或本地无 hash，执行完整下载
+    pkg, err := doRefreshPicoClawAdapter(cacheDir, baseURL, client, entries, remoteHash)
+    if err != nil {
+      lastErr = err
+      continue
+    }
+    return pkg, true, nil
+  }
+  return nil, false, fmt.Errorf("所有远程 URL 均失败: %w", lastErr)
+}
+
+// doRefreshPicoClawAdapter 从指定 URL 完整下载适配器
+func doRefreshPicoClawAdapter(cacheDir, base string, client *http.Client, entries []PicoClawAdapterHashEntry, hashData []byte) (*PicoClawAdapterPackage, error) {
+  tmpRoot, err := os.MkdirTemp("", "picoaide-picoclaw-adapter-*")
+  if err != nil {
+    return nil, err
+  }
+  defer os.RemoveAll(tmpRoot)
+  for _, entry := range entries {
+    data, err := fetchPicoClawAdapterFile(client, base, entry.Path)
+    if err != nil {
+      return nil, err
+    }
+    if got := sha256Hex(data); got != entry.SHA256 {
+      return nil, fmt.Errorf("Picoclaw adapter 文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
+    }
+    target := filepath.Join(tmpRoot, filepath.FromSlash(entry.Path))
+    if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+      return nil, err
+    }
+    if err := os.WriteFile(target, data, 0644); err != nil {
+      return nil, err
+    }
+  }
+  if err := os.WriteFile(filepath.Join(tmpRoot, picoclawAdapterHashFile), hashData, 0644); err != nil {
+    return nil, err
+  }
+  if _, err := LoadPicoClawAdapterPackage(tmpRoot); err != nil {
+    return nil, err
+  }
+  activeRoot := filepath.Join(cacheDir, picoclawAdapterDir)
+  if err := activatePicoClawAdapter(tmpRoot, activeRoot); err != nil {
+    return nil, err
+  }
+  return LoadPicoClawAdapterPackage(activeRoot)
+}
+
+// AutoRefreshPicoClawAdapter 后台自动刷新适配器
+// 阶段一：释放本地嵌入版（从 //go:embed 复制到缓存目录）
+// 阶段二：远程更新检测（hash 对比，失败指数退避，成功后每 24h 检查）
+func AutoRefreshPicoClawAdapter(cacheDir string, remoteBaseURLs []string) {
+  // 阶段一：确保本地嵌入版已释放（含损坏检测）
+  if err := ReleasePicoClawAdapterCacheIfValid(cacheDir); err != nil {
+    slog.Warn("释放本地 Picoclaw 适配器失败", "error", err)
+  } else {
+    slog.Info("本地 Picoclaw 适配器已就绪")
+  }
+
+  if len(remoteBaseURLs) == 0 {
+    return
+  }
+
+  // 阶段二：远程更新检测
+  backoff := 30 * time.Second
+  const maxBackoff = 1 * time.Hour
+  const checkInterval = 24 * time.Hour
+
+  for {
+    _, changed, err := RefreshPicoClawAdapterFromRemoteIfChanged(cacheDir, remoteBaseURLs, nil)
+    if err == nil {
+      if changed {
+        slog.Info("Picoclaw 适配器已自动更新")
+      }
+      time.Sleep(checkInterval)
+      backoff = 30 * time.Second
+      continue
+    }
+    slog.Warn("Picoclaw 适配器远程刷新失败，即将重试", "error", err, "retry_after", backoff)
+    time.Sleep(backoff)
+    backoff *= 2
+    if backoff > maxBackoff {
+      backoff = maxBackoff
+    }
+  }
 }
 
 func SavePicoClawAdapterZip(cacheDir string, data []byte) (*PicoClawAdapterPackage, error) {
@@ -650,11 +753,11 @@ func fetchPicoClawAdapterURL(client *http.Client, url string) ([]byte, error) {
 
 func findBundledPicoClawAdapterRoot() (string, error) {
   paths := []string{
-    filepath.Join("rules", "picoclaw"),
-    filepath.Join(filepath.Dir(os.Args[0]), "rules", "picoclaw"),
+    filepath.Join("internal", "user", picoclawRulesEmbedDir),
+    filepath.Join(filepath.Dir(os.Args[0]), "internal", "user", picoclawRulesEmbedDir),
   }
   if _, file, _, ok := runtime.Caller(0); ok {
-    paths = append(paths, filepath.Join(filepath.Dir(file), "..", "..", "rules", "picoclaw"))
+    paths = append(paths, filepath.Join(filepath.Dir(file), picoclawRulesEmbedDir))
   }
   for _, root := range paths {
     if _, err := os.Stat(filepath.Join(root, picoclawAdapterIndexFile)); err == nil {

@@ -314,7 +314,7 @@ func PicoClawAdapterRemoteBaseURLs() []string {
     }
   }
   // 3. 默认
-  return []string{"https://raw.githubusercontent.com/picoaide/picoaide/main/rules/picoclaw"}
+  return []string{"https://www.picoaide.com/rules/picoclaw"}
 }
 
 func parseAdapterURLs(s string) []string {

@@ -653,6 +653,9 @@ func Serve(cfg *config.GlobalConfig) error {
     go s.ensureImageAvailable()
   }
 
+  // 后台自动刷新 Picoclaw 适配器（hash 检测 + 重试 + 24h 定时）
+  go user.AutoRefreshPicoClawMigrationRules(config.RuleCacheDir(), config.PicoClawAdapterRemoteBaseURLs())
+
   // 定时同步（实时响应配置变更）
   s.restartSyncTimer()
 

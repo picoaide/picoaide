@@ -102,7 +102,8 @@ func (s *Server) handleAdminMigrationRulesRefresh(c *gin.Context) {
     writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  if err := user.RefreshPicoClawMigrationRulesFromAdapter(config.RuleCacheDir(), config.PicoClawAdapterRemoteBaseURL()); err != nil {
+  changed, err := user.RefreshPicoClawMigrationRulesFromURLsCheck(config.RuleCacheDir(), config.PicoClawAdapterRemoteBaseURLs())
+  if err != nil {
     writeError(c, http.StatusBadGateway, "更新迁移规则失败: "+err.Error())
     return
   }
@@ -111,9 +112,13 @@ func (s *Server) handleAdminMigrationRulesRefresh(c *gin.Context) {
     writeError(c, http.StatusInternalServerError, "迁移规则已更新，但读取本地规则失败: "+err.Error())
     return
   }
+  msg := "迁移规则已更新"
+  if !changed {
+    msg = "迁移规则已是最新"
+  }
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success": true,
-    "message": "迁移规则已更新",
+    "message": msg,
     "rules":   info,
   })
 }
