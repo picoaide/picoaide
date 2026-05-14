@@ -67,7 +67,6 @@ func SyncUserDirectory(providerName string, cfg *config.GlobalConfig) (*UserSync
     if groups, err := provider.FetchUserGroups(cfg, username); err == nil {
       if err := auth.SyncUserGroups(username, groups, providerName); err == nil {
         result.GroupMemberCount += len(groups)
-        user.DeployGroupSkillsToUser(cfg, username)
       }
     }
   }
@@ -133,17 +132,6 @@ func SyncGroups(providerName string, cfg *config.GlobalConfig, ensureUser func(s
   }
   if err := auth.ReplaceGroupMembersBySource(providerName, groupMembers); err != nil {
     return nil, err
-  }
-
-  // 部署组绑定技能到所有成员
-  seen := make(map[string]bool)
-  for _, members := range groupMembers {
-    for _, username := range members {
-      if !seen[username] {
-        seen[username] = true
-        user.DeployGroupSkillsToUser(cfg, username)
-      }
-    }
   }
 
   return result, nil

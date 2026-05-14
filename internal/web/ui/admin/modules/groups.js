@@ -82,7 +82,7 @@ export async function init(ctx) {
         const subCount = (byParent[g.id] || []).length;
         const subInfo = subCount > 0 ? ' <small class="text-muted">(' + subCount + ' 个子组)</small>' : '';
         const deleteBtn = !unifiedAuth ? '<button class="btn btn-sm btn-danger" data-group-delete="' + esc(g.name) + '">删除</button>' : '';
-        tr.innerHTML = '<td><strong>' + indent + esc(g.name) + '</strong>' + subInfo + '</td><td>' + srcBadge + '</td><td>' + g.member_count + '</td><td>' + g.skill_count + '</td><td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline" data-group-detail="' + esc(g.name) + '">详情</button><button class="btn btn-sm btn-outline" data-group-apply="' + esc(g.name) + '">下发配置</button>' + deleteBtn + '</div></td>';
+        tr.innerHTML = '<td><strong>' + indent + esc(g.name) + '</strong>' + subInfo + '</td><td>' + srcBadge + '</td><td>' + g.member_count + '</td><td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline" data-group-detail="' + esc(g.name) + '">详情</button><button class="btn btn-sm btn-outline" data-group-apply="' + esc(g.name) + '">下发配置</button>' + deleteBtn + '</div></td>';
         tbody.appendChild(tr);
         renderTree(g.id, depth + 1);
       }

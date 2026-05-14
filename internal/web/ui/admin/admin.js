@@ -43,7 +43,7 @@ async function navigate(section) {
     const resp = await fetch('templates/' + section + '.html');
     $('#content-area').innerHTML = await resp.text();
     const mod = await import('./modules/' + section + '.js');
-    mod.init({ Api, esc, showMsg, $, $$ });
+    mod.init({ Api, esc, showMsg, $, $$, confirmModal, showModal });
   } catch (e) {
     $('#content-area').innerHTML = '<div class="card"><p>加载失败: ' + esc(e.message) + '</p></div>';
   }

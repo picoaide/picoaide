@@ -507,7 +507,6 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
     admin.POST("/groups/skills/unbind", s.handleAdminGroupSkillsUnbind)
     admin.GET("/skills", s.handleAdminSkills)
     admin.POST("/skills/deploy", s.handleAdminSkillsDeploy)
-    admin.GET("/skills/download", s.handleAdminSkillsDownload)
     admin.POST("/skills/remove", s.handleAdminSkillsRemove)
     admin.POST("/skills/user/bind", s.handleAdminSkillsUserBind)
     admin.POST("/skills/user/unbind", s.handleAdminSkillsUserUnbind)
@@ -519,6 +518,8 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
     admin.POST("/skills/sources/refresh", s.handleAdminSkillsSourcesRefresh)
     admin.GET("/skills/registry/list", s.handleAdminSkillsRegistryList)
     admin.POST("/skills/registry/install", s.handleAdminSkillsRegistryInstall)
+    admin.GET("/skills/defaults", s.handleAdminSkillsDefaults)
+    admin.POST("/skills/defaults/toggle", s.handleAdminSkillsDefaultsToggle)
     // 镜像管理（中间件内部已放行 /api/admin/images 前缀）
     admin.GET("/images", s.handleAdminImages)
     admin.POST("/images/pull", s.handleAdminImagePull)

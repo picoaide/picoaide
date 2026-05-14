@@ -1,13 +1,12 @@
 package web
 
 import (
-  "archive/zip"
   "fmt"
-  "io"
   "log/slog"
   "net/http"
   "os"
   "path/filepath"
+  "sort"
   "strings"
 
   "github.com/gin-gonic/gin"
@@ -79,6 +78,21 @@ func (s *Server) handleAdminSkills(c *gin.Context) {
     }
     allSkills = filtered
   }
+
+  // 默认技能排前面
+  defaults, _ := auth.LoadDefaultSkills()
+  defaultSet := make(map[string]bool, len(defaults))
+  for _, d := range defaults {
+    defaultSet[d] = true
+  }
+  sort.SliceStable(allSkills, func(i, j int) bool {
+    di, dj := defaultSet[allSkills[i].Name], defaultSet[allSkills[j].Name]
+    if di != dj {
+      return di
+    }
+    return allSkills[i].Name < allSkills[j].Name
+  })
+
   pageSkills, total, totalPages, page, pageSize := paginateSlice(allSkills, pager)
 
   writeJSON(c, http.StatusOK, map[string]interface{}{
@@ -158,16 +172,16 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
   }
 
   deployFn := func(username string) error {
-    return s.deploySkillToUser(skillName, username)
+    if err := s.deploySkillToUser(skillName, username); err != nil {
+      return err
+    }
+    return auth.BindSkillToUser(username, skillName, skillSource)
   }
 
   if targetUser != "" {
-    if err := s.deploySkillToUser(skillName, targetUser); err != nil {
+    if err := deployFn(targetUser); err != nil {
       writeError(c, http.StatusInternalServerError, err.Error())
       return
-    }
-    if err := auth.BindSkillToUser(targetUser, skillName, skillSource); err != nil {
-      slog.Error("绑定记录写入失败（文件已部署）", "skill", skillName, "username", targetUser, "error", err)
     }
     writeJSON(c, http.StatusOK, map[string]interface{}{
       "success":     true,
@@ -212,65 +226,6 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
 }
 
 // ============================================================
-// 下载
-// ============================================================
-
-func (s *Server) handleAdminSkillsDownload(c *gin.Context) {
-  if s.requireSuperadmin(c) == "" {
-    return
-  }
-  if c.Request.Method != "GET" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
-    return
-  }
-  name := c.Query("name")
-  if name == "" {
-    writeError(c, http.StatusBadRequest, "技能名称不能为空")
-    return
-  }
-  if err := util.SafePathSegment(name); err != nil {
-    writeError(c, http.StatusBadRequest, "技能名称不合法")
-    return
-  }
-  source := findSkillSource(name)
-  if source == "" {
-    writeError(c, http.StatusNotFound, "技能不存在")
-    return
-  }
-  skillPath := filepath.Join(skill.SkillsRootDir(), source, name)
-  w := c.Writer
-  w.Header().Set("Content-Type", "application/zip")
-  w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, name))
-  zw := zip.NewWriter(w)
-  filepath.WalkDir(skillPath, func(path string, d os.DirEntry, err error) error {
-    if err != nil {
-      return nil
-    }
-    relPath, _ := filepath.Rel(skillPath, path)
-    relPath = filepath.ToSlash(relPath)
-    if strings.HasPrefix(relPath, "../") || relPath == ".." {
-      return nil
-    }
-    if d.IsDir() {
-      zw.Create(relPath + "/")
-      return nil
-    }
-    fw, err := zw.Create(relPath)
-    if err != nil {
-      return nil
-    }
-    f, err := os.Open(path)
-    if err != nil {
-      return nil
-    }
-    defer f.Close()
-    io.Copy(fw, f)
-    return nil
-  })
-  zw.Close()
-}
-
-// ============================================================
 // 删除
 // ============================================================
 
@@ -296,15 +251,44 @@ func (s *Server) handleAdminSkillsRemove(c *gin.Context) {
     return
   }
 
-  source := findSkillSource(name)
-  if source == "" {
-    writeError(c, http.StatusBadRequest, "技能不存在")
-    return
+  // 在所有源中搜索匹配 SKILL.md name 的技能（目录名可能和 name 不同）
+  var foundSource, foundDir string
+  skillsRoot := skill.SkillsRootDir()
+  srcEntries, _ := os.ReadDir(skillsRoot)
+  for _, se := range srcEntries {
+    if !se.IsDir() || strings.HasPrefix(se.Name(), ".") {
+      continue
+    }
+    srcDir := filepath.Join(skillsRoot, se.Name())
+    skEntries, _ := os.ReadDir(srcDir)
+    for _, sk := range skEntries {
+      if !sk.IsDir() {
+        continue
+      }
+      meta, pErr := skill.ParseMetadata(filepath.Join(srcDir, sk.Name()))
+      if pErr == nil && meta.Name == name {
+        foundSource = se.Name()
+        foundDir = sk.Name()
+        break
+      }
+    }
+    if foundSource != "" {
+      break
+    }
+  }
+  if foundSource == "" {
+    // 兜底：按目录名查找
+    foundSource = findSkillSource(name)
+    if foundSource == "" {
+      writeError(c, http.StatusBadRequest, "技能不存在")
+      return
+    }
+    foundDir = name
   }
 
   affectedUsers, _ := auth.GetUsersForSkill(name)
 
-  skillPath := filepath.Join(skill.SkillsRootDir(), source, name)
+  skillPath := filepath.Join(skill.SkillsRootDir(), foundSource, foundDir)
   if err := os.RemoveAll(skillPath); err != nil {
     writeError(c, http.StatusInternalServerError, "删除目录失败: "+err.Error())
     return
@@ -312,6 +296,11 @@ func (s *Server) handleAdminSkillsRemove(c *gin.Context) {
 
   if err := auth.DeleteSkill(name); err != nil {
     slog.Error("删除技能 DB 记录失败（目录已删除）", "skill", name, "error", err)
+  }
+
+  // 从默认技能列表中移除
+  if err := auth.RemoveFromDefaultSkills(name); err != nil {
+    slog.Error("从默认列表移除失败", "skill", name, "error", err)
   }
 
   for _, username := range affectedUsers {
@@ -434,6 +423,76 @@ func (s *Server) handleAdminSkillsUserSources(c *gin.Context) {
     "success": true,
     "sources": sources,
   })
+}
+
+// ============================================================
+// 默认技能
+// ============================================================
+
+func (s *Server) handleAdminSkillsDefaults(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
+    return
+  }
+  skills, err := auth.LoadDefaultSkills()
+  if err != nil {
+    writeJSON(c, http.StatusOK, map[string]interface{}{
+      "success": true,
+      "skills":  []string{},
+    })
+    return
+  }
+  writeJSON(c, http.StatusOK, map[string]interface{}{
+    "success": true,
+    "skills":  skills,
+  })
+}
+
+func (s *Server) handleAdminSkillsDefaultsToggle(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
+    return
+  }
+  if c.Request.Method != "POST" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+    return
+  }
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
+    return
+  }
+  name := strings.TrimSpace(c.PostForm("skill_name"))
+  if name == "" {
+    writeError(c, http.StatusBadRequest, "技能名称不能为空")
+    return
+  }
+  skills, err := auth.ToggleDefaultSkill(name)
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, err.Error())
+    return
+  }
+  writeJSON(c, http.StatusOK, map[string]interface{}{
+    "success": true,
+    "skills":  skills,
+  })
+}
+
+// applyDefaultSkillsToUser 为新用户绑定并部署默认技能
+func (s *Server) applyDefaultSkillsToUser(username string) {
+  skills, err := auth.LoadDefaultSkills()
+  if err != nil {
+    return
+  }
+  for _, skillName := range skills {
+    if err := util.SafePathSegment(skillName); err != nil {
+      continue
+    }
+    if err := s.deploySkillToUser(skillName, username); err != nil {
+      slog.Warn("部署默认技能失败", "skill", skillName, "username", username, "error", err)
+      continue
+    }
+    if err := auth.BindSkillToUser(username, skillName, "default"); err != nil {
+      slog.Error("绑定默认技能失败", "skill", skillName, "username", username, "error", err)
+    }
+  }
 }
 
 // ============================================================

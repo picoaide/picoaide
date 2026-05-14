@@ -3,12 +3,10 @@ package user
 import (
   "encoding/json"
   "fmt"
-  "log/slog"
   "os"
   "path/filepath"
   "regexp"
   "sort"
-  "strings"
   "time"
 
   "gopkg.in/yaml.v3"
@@ -228,39 +226,6 @@ func RemoveAllUserData(cfg *config.GlobalConfig) error {
 // ============================================================
 // Cookie 与安全配置
 // ============================================================
-
-// DeployGroupSkillsToUser 部署用户所属组绑定的技能到用户目录
-func DeployGroupSkillsToUser(cfg *config.GlobalConfig, username string) {
-  groups, err := auth.GetGroupsForUser(username)
-  if err != nil {
-    return
-  }
-  skillsDir := config.SkillsDirPath()
-  targetSkillsDir := filepath.Join(UserDir(cfg, username), ".picoclaw", "workspace", "skills")
-
-  for _, groupName := range groups {
-    skills, err := auth.GetGroupSkills(groupName)
-    if err != nil {
-      continue
-    }
-    for _, skillName := range skills {
-      if err := util.SafePathSegment(skillName); err != nil {
-        slog.Warn("跳过不合法技能名", "skill", skillName, "error", err)
-        continue
-      }
-      srcPath := filepath.Clean(filepath.Join(skillsDir, skillName))
-      dstPath := filepath.Clean(filepath.Join(targetSkillsDir, skillName))
-      if !strings.HasPrefix(dstPath, filepath.Clean(targetSkillsDir)+string(os.PathSeparator)) {
-        slog.Warn("跳过逃逸路径", "dst", dstPath)
-        continue
-      }
-      os.RemoveAll(dstPath)
-      if err := util.CopyDir(srcPath, dstPath); err != nil {
-        slog.Warn("部署技能到用户失败", "skill", skillName, "username", username, "error", err)
-      }
-    }
-  }
-}
 
 // SyncCookies 将域名对应的 Cookie 字符串写入用户的 .security.yml
 // 格式：cookies: { domain.com: "name1=val1; name2=val2" }

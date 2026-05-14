@@ -185,19 +185,7 @@ func (UserSkill) TableName() string {
   return "user_skills"
 }
 
-// GroupSkill 组-技能关联表
-type GroupSkill struct {
-  ID        int64  `xorm:"pk autoincr 'id'"`
-  GroupID   int64  `xorm:"notnull 'group_id'"`
-  SkillName string `xorm:"notnull 'skill_name'"`
-  Source    string `xorm:"notnull default '' 'source'"`
-}
-
-func (GroupSkill) TableName() string {
-  return "group_skills"
-}
-
-// GroupInfo 组信息（包含成员数和绑定技能数），非数据库模型，仅用于查询结果
+// GroupInfo 组信息（包含成员数），非数据库模型，仅用于查询结果
 type GroupInfo struct {
   ID          int64  `json:"id"`
   Name        string `json:"name"`
@@ -205,5 +193,4 @@ type GroupInfo struct {
   Source      string `json:"source"`
   Description string `json:"description"`
   MemberCount int    `json:"member_count"`
-  SkillCount  int    `json:"skill_count"`
 }

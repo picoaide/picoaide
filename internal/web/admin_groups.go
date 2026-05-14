@@ -121,32 +121,15 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "组名不能为空")
     return
   }
-  // 删除组之前获取成员、组绑定的技能和 ID
   gid, err := auth.GetGroupID(name)
   groupMembers := []string{}
-  groupSkills := []string{}
   if err == nil {
     groupMembers, _ = auth.GetGroupMembersForDeploy(name)
-    groupSkills, _ = auth.GetGroupSkills(name)
   }
 
   if err := auth.DeleteGroup(name); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
-  }
-
-  // 清理组绑定的技能文件
-  for _, username := range groupMembers {
-    for _, skillName := range groupSkills {
-      has, err := auth.UserHasSkillFromAnySource(username, skillName)
-      if err != nil {
-        continue
-      }
-      if !has {
-        targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName)
-        os.RemoveAll(targetDir)
-      }
-    }
   }
 
   // 共享文件夹清理：移除该组的关联
@@ -220,11 +203,6 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
   // 审计日志：记录谁添加了哪些用户到组
   logger.Audit("group.members.add", "group", groupName, "usernames", usernames, "operator", s.getSessionUser(c))
 
-  // 部署组绑定的技能到新加入成员
-  for _, username := range usernames {
-    user.DeployGroupSkillsToUser(s.cfg, username)
-  }
-
   // 检查共享文件夹影响，自动重启新加入成员的容器
   gid, err := auth.GetGroupID(groupName)
   if err == nil {
@@ -281,32 +259,9 @@ func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
 
   gid, _ := auth.GetGroupID(groupName)
 
-  groupSkills := []string{}
-  if gid > 0 {
-    groupSkills, _ = auth.GetGroupSkills(groupName)
-  }
-
   if err := auth.RemoveUserFromGroup(groupName, username); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
-  }
-
-  // 智能清理技能
-  for _, skillName := range groupSkills {
-    if err := util.SafePathSegment(skillName); err != nil {
-      continue
-    }
-    has, err := auth.UserHasSkillFromAnySource(username, skillName)
-    if err != nil {
-      continue
-    }
-    if !has {
-      targetDir := filepath.Clean(filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName))
-      skillsBase := filepath.Clean(filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills"))
-      if strings.HasPrefix(targetDir, skillsBase+string(os.PathSeparator)) {
-        os.RemoveAll(targetDir)
-      }
-    }
   }
 
   // 检查共享文件夹影响，自动重启失去访问的用户容器
@@ -344,24 +299,19 @@ func (s *Server) handleAdminGroupSkillsBind(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "技能名称不合法")
     return
   }
-  if err := auth.BindSkillToGroup(groupName, skillName, ""); err != nil {
-    writeError(c, http.StatusBadRequest, err.Error())
-    return
-  }
 
-  // 绑定后立即部署到组内所有用户（强制覆盖）
+  // 展开组成员，部署成功后绑定到每个用户
   members, err := auth.GetGroupMembersForDeploy(groupName)
   if err != nil {
-    writeError(c, http.StatusInternalServerError, "绑定成功但获取组成员失败: "+err.Error())
+    writeError(c, http.StatusInternalServerError, "获取组成员失败: "+err.Error())
     return
   }
   userCount := 0
-  deployFailCount := 0
   for _, username := range members {
     if err := s.deploySkillToUser(skillName, username); err == nil {
+      auth.BindSkillToUser(username, skillName, "group")
       userCount++
     } else {
-      deployFailCount++
       slog.Warn("部署技能到组成员失败", "skill", skillName, "group", groupName, "username", username, "error", err)
     }
   }
@@ -395,24 +345,21 @@ func (s *Server) handleAdminGroupSkillsUnbind(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "技能名称不合法")
     return
   }
-  if err := auth.UnbindSkillFromGroup(groupName, skillName); err != nil {
-    writeError(c, http.StatusBadRequest, err.Error())
-    return
-  }
 
-  // 智能清理：遍历组成员，检查是否还有其他来源
+  // 展开组成员，仅对 source 为 "group" 的记录解绑 + 清理文件
   members, _ := auth.GetGroupMembersForDeploy(groupName)
   cleanedCount := 0
   for _, username := range members {
-    has, err := auth.UserHasSkillFromAnySource(username, skillName)
-    if err != nil {
+    src, _ := auth.GetUserSkillSource(username, skillName)
+    if src != "group" {
       continue
     }
-    if !has {
-      targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName)
-      if err := os.RemoveAll(targetDir); err == nil {
-        cleanedCount++
-      }
+    if err := auth.UnbindSkillFromUser(username, skillName); err != nil {
+      slog.Error("解绑技能失败", "skill", skillName, "username", username, "error", err)
+    }
+    targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName)
+    if err := os.RemoveAll(targetDir); err == nil {
+      cleanedCount++
     }
   }
 
@@ -441,11 +388,6 @@ func (s *Server) handleAdminGroupMembers(c *gin.Context) {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  skills, err := auth.GetGroupSkills(groupName)
-  if err != nil {
-    writeError(c, http.StatusBadRequest, err.Error())
-    return
-  }
   if members == nil {
     members = []string{}
   }
@@ -467,19 +409,15 @@ func (s *Server) handleAdminGroupMembers(c *gin.Context) {
     inheritedMembers = filterMembers(inheritedMembers)
   }
   members, memberTotal, memberTotalPages, memberPage, memberPageSize := paginateSlice(members, pager)
-  if skills == nil {
-    skills = []string{}
-  }
   writeJSON(c, http.StatusOK, struct {
     Success          bool     `json:"success"`
     Members          []string `json:"members"`
     InheritedMembers []string `json:"inherited_members"`
-    Skills           []string `json:"skills"`
     Page             int      `json:"page,omitempty"`
     PageSize         int      `json:"page_size,omitempty"`
     Total            int      `json:"total,omitempty"`
     TotalPages       int      `json:"total_pages,omitempty"`
-  }{true, members, inheritedMembers, skills, memberPage, memberPageSize, memberTotal, memberTotalPages})
+  }{true, members, inheritedMembers, memberPage, memberPageSize, memberTotal, memberTotalPages})
 }
 
 // handleAdminAuthSyncGroups 手动触发 LDAP 组同步

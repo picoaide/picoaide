@@ -321,10 +321,13 @@ func GenerateRandomPassword(length int) string {
   return string(b)
 }
 
-// DeleteUser 删除本地用户
+// DeleteUser 删除本地用户（含技能绑定）
 func DeleteUser(username string) error {
   if err := ensureDB(); err != nil {
     return err
+  }
+  if _, err := engine.Where("username = ?", username).Delete(&UserSkill{}); err != nil {
+    return fmt.Errorf("删除技能绑定失败: %w", err)
   }
   affected, err := engine.Where("username = ?", username).Delete(&LocalUser{})
   if err != nil {
@@ -367,6 +370,10 @@ func DeleteAllRegularUsers() (int64, error) {
       _ = session.Rollback()
       return 0, err
     }
+    if _, err := session.Where("username = ?", username).Delete(&UserSkill{}); err != nil {
+      _ = session.Rollback()
+      return 0, err
+    }
   }
   affected, err := session.Where("role != ?", "superadmin").Delete(&LocalUser{})
   if err != nil {
@@ -388,10 +395,6 @@ func ClearAllGroups() error {
     return err
   }
   if _, err := session.Exec("DELETE FROM user_groups"); err != nil {
-    _ = session.Rollback()
-    return err
-  }
-  if _, err := session.Exec("DELETE FROM group_skills"); err != nil {
     _ = session.Rollback()
     return err
   }
