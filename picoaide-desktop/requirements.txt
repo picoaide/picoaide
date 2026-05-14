@@ -1,7 +1,7 @@
 pyautogui==0.9.54
 pynput==1.7.7
 mss==9.0.1
-Pillow==12.1.1
+Pillow==12.2.0
 openpyxl==3.1.5
 python-docx==1.1.2
 websockets==13.1
