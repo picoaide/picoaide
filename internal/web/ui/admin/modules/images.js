@@ -6,6 +6,8 @@ export async function init(ctx) {
   let imageUsersPage = 1;
   let imageUsersSearch = '';
   let imageUsersTotalPages = 1;
+  let isPulling = false;
+  let pullingTag = '';
 
   await loadLocalImages();
   loadRegistryTags();
@@ -50,16 +52,42 @@ export async function init(ctx) {
     document.querySelectorAll('#upgrade-users input[type=checkbox]').forEach(cb => cb.checked = false);
   });
 
+  // 拉取状态轮询
+  let pullPollTimer = null;
+  async function checkPullStatus() {
+    const data = await Api.get('/api/admin/images/pull-status').catch(() => ({}));
+    if (data.running) {
+      $('#image-pull-indicator')?.classList.remove('hidden');
+      $('#image-pull-indicator .pull-tag').textContent = data.tag || '';
+      $('#image-pull-indicator .pull-msg').textContent = data.message || '正在拉取...';
+      $('#image-pull-indicator .pull-time').textContent = data.started_at || '';
+      // 刷新本地列表和远程标签
+      await loadLocalImages();
+      loadRegistryTags();
+    } else {
+      $('#image-pull-indicator')?.classList.add('hidden');
+      // 如果之前是 running，拉取刚结束，刷新列表
+      if (pullPollTimer) {
+        await loadLocalImages();
+        loadRegistryTags();
+      }
+    }
+  }
+  // 启动轮询（每 3 秒）
+  pullPollTimer = setInterval(checkPullStatus, 3000);
+
   async function loadLocalImages() {
-    const data = await Api.get('/api/admin/images').catch(() => ({ images: [] }));
+    const data = await Api.get('/api/admin/images').catch(() => ({ images: [], pulling: false }));
     const tbody = $('#images-local');
     tbody.innerHTML = '';
     localImages = data.images || [];
     if (localImages.length === 0) {
       $('#images-local-empty')?.classList.remove('hidden');
+      updatePullIndicator(data);
       return;
     }
     $('#images-local-empty')?.classList.add('hidden');
+    updatePullIndicator(data);
     for (const img of localImages) {
       const tags = (img.repo_tags || []).join(', ') || '(无标签)';
       const userCount = img.user_count || 0;
@@ -88,6 +116,21 @@ export async function init(ctx) {
     tbody.querySelectorAll('[data-users-img]').forEach(btn => {
       btn.addEventListener('click', () => showImageUsers(btn.dataset.usersImg));
     });
+  }
+
+  function updatePullIndicator(data) {
+    const indicator = $('#image-pull-indicator');
+    if (!indicator) return;
+    isPulling = data.pulling || false;
+    pullingTag = data.pulling_tag || '';
+    if (isPulling) {
+      indicator.classList.remove('hidden');
+      indicator.querySelector('.pull-tag').textContent = pullingTag;
+      indicator.querySelector('.pull-msg').textContent = data.pull_status?.message || '正在拉取...';
+      indicator.querySelector('.pull-time').textContent = data.pull_status?.started_at || '';
+    } else {
+      indicator.classList.add('hidden');
+    }
   }
 
   async function loadRegistryTags() {
@@ -124,19 +167,25 @@ export async function init(ctx) {
 
     for (const tag of tags) {
       const exists = localTags.has(tag);
-      // 本地存在其他版本的 picoaide 镜像就显示升级按钮
+      const isCurrentPull = isPulling && pullingTag === tag;
       const hasOtherVersions = Array.from(localTags).some(t => t !== tag);
       const tr = document.createElement('tr');
-      const statusHtml = exists
-        ? '<span class="badge badge-ok">已存在</span>'
-        : '<span class="badge badge-muted">未拉取</span>';
+      let statusHtml;
+      if (isCurrentPull) {
+        statusHtml = '<span class="badge badge-warn">拉取中...</span>';
+      } else if (exists) {
+        statusHtml = '<span class="badge badge-ok">已存在</span>';
+      } else {
+        statusHtml = '<span class="badge badge-muted">未拉取</span>';
+      }
       const upgradeBtnHtml = hasOtherVersions
         ? '<button class="btn btn-sm btn-primary" data-upgrade="' + esc(tag) + '" style="margin-left:4px">升级</button>'
         : '';
+      const pullDisabled = isPulling ? ' disabled' : '';
       tr.innerHTML =
         '<td style="font-family:monospace">' + esc(tag) + '</td>' +
         '<td>' + statusHtml + '</td>' +
-        '<td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline" data-tag="' + esc(tag) + '">' + (exists ? '重新拉取' : '拉取') + '</button>' + upgradeBtnHtml + '</div></td>';
+        '<td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline"' + pullDisabled + ' data-tag="' + esc(tag) + '">' + (isCurrentPull ? '拉取中...' : (exists ? '重新拉取' : '拉取')) + '</button>' + upgradeBtnHtml + '</div></td>';
       tbody.appendChild(tr);
     }
     tbody.querySelectorAll('[data-tag]').forEach(btn => {

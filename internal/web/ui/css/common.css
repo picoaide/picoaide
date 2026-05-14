@@ -534,6 +534,7 @@ tbody tr:hover { background: #f8fbff; }
 .badge-ok { background: var(--success-bg); color: var(--success); }
 .badge-muted { background: #f1f5f9; color: var(--text-muted); }
 .badge-danger { background: var(--danger-bg); color: var(--danger); }
+.badge-warn { background: #fff3cd; color: #856404; }
 .msg { padding: .55rem .78rem; border-radius: var(--radius-sm); font-size: .84rem; margin: .55rem 0; min-height: 0; font-weight: 600; }
 .msg:empty { display: none; }
 .msg-ok { background: var(--success-bg); color: var(--success); border: 1px solid #bbf7d0; }

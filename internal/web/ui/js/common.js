@@ -37,9 +37,17 @@ var Api = {
   get: function(path) { return apiJSON('GET', path); },
   post: function(path, params) {
     return getCSRF().then(function(csrf) {
-      return apiJSON('POST', path, {
+      return api('POST', path, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: formBody(Object.assign({}, params, { csrf_token: csrf })),
+      }).then(function(r) {
+        if (r.status === 412) {
+          return r.json().then(function(d) {
+            alertModal('本地无可用镜像，请先到<a href="/admin/images" style="color:#4fc3f7" onclick="navigate(\'images\');return false">镜像管理</a>拉取镜像');
+            return { success: false, error: 'NO_IMAGE' };
+          });
+        }
+        return r.json();
       });
     });
   },

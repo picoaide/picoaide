@@ -321,6 +321,108 @@ func (s *Server) allowedExtensionOrigin(origin string) bool {
   return false
 }
 
+// ensureImageAvailable 检查本地是否有 picoclaw 镜像，无则自动拉取最新版本
+func (s *Server) ensureImageAvailable() {
+  for {
+    ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+    images, err := dockerpkg.ListLocalImages(ctx, s.cfg.Image.Name)
+    cancel()
+    if err == nil && len(images) > 0 {
+      slog.Info("本地已有镜像，跳过自动拉取", "count", len(images))
+      return
+    }
+
+    // 从 GitHub 获取最新标签列表
+    ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
+    tags, err := dockerpkg.ListRegistryTagsForConfig(ctx2, s.cfg.Image.RepoName(), "github")
+    cancel2()
+    if err != nil || len(tags) == 0 {
+      slog.Error("获取远程标签失败，30 秒后重试", "error", err)
+      time.Sleep(30 * time.Second)
+      continue
+    }
+
+    sortTagsForDisplay(tags)
+    latestTag := tags[0]
+    // 按当前配置的仓库地址拉取（默认腾讯云，可改 GitHub）
+    pullRef := s.cfg.Image.PullRef(latestTag)
+    unifiedRef := s.cfg.Image.UnifiedRef(latestTag)
+    startImagePull(latestTag)
+    slog.Info("正在拉取镜像", "tag", pullRef)
+
+    pullCtx := context.Background()
+    reader, err := dockerpkg.ImagePull(pullCtx, pullRef)
+    if err != nil {
+      slog.Error("镜像拉取失败", "error", err)
+      failImagePull(err.Error())
+      time.Sleep(30 * time.Second)
+      continue
+    }
+    buf := make([]byte, 4096)
+    for {
+      n, readErr := reader.Read(buf)
+      if n > 0 {
+        updateImagePull(string(buf[:n]))
+      }
+      if readErr != nil {
+        break
+      }
+    }
+    reader.Close()
+
+    // 腾讯云模式：拉取后 retag 为统一名称
+    if s.cfg.Image.IsTencent() && pullRef != unifiedRef {
+      slog.Info("重命名镜像", "from", pullRef, "to", unifiedRef)
+      if err := dockerpkg.RetagImage(pullCtx, pullRef, unifiedRef); err != nil {
+        slog.Error("重命名失败", "error", err)
+      }
+    }
+
+    ctx3, cancel3 := context.WithTimeout(context.Background(), 10*time.Second)
+    images, err = dockerpkg.ListLocalImages(ctx3, s.cfg.Image.Name)
+    cancel3()
+    if err == nil && len(images) > 0 {
+      finishImagePull()
+      slog.Info("镜像拉取完成", "tag", unifiedRef)
+      return
+    }
+    slog.Error("镜像拉取后未检测到本地镜像，30 秒后重试")
+    failImagePull("拉取后未检测到本地镜像")
+    time.Sleep(30 * time.Second)
+  }
+}
+
+// imageRequiredMiddleware 拦截无本地镜像时的超管写操作
+func (s *Server) imageRequiredMiddleware() gin.HandlerFunc {
+  return func(c *gin.Context) {
+    if c.Request.Method != "POST" {
+      c.Next()
+      return
+    }
+    if strings.HasPrefix(c.Request.URL.Path, "/api/admin/images") {
+      c.Next()
+      return
+    }
+    if !s.dockerAvailable {
+      c.Next()
+      return
+    }
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    images, err := dockerpkg.ListLocalImages(ctx, s.cfg.Image.Name)
+    cancel()
+    if err == nil && len(images) > 0 {
+      c.Next()
+      return
+    }
+    if getImagePullStatus().Running {
+      c.Next()
+      return
+    }
+    writeError(c, http.StatusPreconditionFailed, "本地无可用镜像，请先到镜像管理拉取镜像")
+    c.Abort()
+  }
+}
+
 // RegisterRoutes 将所有 API 路由注册到 Gin 引擎
 func (s *Server) RegisterRoutes(r *gin.Engine) {
   s.registerUIRoutes(r)
@@ -346,15 +448,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
   // 配置管理（超管）
   r.GET("/api/config", s.handleConfigGet)
   r.POST("/api/config", s.handleConfigSave)
-  r.POST("/api/admin/config/apply", s.handleAdminConfigApply)
-  r.GET("/api/admin/migration-rules", s.handleAdminMigrationRulesGet)
-  r.POST("/api/admin/migration-rules/refresh", s.handleAdminMigrationRulesRefresh)
-  r.POST("/api/admin/migration-rules/upload", s.handleAdminMigrationRulesUpload)
-  r.GET("/api/admin/picoclaw/channels", s.handlePicoClawAdminChannelsGet)
   r.GET("/api/picoclaw/channels", s.handlePicoClawChannelsGet)
   r.GET("/api/picoclaw/config-fields", s.handlePicoClawConfigFieldsGet)
   r.POST("/api/picoclaw/config-fields", s.handlePicoClawConfigFieldsSave)
-  r.GET("/api/admin/task/status", s.handleAdminTaskStatus)
   // 文件管理
   r.GET("/api/files", s.handleFiles)
   r.POST("/api/files/upload", s.handleFileUpload)
@@ -376,74 +472,77 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
   r.GET("/api/browser/ws", s.handleBrowserWS)
   // Computer 桌面代理 WebSocket
   r.GET("/api/computer/ws", s.handleComputerWS)
-  // 超管 - 用户管理
-  r.GET("/api/admin/users", s.handleAdminUsers)
-  r.POST("/api/admin/users/create", s.handleAdminUserCreate)
-  r.POST("/api/admin/users/batch-create", s.handleAdminUserBatchCreate)
-  r.POST("/api/admin/users/delete", s.handleAdminUserDelete)
-  // 超管 - 超管账户管理
-  r.GET("/api/admin/superadmins", s.handleAdminSuperadmins)
-  r.POST("/api/admin/superadmins/create", s.handleAdminSuperadminCreate)
-  r.POST("/api/admin/superadmins/delete", s.handleAdminSuperadminDelete)
-  r.POST("/api/admin/superadmins/reset", s.handleAdminSuperadminReset)
-  r.POST("/api/admin/container/start", s.handleAdminContainerStart)
-  r.POST("/api/admin/container/stop", s.handleAdminContainerStop)
-  r.POST("/api/admin/container/restart", s.handleAdminContainerRestart)
-  r.POST("/api/admin/container/debug", s.handleAdminContainerDebug)
-  r.GET("/api/admin/container/logs", s.handleAdminContainerLogs)
-  // 超管 - 白名单
-  r.GET("/api/admin/whitelist", s.handleAdminWhitelistGet)
-  r.POST("/api/admin/whitelist", s.handleAdminWhitelistPost)
-  // 超管 - 认证配置
-  r.POST("/api/admin/auth/test-ldap", s.handleAdminAuthTestLDAP)
-  r.GET("/api/admin/auth/ldap-users", s.handleAdminAuthLDAPUsers)
-  r.POST("/api/admin/auth/sync-users", s.handleAdminAuthSyncUsers)
-  r.POST("/api/admin/auth/sync-groups", s.handleAdminAuthSyncGroups)
-  r.GET("/api/admin/auth/providers", s.handleAdminAuthProviders)
-  // 超管 - 用户组
-  r.GET("/api/admin/groups", s.handleAdminGroups)
-  r.POST("/api/admin/groups/create", s.handleAdminGroupCreate)
-  r.POST("/api/admin/groups/delete", s.handleAdminGroupDelete)
-  r.GET("/api/admin/groups/members", s.handleAdminGroupMembers)
-  r.POST("/api/admin/groups/members/add", s.handleAdminGroupMembersAdd)
-  r.POST("/api/admin/groups/members/remove", s.handleAdminGroupMembersRemove)
-  r.POST("/api/admin/groups/skills/bind", s.handleAdminGroupSkillsBind)
-  r.POST("/api/admin/groups/skills/unbind", s.handleAdminGroupSkillsUnbind)
-  // 超管 - 技能库
-  r.GET("/api/admin/skills", s.handleAdminSkills)
-  r.POST("/api/admin/skills/deploy", s.handleAdminSkillsDeploy)
-  r.GET("/api/admin/skills/download", s.handleAdminSkillsDownload)
-  r.POST("/api/admin/skills/remove", s.handleAdminSkillsRemove)
-  r.POST("/api/admin/skills/user/bind", s.handleAdminSkillsUserBind)
-  r.POST("/api/admin/skills/user/unbind", s.handleAdminSkillsUserUnbind)
-  r.GET("/api/admin/skills/user/sources", s.handleAdminSkillsUserSources)
-  // 超管 - 技能源管理
-  r.GET("/api/admin/skills/sources", s.handleAdminSkillsSources)
-  r.POST("/api/admin/skills/sources/git", s.handleAdminSkillsSourcesGitAdd)
-  r.POST("/api/admin/skills/sources/remove", s.handleAdminSkillsSourcesRemove)
-  r.POST("/api/admin/skills/sources/pull", s.handleAdminSkillsSourcesPull)
-  r.POST("/api/admin/skills/sources/refresh", s.handleAdminSkillsSourcesRefresh)
-  // 超管 - 注册源技能管理
-  r.GET("/api/admin/skills/registry/list", s.handleAdminSkillsRegistryList)
-  r.POST("/api/admin/skills/registry/install", s.handleAdminSkillsRegistryInstall)
-  // 超管 - 镜像管理
-  r.GET("/api/admin/images", s.handleAdminImages)
-  r.POST("/api/admin/images/pull", s.handleAdminImagePull)
-  r.POST("/api/admin/images/delete", s.handleAdminImageDelete)
-  r.POST("/api/admin/images/migrate", s.handleAdminImageMigrate)
-  r.POST("/api/admin/images/upgrade", s.handleAdminImageUpgrade)
-  r.GET("/api/admin/images/registry", s.handleAdminImageRegistry)
-  r.GET("/api/admin/images/local-tags", s.handleAdminLocalTags)
-  r.GET("/api/admin/images/upgrade-candidates", s.handleAdminImageUpgradeCandidates)
-  r.GET("/api/admin/images/users", s.handleAdminImageUsers)
-  // 超管 - 团队空间（共享文件夹）
-  r.GET("/api/admin/shared-folders", s.handleAdminSharedFolders)
-  r.POST("/api/admin/shared-folders/create", s.handleAdminSharedFoldersCreate)
-  r.POST("/api/admin/shared-folders/update", s.handleAdminSharedFoldersUpdate)
-  r.POST("/api/admin/shared-folders/delete", s.handleAdminSharedFoldersDelete)
-  r.POST("/api/admin/shared-folders/groups/set", s.handleAdminSharedFoldersSetGroups)
-  r.POST("/api/admin/shared-folders/test", s.handleAdminSharedFoldersTest)
-  r.POST("/api/admin/shared-folders/mount", s.handleAdminSharedFoldersMount)
+  // 超管 API 路由组（含镜像拦截中间件）
+  admin := r.Group("/api/admin")
+  admin.Use(s.imageRequiredMiddleware())
+  {
+    admin.GET("/users", s.handleAdminUsers)
+    admin.POST("/users/create", s.handleAdminUserCreate)
+    admin.POST("/users/batch-create", s.handleAdminUserBatchCreate)
+    admin.POST("/users/delete", s.handleAdminUserDelete)
+    admin.GET("/superadmins", s.handleAdminSuperadmins)
+    admin.POST("/superadmins/create", s.handleAdminSuperadminCreate)
+    admin.POST("/superadmins/delete", s.handleAdminSuperadminDelete)
+    admin.POST("/superadmins/reset", s.handleAdminSuperadminReset)
+    admin.POST("/container/start", s.handleAdminContainerStart)
+    admin.POST("/container/stop", s.handleAdminContainerStop)
+    admin.POST("/container/restart", s.handleAdminContainerRestart)
+    admin.POST("/container/debug", s.handleAdminContainerDebug)
+    admin.GET("/container/logs", s.handleAdminContainerLogs)
+    admin.GET("/whitelist", s.handleAdminWhitelistGet)
+    admin.POST("/whitelist", s.handleAdminWhitelistPost)
+    admin.POST("/auth/test-ldap", s.handleAdminAuthTestLDAP)
+    admin.GET("/auth/ldap-users", s.handleAdminAuthLDAPUsers)
+    admin.POST("/auth/sync-users", s.handleAdminAuthSyncUsers)
+    admin.POST("/auth/sync-groups", s.handleAdminAuthSyncGroups)
+    admin.GET("/auth/providers", s.handleAdminAuthProviders)
+    admin.GET("/groups", s.handleAdminGroups)
+    admin.POST("/groups/create", s.handleAdminGroupCreate)
+    admin.POST("/groups/delete", s.handleAdminGroupDelete)
+    admin.GET("/groups/members", s.handleAdminGroupMembers)
+    admin.POST("/groups/members/add", s.handleAdminGroupMembersAdd)
+    admin.POST("/groups/members/remove", s.handleAdminGroupMembersRemove)
+    admin.POST("/groups/skills/bind", s.handleAdminGroupSkillsBind)
+    admin.POST("/groups/skills/unbind", s.handleAdminGroupSkillsUnbind)
+    admin.GET("/skills", s.handleAdminSkills)
+    admin.POST("/skills/deploy", s.handleAdminSkillsDeploy)
+    admin.GET("/skills/download", s.handleAdminSkillsDownload)
+    admin.POST("/skills/remove", s.handleAdminSkillsRemove)
+    admin.POST("/skills/user/bind", s.handleAdminSkillsUserBind)
+    admin.POST("/skills/user/unbind", s.handleAdminSkillsUserUnbind)
+    admin.GET("/skills/user/sources", s.handleAdminSkillsUserSources)
+    admin.GET("/skills/sources", s.handleAdminSkillsSources)
+    admin.POST("/skills/sources/git", s.handleAdminSkillsSourcesGitAdd)
+    admin.POST("/skills/sources/remove", s.handleAdminSkillsSourcesRemove)
+    admin.POST("/skills/sources/pull", s.handleAdminSkillsSourcesPull)
+    admin.POST("/skills/sources/refresh", s.handleAdminSkillsSourcesRefresh)
+    admin.GET("/skills/registry/list", s.handleAdminSkillsRegistryList)
+    admin.POST("/skills/registry/install", s.handleAdminSkillsRegistryInstall)
+    // 镜像管理（中间件内部已放行 /api/admin/images 前缀）
+    admin.GET("/images", s.handleAdminImages)
+    admin.POST("/images/pull", s.handleAdminImagePull)
+    admin.POST("/images/delete", s.handleAdminImageDelete)
+    admin.POST("/images/migrate", s.handleAdminImageMigrate)
+    admin.POST("/images/upgrade", s.handleAdminImageUpgrade)
+    admin.GET("/images/registry", s.handleAdminImageRegistry)
+    admin.GET("/images/local-tags", s.handleAdminLocalTags)
+    admin.GET("/images/upgrade-candidates", s.handleAdminImageUpgradeCandidates)
+    admin.GET("/images/users", s.handleAdminImageUsers)
+    admin.GET("/images/pull-status", s.handleAdminImagePullStatus)
+    admin.GET("/shared-folders", s.handleAdminSharedFolders)
+    admin.POST("/shared-folders/create", s.handleAdminSharedFoldersCreate)
+    admin.POST("/shared-folders/update", s.handleAdminSharedFoldersUpdate)
+    admin.POST("/shared-folders/delete", s.handleAdminSharedFoldersDelete)
+    admin.POST("/shared-folders/groups/set", s.handleAdminSharedFoldersSetGroups)
+    admin.POST("/shared-folders/test", s.handleAdminSharedFoldersTest)
+    admin.POST("/shared-folders/mount", s.handleAdminSharedFoldersMount)
+    admin.POST("/config/apply", s.handleAdminConfigApply)
+    admin.GET("/migration-rules", s.handleAdminMigrationRulesGet)
+    admin.POST("/migration-rules/refresh", s.handleAdminMigrationRulesRefresh)
+    admin.POST("/migration-rules/upload", s.handleAdminMigrationRulesUpload)
+    admin.GET("/picoclaw/channels", s.handlePicoClawAdminChannelsGet)
+    admin.GET("/task/status", s.handleAdminTaskStatus)
+  }
   // 普通用户 - 团队空间
   r.GET("/api/shared-folders", s.handleSharedFolders)
   // 普通用户 - 技能中心
@@ -547,6 +646,11 @@ func Serve(cfg *config.GlobalConfig) error {
     csrfKey:         csrfKey,
     dockerAvailable: dockerOK,
     loginLimiter:    newLoginRateLimiter(),
+  }
+
+  // 后台自动拉取镜像（无本地镜像时）
+  if dockerOK {
+    go s.ensureImageAvailable()
   }
 
   // 定时同步（实时响应配置变更）

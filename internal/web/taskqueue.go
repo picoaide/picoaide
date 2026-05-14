@@ -11,6 +11,64 @@ import (
 )
 
 // ============================================================
+// 镜像拉取任务状态跟踪
+// ============================================================
+
+type ImagePullTask struct {
+  Running   bool   `json:"running"`
+  Tag       string `json:"tag"`
+  Message   string `json:"message"`
+  Error     string `json:"error,omitempty"`
+  StartedAt string `json:"started_at,omitempty"`
+}
+
+var imagePullStatus struct {
+  mu     sync.Mutex
+  status ImagePullTask
+}
+
+func startImagePull(tag string) {
+  imagePullStatus.mu.Lock()
+  defer imagePullStatus.mu.Unlock()
+  imagePullStatus.status = ImagePullTask{
+    Running:   true,
+    Tag:       tag,
+    Message:   "正在拉取...",
+    StartedAt: time.Now().Format("2006-01-02 15:04:05"),
+  }
+}
+
+func updateImagePull(msg string) {
+  imagePullStatus.mu.Lock()
+  defer imagePullStatus.mu.Unlock()
+  if imagePullStatus.status.Running {
+    imagePullStatus.status.Message = msg
+  }
+}
+
+func finishImagePull() {
+  imagePullStatus.mu.Lock()
+  defer imagePullStatus.mu.Unlock()
+  imagePullStatus.status.Running = false
+  imagePullStatus.status.Message = "拉取完成"
+  imagePullStatus.status.Error = ""
+}
+
+func failImagePull(errMsg string) {
+  imagePullStatus.mu.Lock()
+  defer imagePullStatus.mu.Unlock()
+  imagePullStatus.status.Running = false
+  imagePullStatus.status.Error = errMsg
+  imagePullStatus.status.Message = "拉取失败: " + errMsg
+}
+
+func getImagePullStatus() ImagePullTask {
+  imagePullStatus.mu.Lock()
+  defer imagePullStatus.mu.Unlock()
+  return imagePullStatus.status
+}
+
+// ============================================================
 // 批量任务队列（支持排队）
 // ============================================================
 

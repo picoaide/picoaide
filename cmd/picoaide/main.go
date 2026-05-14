@@ -1,7 +1,6 @@
 package main
 
 import (
-  "context"
   "crypto/rand"
   "fmt"
   "io"
@@ -10,7 +9,6 @@ import (
   "os/exec"
   "path/filepath"
   "strconv"
-  "time"
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
@@ -78,6 +76,14 @@ func main() {
     if len(positional) == 0 {
       fmt.Println("用法: picoaide reset-password <用户名>")
       os.Exit(1)
+    }
+    wd, _ := os.Getwd()
+    if err := auth.InitDB(wd); err != nil {
+      os.MkdirAll(wd, 0755)
+      if err := auth.InitDB(wd); err != nil {
+        fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
+        os.Exit(1)
+      }
     }
     if err := runResetPassword(positional[0]); err != nil {
       fmt.Fprintf(os.Stderr, "重置密码失败: %v\n", err)
@@ -227,8 +233,6 @@ func runInitSilent() {
     os.Exit(1)
   }
 
-  pullLatestImage(cfg)
-
   if err := config.InstallService(cfg); err != nil {
     fmt.Fprintf(os.Stderr, "服务安装失败: %v\n", err)
     os.Exit(1)
@@ -285,49 +289,6 @@ func generatePassword(length int) string {
     b[i] = chars[int(b[i])%len(chars)]
   }
   return string(b)
-}
-
-func pullLatestImage(cfg *config.GlobalConfig) {
-  if err := dockerpkg.InitClient(); err != nil {
-    fmt.Fprintf(os.Stderr, "Docker 不可用，跳过镜像拉取: %v\n", err)
-    return
-  }
-  defer dockerpkg.CloseClient()
-
-  ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
-  defer cancel()
-
-  tags, err := dockerpkg.ListRegistryTagsForConfig(ctx, cfg.Image.RepoName(), cfg.Image.Registry)
-  if err != nil {
-    fmt.Fprintf(os.Stderr, "获取远程标签失败: %v\n", err)
-    return
-  }
-  if len(tags) == 0 {
-    fmt.Println("远程仓库无可用标签")
-    return
-  }
-
-  latestTag := tags[len(tags)-1]
-  pullRef := cfg.Image.PullRef(latestTag)
-  unifiedRef := cfg.Image.UnifiedRef(latestTag)
-
-  fmt.Printf("正在拉取镜像 %s ...\n", pullRef)
-  pullCtx := context.Background()
-  pullReader, err := dockerpkg.ImagePull(pullCtx, pullRef)
-  if err != nil {
-    fmt.Fprintf(os.Stderr, "拉取失败: %v\n", err)
-    return
-  }
-  defer pullReader.Close()
-  io.Copy(os.Stdout, pullReader)
-
-  if cfg.Image.IsTencent() && pullRef != unifiedRef {
-    fmt.Printf("重命名镜像: %s -> %s\n", pullRef, unifiedRef)
-    if err := dockerpkg.RetagImage(pullCtx, pullRef, unifiedRef); err != nil {
-      fmt.Fprintf(os.Stderr, "重命名失败: %v\n", err)
-    }
-  }
-  fmt.Printf("镜像 %s 拉取完成\n", latestTag)
 }
 
 func checkPort(port int) bool {
