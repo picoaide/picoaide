@@ -8,6 +8,7 @@ import (
   "path/filepath"
   "regexp"
   "sort"
+  "strings"
   "time"
 
   "gopkg.in/yaml.v3"
@@ -249,6 +250,10 @@ func DeployGroupSkillsToUser(cfg *config.GlobalConfig, username string) {
       }
       srcPath := filepath.Join(skillsDir, skillName)
       dstPath := filepath.Join(targetSkillsDir, skillName)
+      if !strings.HasPrefix(dstPath+"/", targetSkillsDir+"/") {
+        slog.Warn("跳过逃逸路径", "dst", dstPath)
+        continue
+      }
       os.RemoveAll(dstPath)
       if err := util.CopyDir(srcPath, dstPath); err != nil {
         slog.Warn("部署技能到用户失败", "skill", skillName, "username", username, "error", err)

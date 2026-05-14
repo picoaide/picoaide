@@ -105,6 +105,11 @@ func (s *Server) deploySkillToUser(skillName, username string) error {
   }
   srcPath := filepath.Join(skill.SkillsRootDir(), source, skillName)
   targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName)
+  skillsBase := filepath.Join(skill.SkillsRootDir(), source) + "/"
+  userSkillsBase := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills") + "/"
+  if !strings.HasPrefix(srcPath+"/", skillsBase) || !strings.HasPrefix(targetDir+"/", userSkillsBase) {
+    return fmt.Errorf("非法技能路径")
+  }
   if err := os.RemoveAll(targetDir); err != nil {
     return fmt.Errorf("删除旧技能目录失败: %w", err)
   }

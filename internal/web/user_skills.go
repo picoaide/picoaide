@@ -166,6 +166,11 @@ func removeUserSkillDir(cfg *config.GlobalConfig, username, skillName string) {
     return
   }
   targetDir := filepath.Join(user.UserDir(cfg, username), ".picoclaw", "workspace", "skills", skillName)
+  skillsBase := filepath.Join(user.UserDir(cfg, username), ".picoclaw", "workspace", "skills") + "/"
+  if !strings.HasPrefix(targetDir+"/", skillsBase) {
+    slog.Error("非法技能路径", "target", targetDir)
+    return
+  }
   if _, err := os.Stat(targetDir); os.IsNotExist(err) {
     return
   }

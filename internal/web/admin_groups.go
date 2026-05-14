@@ -302,7 +302,10 @@ func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
     }
     if !has {
       targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName)
-      os.RemoveAll(targetDir)
+      skillsBase := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills") + "/"
+      if strings.HasPrefix(targetDir+"/", skillsBase) {
+        os.RemoveAll(targetDir)
+      }
     }
   }
 
