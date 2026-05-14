@@ -8,7 +8,7 @@ import (
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/authsource"
-  "github.com/picoaide/picoaide/internal/config"
+  "github.com/picoaide/picoaide/internal/skill"
 )
 
 func TestWhitelist_GetEmpty(t *testing.T) {
@@ -276,7 +276,7 @@ func TestGroupSkills_BindExpandsToMembers(t *testing.T) {
   }
 
   // 创建技能目录（deploy 需要实际技能文件）
-  skillDir := filepath.Join(config.DefaultWorkDir, "skills", "test-source", "test-skill")
+  skillDir := filepath.Join(skill.SkillsRootDir(), "test-source", "test-skill")
   os.MkdirAll(skillDir, 0755)
   os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test\n---\n# Content\n"), 0644)
 
@@ -318,8 +318,8 @@ func TestGroupSkills_BindExpandsToMembers(t *testing.T) {
 func TestDefaultSkills_ToggleAndList(t *testing.T) {
   env := setupTestServer(t)
 
-  // 创建技能目录（auth.SkillsRootDir 由 InitDB 设置，指向临时目录）
-  skillDir := filepath.Join(auth.SkillsRootDir, "test-source", "default-skill")
+  // 创建技能目录
+  skillDir := filepath.Join(skill.SkillsRootDir(), "test-source", "default-skill")
   os.MkdirAll(skillDir, 0755)
   os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: default-skill\ndescription: Default test\n---\n"), 0644)
 
@@ -367,7 +367,7 @@ func TestDefaultSkills_AppliedToNewUser(t *testing.T) {
   env := setupTestServer(t)
 
   // 创建技能目录
-  skillDir := filepath.Join(auth.SkillsRootDir, "test-source", "default-skill")
+  skillDir := filepath.Join(skill.SkillsRootDir(), "test-source", "default-skill")
   os.MkdirAll(skillDir, 0755)
   os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: default-skill\ndescription: Default test\n---\n"), 0644)
 

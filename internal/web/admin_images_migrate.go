@@ -118,7 +118,7 @@ func (s *Server) handleAdminImageMigrate(c *gin.Context) {
     // 只有原来是 running 状态才重新启动
     if rec.Status == "running" {
       ud := user.UserDir(s.cfg, username)
-      cid, createErr := dockerpkg.CreateContainer(ctx, username, newImage, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
+      cid, createErr := dockerpkg.CreateContainer(ctx, username, newImage, ud, rec.IP, rec.CPULimit, rec.MemoryLimit, rec.MCPToken)
       if createErr != nil {
         failed = append(failed, username+"(创建失败)")
         continue
@@ -376,7 +376,7 @@ func (s *Server) handleAdminImageUpgrade(c *gin.Context) {
     }
     if rec.Status == "running" {
       ud := user.UserDir(s.cfg, username)
-      cid, createErr := dockerpkg.CreateContainer(ctx, username, img, ud, rec.IP, rec.CPULimit, rec.MemoryLimit)
+      cid, createErr := dockerpkg.CreateContainer(ctx, username, img, ud, rec.IP, rec.CPULimit, rec.MemoryLimit, rec.MCPToken)
       if createErr != nil {
         return fmt.Errorf("创建失败: %w", createErr)
       }

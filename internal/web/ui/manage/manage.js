@@ -5,7 +5,7 @@ const $$ = s => document.querySelectorAll(s);
 
 let currentUser = '';
 const sections = Array.from($$('.tabs a')).map(a => a.dataset.section);
-const defaultSection = 'skills';
+const defaultSection = 'welcome';
 
 function getSectionFromPath() {
   const path = window.location.pathname.replace(/\/+$/, '');
@@ -34,7 +34,7 @@ async function navigate(section) {
 
   $$('.tab').forEach(a => a.classList.toggle('active', a.dataset.section === section));
 
-  history.replaceState(null, '', '/manage/' + section);
+  history.replaceState(null, '', '/user/' + section);
 
   try {
     const resp = await fetch('templates/' + section + '.html');

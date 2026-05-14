@@ -50,7 +50,7 @@ function redirectByRole(info) {
     window.location.replace('/initializing');
     return;
   }
-  window.location.replace('/manage');
+  window.location.replace('/user/welcome');
 }
 
 async function checkExistingSession() {

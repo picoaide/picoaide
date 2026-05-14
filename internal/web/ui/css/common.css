@@ -1,8 +1,8 @@
 /* PicoAide — enterprise UI system */
 
 :root {
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
   --primary-light: #eff6ff;
   --primary-dark: #1e3a8a;
   --success: #15803d;
@@ -83,7 +83,7 @@ input, select, textarea {
 input:hover, select:hover, textarea:hover { border-color: #94a3b8; }
 input:focus, select:focus, textarea:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+  box-shadow: 0 0 0 3px rgba(59,130,246,.12);
 }
 input::placeholder, textarea::placeholder { color: #94a3b8; }
 textarea { resize: vertical; min-height: 120px; }
@@ -116,9 +116,9 @@ textarea { resize: vertical; min-height: 120px; }
   background: var(--primary);
   color: #fff;
   border-color: var(--primary);
-  box-shadow: 0 1px 2px rgba(37,99,235,.18);
+  box-shadow: 0 1px 2px rgba(59,130,246,.18);
 }
-.btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); box-shadow: 0 8px 18px rgba(37,99,235,.18); }
+.btn-primary:hover { background: #60a5fa; border-color: #60a5fa; color: #fff; box-shadow: 0 2px 8px rgba(59,130,246,.2); }
 .btn-outline {
   background: var(--surface);
   color: #334155;
@@ -206,7 +206,7 @@ label.toggle-switch,
 }
 .toggle-switch input:focus-visible + .toggle-switch-control,
 .switch:has(input:focus-visible)::before {
-  box-shadow: 0 0 0 3px rgba(37,99,235,.16);
+  box-shadow: 0 0 0 3px rgba(59,130,246,.16);
 }
 .toggle-switch-label {
   min-width: 0;
@@ -556,10 +556,10 @@ tbody tr:hover { background: #f8fbff; }
 .navbar { display: flex; align-items: center; justify-content: space-between; padding: .82rem 1.5rem; background: rgba(255,255,255,.92); border-bottom: 1px solid var(--border); box-shadow: var(--shadow-sm); backdrop-filter: blur(10px); }
 .navbar h1 { display: flex; align-items: center; gap: .65rem; font-size: 1.05rem; color: var(--text); margin: 0; }
 .navbar-right { display: flex; align-items: center; gap: .85rem; font-size: .88rem; color: var(--text-secondary); }
-.tabs { display: flex; gap: .28rem; border-bottom: 1px solid var(--border); margin-bottom: 1.2rem; overflow-x: auto; }
+.tabs { display: flex; gap: .28rem; border-bottom: 1px solid var(--border); margin-bottom: 1.2rem; flex-wrap: wrap; }
 .tab { flex: 0 0 auto; padding: .62rem .95rem; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; font-size: .88rem; font-weight: 700; color: var(--text-muted); cursor: pointer; font-family: var(--font); white-space: nowrap; transition: color var(--transition), border-color var(--transition), background var(--transition); }
 .tab:hover { color: var(--text); background: #f8fafc; }
-.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); border-bottom-width: 2.5px; background: var(--primary-light); }
 .panel { display: none; }
 .panel.active { display: block; }
 .container { max-width: 1040px; margin: 0 auto; padding: 1.25rem 1.5rem; }
@@ -596,7 +596,7 @@ tbody tr:hover { background: #f8fbff; }
 .login-form { max-width: 360px; }
 .login-form .field { margin-bottom: 1rem; }
 .login-form input { height: 42px; border-color: #cbd5e1; background: #fff; }
-.login-submit { width: 100%; height: 42px; margin-top: .25rem; background: var(--primary); border-color: var(--primary); box-shadow: 0 8px 18px rgba(37,99,235,.16); }
+.login-submit { width: 100%; height: 42px; margin-top: .25rem; background: var(--primary); border-color: var(--primary); box-shadow: 0 8px 18px rgba(59,130,246,.16); }
 .login-submit:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
 .login-aside { display: flex; align-items: center; padding: 4.5rem 5rem; background: #0f172a; color: #fff; }
 .login-aside-content { max-width: 720px; }
@@ -622,6 +622,7 @@ tbody tr:hover { background: #f8fbff; }
 .sidebar-nav a { display: flex; align-items: center; padding: .58rem .72rem; margin-bottom: .12rem; color: #475569; font-size: .88rem; font-weight: 700; border-radius: var(--radius-sm); border-left: none; text-decoration: none; transition: all var(--transition); }
 .sidebar-nav a:hover { color: var(--text); background: #f1f5f9; }
 .sidebar-nav a.active { color: var(--primary); background: var(--primary-light); font-weight: 800; }
+.nav-divider { display: block; height: 1px; background: linear-gradient(to right, var(--border), transparent); margin: .45rem .72rem .35rem; opacity: .7; }
 .sidebar-footer { padding: .85rem 1rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: .6rem; font-size: .8rem; color: var(--text-muted); }
 .content { min-width: 0; width: calc(100% - var(--sidebar-w)); max-width: calc(100vw - var(--sidebar-w)); min-height: 100vh; margin-left: var(--sidebar-w); padding: 1.5rem 2rem; overflow-x: hidden; background: var(--bg); }
 
@@ -702,7 +703,7 @@ tbody tr:hover { background: #f8fbff; }
   background: var(--bg);
 }
 .sf-tag-selector .sf-tag-input-wrap:focus-within {
-  border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37,99,235,.12);
+  border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,.12);
 }
 .sf-tag-selector .sf-tag-input-wrap .sf-tag-input {
   flex: 1; border: none; outline: none; padding: .38rem .5rem;

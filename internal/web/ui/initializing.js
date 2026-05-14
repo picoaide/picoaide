@@ -23,7 +23,7 @@ async function pollStatus() {
     if (data.ready) {
       initTitle.textContent = '初始化完成';
       initDetail.textContent = '正在进入个人后台...';
-      window.location.replace('/manage');
+      window.location.replace('/user/welcome');
       return;
     }
     initTitle.textContent = statusText(data);

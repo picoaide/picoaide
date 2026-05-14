@@ -40,6 +40,7 @@ func setupTestServer(t *testing.T) *testEnv {
 
   // 创建临时目录
   tmpDir := t.TempDir()
+  config.DefaultWorkDir = tmpDir
   t.Setenv("PICOAIDE_RULE_CACHE_DIR", filepath.Join(tmpDir, "rules"))
 
   // 初始化数据库

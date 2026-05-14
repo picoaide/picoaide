@@ -499,7 +499,7 @@ func (s *Server) recreateUserContainerWithSharedMounts(username string) error {
 
   // 重建容器
   containerID, err := dockerpkg.CreateContainerWithOptions(ctx, username, rec.Image,
-    userDir, rec.IP, rec.CPULimit, rec.MemoryLimit, false, extraMounts)
+    userDir, rec.IP, rec.CPULimit, rec.MemoryLimit, false, extraMounts, rec.MCPToken)
   if err != nil {
     return fmt.Errorf("重建容器失败: %w", err)
   }

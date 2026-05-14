@@ -312,6 +312,22 @@ func syncSchema() error {
     return err
   }
 
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS user_cookies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    cookies TEXT NOT NULL DEFAULT '',
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(username, domain)
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_cookies_username ON user_cookies(username)`)
+  if err != nil {
+    return err
+  }
+
   return nil
 }
 

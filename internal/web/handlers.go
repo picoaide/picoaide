@@ -365,6 +365,56 @@ func (s *Server) handleCookies(c *gin.Context) {
   writeSuccess(c, "已同步 "+domain+" 的登录状态")
 }
 
+// handleUserCookies 返回当前用户所有已授权的域名列表
+func (s *Server) handleUserCookies(c *gin.Context) {
+  username := s.requireAuth(c)
+  if username == "" {
+    return
+  }
+
+  entries, err := auth.ListCookieDomains(username)
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "读取失败")
+    return
+  }
+
+  // 不暴露 cookie 值给前端
+  type cookieInfo struct {
+    Domain    string `json:"domain"`
+    UpdatedAt string `json:"updated_at"`
+  }
+  list := make([]cookieInfo, len(entries))
+  for i, e := range entries {
+    list[i] = cookieInfo{Domain: e.Domain, UpdatedAt: e.UpdatedAt}
+  }
+
+  writeJSON(c, http.StatusOK, gin.H{
+    "success": true,
+    "list":    list,
+  })
+}
+
+// handleUserCookiesDelete 取消某个域名的授权
+func (s *Server) handleUserCookiesDelete(c *gin.Context) {
+  username := s.requireAuth(c)
+  if username == "" {
+    return
+  }
+
+  domain := strings.TrimSpace(c.PostForm("domain"))
+  if domain == "" {
+    writeError(c, http.StatusBadRequest, "域名不能为空")
+    return
+  }
+
+  if err := auth.DeleteCookie(username, domain); err != nil {
+    writeError(c, http.StatusInternalServerError, "删除失败: "+err.Error())
+    return
+  }
+
+  writeSuccess(c, "已取消 "+domain+" 的授权")
+}
+
 // ============================================================
 // 钉钉配置 Handler
 // ============================================================
