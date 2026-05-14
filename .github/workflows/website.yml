@@ -5,6 +5,7 @@ on:
     paths:
       - 'website/**'
       - 'wrangler.toml'
+      - 'internal/user/picoclaw_rules/**'
   workflow_dispatch:
 
 jobs:
