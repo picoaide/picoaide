@@ -6,6 +6,8 @@ export async function init(ctx) {
   let imageUsersPage = 1;
   let imageUsersSearch = '';
   let imageUsersTotalPages = 1;
+  let isPulling = false;
+  let pullingTag = '';
 
   await loadLocalImages();
   loadRegistryTags();
@@ -50,16 +52,54 @@ export async function init(ctx) {
     document.querySelectorAll('#upgrade-users input[type=checkbox]').forEach(cb => cb.checked = false);
   });
 
+  // 拉取状态轮询（解析 Docker 进度 JSON，显示百分比，拉取完毕刷新一次列表）
+  let pullPollTimer = null;
+  let prevPullRunning = false;
+  function parsePullProgress(msg) {
+    try {
+      var d = JSON.parse(msg);
+      var pct = '';
+      if (d.progressDetail && d.progressDetail.total > 0) {
+        pct = Math.round(d.progressDetail.current / d.progressDetail.total * 100) + '%';
+      }
+      return (d.id || '') + ' ' + (d.status || '') + (pct ? ' ' + pct : '');
+    } catch (e) {
+      return msg;
+    }
+  }
+  async function checkPullStatus() {
+    const data = await Api.get('/api/admin/images/pull-status').catch(function() { return {}; });
+    if (data.running) {
+      prevPullRunning = true;
+      $('#image-pull-indicator')?.classList.remove('hidden');
+      $('#image-pull-indicator .pull-tag').textContent = data.tag || '';
+      $('#image-pull-indicator .pull-msg').textContent = parsePullProgress(data.message);
+      $('#image-pull-indicator .pull-time').textContent = data.started_at || '';
+    } else {
+      $('#image-pull-indicator')?.classList.add('hidden');
+      if (prevPullRunning) {
+        prevPullRunning = false;
+        await loadLocalImages();
+        loadRegistryTags();
+      }
+    }
+  }
+  pullPollTimer = setInterval(checkPullStatus, 3000);
+
   async function loadLocalImages() {
-    const data = await Api.get('/api/admin/images').catch(() => ({ images: [] }));
+    const data = await Api.get('/api/admin/images').catch(() => ({ images: [], pulling: false }));
     const tbody = $('#images-local');
     tbody.innerHTML = '';
     localImages = data.images || [];
     if (localImages.length === 0) {
-      $('#images-local-empty')?.classList.remove('hidden');
+      updatePullIndicator(data);
+      if (!isPulling) {
+        $('#images-local-empty')?.classList.remove('hidden');
+      }
       return;
     }
     $('#images-local-empty')?.classList.add('hidden');
+    updatePullIndicator(data);
     for (const img of localImages) {
       const tags = (img.repo_tags || []).join(', ') || '(无标签)';
       const userCount = img.user_count || 0;
@@ -76,18 +116,39 @@ export async function init(ctx) {
         '<td>' + userBtnHtml + '</td>' +
         actionsTd;
       for (const tag of (img.repo_tags || [])) {
-        const btn = document.createElement('button');
-        btn.className = 'btn btn-sm btn-danger';
-        btn.textContent = '删除';
-        btn.dataset.image = tag;
-        btn.addEventListener('click', () => deleteImage(tag));
-        tr.querySelector('td:last-child .btn-group').appendChild(btn);
+        const changeBtn = document.createElement('button');
+        changeBtn.className = 'btn btn-sm btn-primary';
+        changeBtn.textContent = '变更版本';
+        changeBtn.dataset.change = tag;
+        changeBtn.addEventListener('click', () => openUpgradeModal(tag));
+        tr.querySelector('td:last-child .btn-group').appendChild(changeBtn);
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn btn-sm btn-danger';
+        delBtn.textContent = '删除';
+        delBtn.dataset.image = tag;
+        delBtn.addEventListener('click', () => deleteImage(tag));
+        tr.querySelector('td:last-child .btn-group').appendChild(delBtn);
       }
       tbody.appendChild(tr);
     }
     tbody.querySelectorAll('[data-users-img]').forEach(btn => {
       btn.addEventListener('click', () => showImageUsers(btn.dataset.usersImg));
     });
+  }
+
+  function updatePullIndicator(data) {
+    const indicator = $('#image-pull-indicator');
+    if (!indicator) return;
+    isPulling = data.pulling || false;
+    pullingTag = data.pulling_tag || '';
+    if (isPulling) {
+      indicator.classList.remove('hidden');
+      indicator.querySelector('.pull-tag').textContent = pullingTag;
+      indicator.querySelector('.pull-msg').textContent = data.pull_status?.message || '正在拉取...';
+      indicator.querySelector('.pull-time').textContent = data.pull_status?.started_at || '';
+    } else {
+      indicator.classList.add('hidden');
+    }
   }
 
   async function loadRegistryTags() {
@@ -124,91 +185,33 @@ export async function init(ctx) {
 
     for (const tag of tags) {
       const exists = localTags.has(tag);
-      // 本地存在其他版本的 picoaide 镜像就显示升级按钮
-      const hasOtherVersions = Array.from(localTags).some(t => t !== tag);
+      const isCurrentPull = isPulling && pullingTag === tag;
       const tr = document.createElement('tr');
-      const statusHtml = exists
-        ? '<span class="badge badge-ok">已存在</span>'
-        : '<span class="badge badge-muted">未拉取</span>';
-      const upgradeBtnHtml = hasOtherVersions
-        ? '<button class="btn btn-sm btn-primary" data-upgrade="' + esc(tag) + '" style="margin-left:4px">升级</button>'
-        : '';
+      let statusHtml;
+      if (isCurrentPull) {
+        statusHtml = '<span class="badge badge-warn">拉取中...</span>';
+      } else if (exists) {
+        statusHtml = '<span class="badge badge-ok">已存在</span>';
+      } else {
+        statusHtml = '<span class="badge badge-muted">未拉取</span>';
+      }
+      const pullDisabled = isPulling ? ' disabled' : '';
       tr.innerHTML =
         '<td style="font-family:monospace">' + esc(tag) + '</td>' +
         '<td>' + statusHtml + '</td>' +
-        '<td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline" data-tag="' + esc(tag) + '">' + (exists ? '重新拉取' : '拉取') + '</button>' + upgradeBtnHtml + '</div></td>';
+        '<td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline"' + pullDisabled + ' data-tag="' + esc(tag) + '">' + (isCurrentPull ? '拉取中...' : (exists ? '重新拉取' : '拉取')) + '</button></div></td>';
       tbody.appendChild(tr);
     }
     tbody.querySelectorAll('[data-tag]').forEach(btn => {
       btn.addEventListener('click', () => pullImage(btn.dataset.tag));
     });
-    tbody.querySelectorAll('[data-upgrade]').forEach(btn => {
-      btn.addEventListener('click', () => openUpgradeModal(btn.dataset.upgrade));
-    });
   }
 
   async function pullImage(tag) {
-    const modal = $('#image-pull-modal');
-    const progress = $('#pull-progress');
-    const nameEl = $('#pull-image-name');
-
-    nameEl.textContent = tag;
-    progress.innerHTML = '';
-    modal.classList.remove('hidden');
-
-    const csrf = await getCSRF();
-    const formData = new FormData();
-    formData.append('tag', tag);
-    formData.append('csrf_token', csrf);
-
-    try {
-      const serverBase = await getServerUrl();
-      const response = await fetch(serverBase + '/api/admin/images/pull', {
-        method: 'POST',
-        body: formData,
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        progress.innerHTML += '<div style="color:#e74c3c">拉取失败: ' + response.status + '</div>';
-        return;
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            try {
-              const obj = JSON.parse(data);
-              if (obj.status === 'done') {
-                progress.innerHTML += '<div style="color:#2ecc71">拉取完成!</div>';
-                await loadLocalImages();
-                loadRegistryTags();
-                break;
-              }
-              if (obj.status) {
-                progress.innerHTML += '<div>' + esc(obj.status) + (obj.progress ? ' ' + esc(obj.progress) : '') + '</div>';
-              }
-            } catch {
-              progress.innerHTML += '<div>' + esc(data) + '</div>';
-            }
-            progress.scrollTop = progress.scrollHeight;
-          }
-        }
-      }
-    } catch (err) {
-      progress.innerHTML += '<div style="color:#e74c3c">错误: ' + esc(err.message) + '</div>';
+    const res = await Api.post('/api/admin/images/pull', { tag: tag });
+    if (!res.success) {
+      showMsg('#images-local-msg', res.error || '拉取失败', false);
+      return;
     }
   }
 

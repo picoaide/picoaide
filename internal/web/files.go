@@ -29,6 +29,7 @@ type FileEntry struct {
   SizeStr string `json:"size_str"`
   ModTime string `json:"mod_time"`
   RelPath string `json:"rel_path"`
+  Tag     string `json:"tag,omitempty"`
 }
 
 // Crumb 代表面包屑导航中的一条记录
@@ -145,8 +146,16 @@ func (s *Server) handleFiles(c *gin.Context) {
       return
     }
 
+    // 获取用户可访问的共享文件夹
+    folders, _ := auth.GetAccessibleSharedFolders(username)
+    hasShares := len(folders) > 0
+
     var fileEntries []FileEntry
     for _, e := range dirEntries {
+      // 如果已挂载共享文件夹，隐藏物理 share 目录避免重复
+      if hasShares && e.Name() == "share" && e.IsDir() {
+        continue
+      }
       fi, _ := e.Info()
       if fi == nil {
         continue
@@ -158,11 +167,11 @@ func (s *Server) handleFiles(c *gin.Context) {
         SizeStr: util.FormatSize(fi.Size()),
         ModTime: fi.ModTime().Format("2006-01-02 15:04"),
         RelPath: e.Name(),
+        Tag:     picoclawWorkspaceTag(e.Name(), e.IsDir()),
       })
     }
 
     // 追加用户可访问的共享文件夹
-    folders, _ := auth.GetAccessibleSharedFolders(username)
     for _, sf := range folders {
       fileEntries = append(fileEntries, FileEntry{
         Name:    "share/" + sf.Name,
@@ -170,6 +179,7 @@ func (s *Server) handleFiles(c *gin.Context) {
         SizeStr: "共享文件夹",
         ModTime: "-",
         RelPath: "share/" + sf.Name,
+        Tag:     "共享",
       })
     }
 
@@ -280,11 +290,6 @@ func (s *Server) handleFileUpload(c *gin.Context) {
   }
   defer fr.root.Close()
 
-  if fr.isShare {
-    writeError(c, http.StatusForbidden, "共享文件夹不支持上传操作")
-    return
-  }
-
   info, err := fr.root.Stat(fr.safePath)
   if err != nil || !info.IsDir() {
     writeError(c, http.StatusBadRequest, "目标目录不存在")
@@ -367,11 +372,6 @@ func (s *Server) handleFileDelete(c *gin.Context) {
   }
   defer fr.root.Close()
 
-  if fr.isShare {
-    writeError(c, http.StatusForbidden, "共享文件夹不支持删除操作")
-    return
-  }
-
   if fr.safePath == "." {
     writeError(c, http.StatusBadRequest, "不能删除工作区根目录")
     return
@@ -422,11 +422,6 @@ func (s *Server) handleFileMkdir(c *gin.Context) {
     return
   }
   defer fr.root.Close()
-
-  if fr.isShare {
-    writeError(c, http.StatusForbidden, "共享文件夹不支持创建目录操作")
-    return
-  }
 
   if err := fr.root.Mkdir(filepath.Join(fr.safePath, name), 0755); err != nil {
     writeError(c, http.StatusInternalServerError, "创建目录失败")
@@ -505,11 +500,6 @@ func (s *Server) handleFileEditSave(c *gin.Context) {
     return
   }
   defer fr.root.Close()
-
-  if fr.isShare {
-    writeError(c, http.StatusForbidden, "共享文件夹不支持编辑保存操作")
-    return
-  }
 
   // 只允许编辑文本文件
   if !util.IsTextFile(fr.safePath) {

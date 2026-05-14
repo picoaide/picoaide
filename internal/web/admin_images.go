@@ -97,13 +97,17 @@ func (s *Server) handleAdminImages(c *gin.Context) {
     list = []ImageInfo{}
   }
 
+  ps := getImagePullStatus()
   writeJSON(c, http.StatusOK, struct {
-    Success bool        `json:"success"`
-    Images  []ImageInfo `json:"images"`
-  }{true, list})
+    Success    bool          `json:"success"`
+    Images     []ImageInfo   `json:"images"`
+    Pulling    bool          `json:"pulling"`
+    PullingTag string        `json:"pulling_tag,omitempty"`
+    PullStatus ImagePullTask `json:"pull_status"`
+  }{true, list, ps.Running, ps.Tag, ps})
 }
 
-// handleAdminImagePull 拉取镜像（SSE 流式推送）
+// handleAdminImagePull 拉取镜像（SSE 流式推送，含防重复）
 func (s *Server) handleAdminImagePull(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
@@ -117,6 +121,11 @@ func (s *Server) handleAdminImagePull(c *gin.Context) {
     return
   }
 
+  if getImagePullStatus().Running {
+    writeError(c, http.StatusConflict, "已有镜像拉取任务进行中，请稍后再试")
+    return
+  }
+
   tag := c.PostForm("tag")
   if tag == "" {
     writeError(c, http.StatusBadRequest, "标签参数不能为空")
@@ -125,6 +134,7 @@ func (s *Server) handleAdminImagePull(c *gin.Context) {
 
   pullRef := s.cfg.Image.PullRef(tag)
   unifiedRef := s.cfg.Image.UnifiedRef(tag)
+  startImagePull(tag)
 
   // SSE 响应
   c.Writer.Header().Set("Content-Type", "text/event-stream")
@@ -138,6 +148,7 @@ func (s *Server) handleAdminImagePull(c *gin.Context) {
   ctx := context.Background()
   reader, err := dockerpkg.ImagePull(ctx, pullRef)
   if err != nil {
+    failImagePull(err.Error())
     fmt.Fprintf(c.Writer, "data: {\"status\":\"error\",\"error\":\"%s\"}\n\n", err.Error())
     flush()
     return
@@ -148,7 +159,9 @@ func (s *Server) handleAdminImagePull(c *gin.Context) {
   for {
     n, err := reader.Read(buf)
     if n > 0 {
-      fmt.Fprintf(c.Writer, "data: %s\n\n", buf[:n])
+      msg := string(buf[:n])
+      updateImagePull(msg)
+      fmt.Fprintf(c.Writer, "data: %s\n\n", msg)
       flush()
     }
     if err != nil {
@@ -158,17 +171,30 @@ func (s *Server) handleAdminImagePull(c *gin.Context) {
 
   // 腾讯云模式：拉取后 retag 为统一名称
   if s.cfg.Image.IsTencent() && pullRef != unifiedRef {
-    fmt.Fprintf(c.Writer, "data: {\"status\":\"重命名镜像: %s -> %s\"}\n\n", pullRef, unifiedRef)
+    msg := fmt.Sprintf("重命名镜像: %s -> %s", pullRef, unifiedRef)
+    updateImagePull(msg)
+    fmt.Fprintf(c.Writer, "data: {\"status\":\"%s\"}\n\n", msg)
     flush()
     if err := dockerpkg.RetagImage(ctx, pullRef, unifiedRef); err != nil {
-      fmt.Fprintf(c.Writer, "data: {\"status\":\"error\",\"error\":\"重命名失败: %s\"}\n\n", err.Error())
+      errMsg := fmt.Sprintf("重命名失败: %s", err.Error())
+      failImagePull(errMsg)
+      fmt.Fprintf(c.Writer, "data: {\"status\":\"error\",\"error\":\"%s\"}\n\n", errMsg)
       flush()
       return
     }
   }
 
+  finishImagePull()
   fmt.Fprintf(c.Writer, "data: {\"status\":\"done\"}\n\n")
   flush()
+}
+
+// handleAdminImagePullStatus 返回当前镜像拉取任务状态
+func (s *Server) handleAdminImagePullStatus(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
+    return
+  }
+  writeJSON(c, http.StatusOK, getImagePullStatus())
 }
 
 // handleAdminImageDelete 删除本地镜像（检查用户依赖）

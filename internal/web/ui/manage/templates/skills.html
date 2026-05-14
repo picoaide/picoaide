@@ -1,0 +1,21 @@
+<div class="surface-panel">
+  <div class="toolbar" style="padding:.85rem 1rem;border-bottom:1px solid var(--border-light)">
+    <div>
+      <div class="toolbar-title" style="font-size:1.05rem">技能中心</div>
+      <div class="toolbar-subtitle">浏览和安装企业提供的 AI 技能，自安装的技能可随时卸载</div>
+    </div>
+  </div>
+  <div style="padding:.65rem 1rem;border-bottom:1px solid var(--border-light)">
+    <div class="list-search">
+      <input type="search" id="skills-search" placeholder="搜索技能名称或描述">
+      <button class="btn btn-outline btn-sm" id="skills-search-btn">搜索</button>
+    </div>
+  </div>
+  <div id="skills-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:.85rem;padding:1rem"></div>
+  <div id="skills-empty" class="text-muted text-center hidden" style="padding:2.5rem 1rem">
+    <div style="font-size:2.5rem;margin-bottom:.65rem;opacity:.4">&#9881;</div>
+    <div style="font-weight:600;margin-bottom:.25rem">暂无可用技能</div>
+    <div style="font-size:.85rem">管理员尚未安装任何技能</div>
+  </div>
+  <div id="skills-msg" class="msg"></div>
+</div>

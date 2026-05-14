@@ -18,6 +18,6 @@ hugo --minify
 
 ## Cloudflare Pages 配置
 
-- **构建命令**: `cd website && hugo --minify`
+- **构建命令**: `cd website && mkdir -p static/rules && cp -r ../internal/user/picoclaw_rules static/rules/picoclaw && hugo --minify`
 - **输出目录**: `website/public`
 - **环境变量**: `HUGO_VERSION = 0.147.5`

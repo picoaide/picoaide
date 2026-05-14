@@ -203,6 +203,7 @@ func syncSchema() error {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     skill_name TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT '',
     UNIQUE(group_id, skill_name)
   )`)
   if err != nil {
@@ -227,8 +228,42 @@ func syncSchema() error {
     return err
   }
 
+  // 技能库表
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS skills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS user_skills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    skill_name TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '2000-01-01 00:00:00',
+    UNIQUE(username, skill_name)
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_skills_username ON user_skills(username)`)
+  if err != nil {
+    return err
+  }
+  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_skills_skill_name ON user_skills(skill_name)`)
+  if err != nil {
+    return err
+  }
+
   // 迁移：旧数据库 groups 表没有 parent_id 列
   engine.Exec(`ALTER TABLE groups ADD COLUMN parent_id INTEGER REFERENCES groups(id) ON DELETE SET NULL`)
+  // 迁移：group_skills / user_skills 加 source 列
+  engine.Exec(`ALTER TABLE group_skills ADD COLUMN source TEXT NOT NULL DEFAULT ''`)
+  engine.Exec(`ALTER TABLE user_skills ADD COLUMN source TEXT NOT NULL DEFAULT ''`)
+  engine.Exec(`ALTER TABLE user_skills ADD COLUMN updated_at TEXT NOT NULL DEFAULT '2000-01-01 00:00:00'`)
 
   _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS shared_folders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

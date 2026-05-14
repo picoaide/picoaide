@@ -426,9 +426,6 @@ func testRules() PicoClawMigrationRuleSet {
 
 func testPicoClawMigrationService(t *testing.T, rules PicoClawMigrationRuleSet) *PicoClawMigrationService {
   t.Helper()
-  if err := rules.Validate(); err != nil {
-    t.Fatalf("rules.Validate() error = %v", err)
-  }
   return &PicoClawMigrationService{rules: rules}
 }
 

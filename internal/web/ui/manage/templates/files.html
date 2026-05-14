@@ -1,0 +1,28 @@
+<div class="card">
+  <div class="card-header">文件管理</div>
+  <nav id="breadcrumb" class="text-sm mb-1"></nav>
+  <div class="toolbar">
+    <button class="btn btn-sm btn-outline" id="mkdir-btn">新建目录</button>
+    <div class="inline-file" style="flex:1;max-width:560px">
+      <div class="file-summary" id="upload-file-name">未选择文件</div>
+      <div class="btn-group">
+        <label class="btn btn-sm btn-outline" style="cursor:pointer">选择文件<input type="file" id="upload-input" class="hidden"></label>
+        <button class="btn btn-sm btn-primary" id="upload-btn" disabled>上传到当前目录</button>
+      </div>
+    </div>
+  </div>
+  <div id="file-list"></div>
+  <div id="file-msg" class="msg"></div>
+</div>
+
+<div id="tab-editor" class="hidden">
+  <div class="card">
+    <div class="row mb-1">
+      <button class="btn btn-outline" id="editor-back">返回</button>
+      <strong id="editor-filename" style="flex:1"></strong>
+      <button class="btn btn-primary" id="editor-save">保存</button>
+    </div>
+    <div id="editor-msg" class="msg"></div>
+    <textarea id="editor-content" spellcheck="false" style="font-family:monospace;height:480px"></textarea>
+  </div>
+</div>

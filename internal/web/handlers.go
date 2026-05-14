@@ -159,6 +159,14 @@ func (s *Server) handleLogin(c *gin.Context) {
     }
     s.setSessionCookie(c, s.createSessionToken(username), 86400)
     logger.Audit("user.login", "username", username, "method", "local")
+
+    // 超管首次登录成功，删除 secret 文件
+    if isSuperadmin {
+      if wd, err := os.Getwd(); err == nil {
+        os.Remove(filepath.Join(wd, "secret"))
+      }
+    }
+
     writeJSON(c, http.StatusOK, struct {
       Success  bool   `json:"success"`
       Username string `json:"username"`

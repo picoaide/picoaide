@@ -11,21 +11,83 @@ import (
 )
 
 // ============================================================
-// 批量任务队列
+// 镜像拉取任务状态跟踪
+// ============================================================
+
+type ImagePullTask struct {
+  Running   bool   `json:"running"`
+  Tag       string `json:"tag"`
+  Message   string `json:"message"`
+  Error     string `json:"error,omitempty"`
+  StartedAt string `json:"started_at,omitempty"`
+}
+
+var imagePullStatus struct {
+  mu     sync.Mutex
+  status ImagePullTask
+}
+
+func startImagePull(tag string) {
+  imagePullStatus.mu.Lock()
+  defer imagePullStatus.mu.Unlock()
+  imagePullStatus.status = ImagePullTask{
+    Running:   true,
+    Tag:       tag,
+    Message:   "正在拉取...",
+    StartedAt: time.Now().Format("2006-01-02 15:04:05"),
+  }
+}
+
+func updateImagePull(msg string) {
+  imagePullStatus.mu.Lock()
+  defer imagePullStatus.mu.Unlock()
+  if imagePullStatus.status.Running {
+    imagePullStatus.status.Message = msg
+  }
+}
+
+func finishImagePull() {
+  imagePullStatus.mu.Lock()
+  defer imagePullStatus.mu.Unlock()
+  imagePullStatus.status.Running = false
+  imagePullStatus.status.Message = "拉取完成"
+  imagePullStatus.status.Error = ""
+}
+
+func failImagePull(errMsg string) {
+  imagePullStatus.mu.Lock()
+  defer imagePullStatus.mu.Unlock()
+  imagePullStatus.status.Running = false
+  imagePullStatus.status.Error = errMsg
+  imagePullStatus.status.Message = "拉取失败: " + errMsg
+}
+
+func getImagePullStatus() ImagePullTask {
+  imagePullStatus.mu.Lock()
+  defer imagePullStatus.mu.Unlock()
+  return imagePullStatus.status
+}
+
+// ============================================================
+// 批量任务队列（支持排队）
 // ============================================================
 
 const (
-  taskInterval = 2 * time.Second // 每个用户操作间隔
+  taskInterval = 2 * time.Second
   taskQueueSize = 64
 )
 
-// TaskItem 队列中的单个任务项
 type TaskItem struct {
   Username string
   Fn       func(username string) error
 }
 
-// TaskStatus 任务状态
+type pendingTask struct {
+  taskType string
+  users    []string
+  fn       func(username string) error
+}
+
 type TaskStatus struct {
   ID        string `json:"id"`
   Type      string `json:"type"`
@@ -35,35 +97,25 @@ type TaskStatus struct {
   Running   bool   `json:"running"`
   Message   string `json:"message"`
   StartedAt string `json:"started_at,omitempty"`
+  Pending   int    `json:"pending"`
 }
 
-// taskQueue 全局任务队列
 var taskQueue struct {
-  mu     sync.Mutex
-  items  chan TaskItem
-  status *TaskStatus
-  active int32 // 原子标记：1=正在处理
-  done   int32
-  failed int32
-  total  int32
+  mu      sync.Mutex
+  items   chan TaskItem
+  pending []pendingTask
+  status  *TaskStatus
+  active  int32
+  done    int32
+  failed  int32
+  total   int32
 }
 
 func init() {
   taskQueue.items = make(chan TaskItem, taskQueueSize)
 }
 
-// enqueueTask 提交批量任务到队列，返回任务 ID
-// 跳过超管用户
 func enqueueTask(taskType string, users []string, fn func(username string) error) (string, error) {
-  taskQueue.mu.Lock()
-  defer taskQueue.mu.Unlock()
-
-  // 已有任务在运行
-  if atomic.LoadInt32(&taskQueue.active) == 1 {
-    return "", fmt.Errorf("已有任务正在执行，请等待完成后再试")
-  }
-
-  // 过滤超管
   var filtered []string
   for _, u := range users {
     if auth.IsSuperadmin(u) {
@@ -71,9 +123,22 @@ func enqueueTask(taskType string, users []string, fn func(username string) error
     }
     filtered = append(filtered, u)
   }
-
   if len(filtered) == 0 {
     return "", fmt.Errorf("没有可操作的用户")
+  }
+
+  taskQueue.mu.Lock()
+
+  if atomic.LoadInt32(&taskQueue.active) == 1 {
+    taskQueue.pending = append(taskQueue.pending, pendingTask{
+      taskType: taskType,
+      users:    filtered,
+      fn:       fn,
+    })
+    taskID := fmt.Sprintf("%s-%d", taskType, time.Now().Unix())
+    slog.Info("批量任务已排队", "task_id", taskID, "total", len(filtered))
+    taskQueue.mu.Unlock()
+    return taskID, nil
   }
 
   taskID := fmt.Sprintf("%s-%d", taskType, time.Now().Unix())
@@ -88,12 +153,11 @@ func enqueueTask(taskType string, users []string, fn func(username string) error
     Total:     len(filtered),
     Running:   true,
     StartedAt: time.Now().Format("2006-01-02 15:04:05"),
+    Pending:   len(taskQueue.pending),
   }
+  taskQueue.mu.Unlock()
 
-  // 启动后台处理
   go processQueue(fn)
-
-  // 投递任务项
   go func() {
     for _, u := range filtered {
       taskQueue.items <- TaskItem{Username: u, Fn: fn}
@@ -104,7 +168,6 @@ func enqueueTask(taskType string, users []string, fn func(username string) error
   return taskID, nil
 }
 
-// processQueue 消费队列中的任务
 func processQueue(fn func(username string) error) {
   total := atomic.LoadInt32(&taskQueue.total)
   for {
@@ -125,7 +188,6 @@ func processQueue(fn func(username string) error) {
     failed := atomic.LoadInt32(&taskQueue.failed)
     processed := done + failed
 
-    // 更新状态消息
     taskQueue.mu.Lock()
     if taskQueue.status != nil {
       taskQueue.status.Done = int(done)
@@ -136,16 +198,12 @@ func processQueue(fn func(username string) error) {
     }
     taskQueue.mu.Unlock()
 
-    // 全部处理完成
     if processed >= total {
       break
     }
-
-    // 间隔避免拥堵
     time.Sleep(taskInterval)
   }
 
-  // 标记完成
   taskQueue.mu.Lock()
   atomic.StoreInt32(&taskQueue.active, 0)
   if taskQueue.status != nil {
@@ -155,22 +213,50 @@ func processQueue(fn func(username string) error) {
     taskQueue.status.Done = int(done)
     taskQueue.status.Failed = int(failed)
     taskQueue.status.Message = fmt.Sprintf("完成：%d 成功，%d 失败", done, failed)
+    taskQueue.status.Pending = len(taskQueue.pending)
   }
-  taskQueue.mu.Unlock()
 
+  if len(taskQueue.pending) > 0 {
+    next := taskQueue.pending[0]
+    taskQueue.pending = taskQueue.pending[1:]
+
+    atomic.StoreInt32(&taskQueue.total, int32(len(next.users)))
+    atomic.StoreInt32(&taskQueue.done, 0)
+    atomic.StoreInt32(&taskQueue.failed, 0)
+    atomic.StoreInt32(&taskQueue.active, 1)
+
+    taskQueue.status = &TaskStatus{
+      ID:        fmt.Sprintf("%s-%d", next.taskType, time.Now().Unix()),
+      Type:      next.taskType,
+      Total:     len(next.users),
+      Running:   true,
+      StartedAt: time.Now().Format("2006-01-02 15:04:05"),
+      Pending:   len(taskQueue.pending),
+    }
+    taskQueue.mu.Unlock()
+
+    go processQueue(next.fn)
+    go func() {
+      for _, u := range next.users {
+        taskQueue.items <- TaskItem{Username: u, Fn: next.fn}
+      }
+    }()
+    return
+  }
+
+  taskQueue.mu.Unlock()
   slog.Info("批量任务完成", "done", taskQueue.done, "failed", taskQueue.failed)
 }
 
-// getTaskStatus 返回当前任务状态
 func getTaskStatus() *TaskStatus {
   taskQueue.mu.Lock()
   defer taskQueue.mu.Unlock()
   if taskQueue.status == nil {
     return &TaskStatus{Running: false}
   }
-  // 刷新原子计数
   s := *taskQueue.status
   s.Done = int(atomic.LoadInt32(&taskQueue.done))
   s.Failed = int(atomic.LoadInt32(&taskQueue.failed))
+  s.Pending = len(taskQueue.pending)
   return &s
 }

@@ -76,19 +76,23 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
     serveHTML(c, "initializing.html")
   })
   r.GET("/manage", func(c *gin.Context) {
-    if !requireManageUser(c) {
-      return
-    }
-    username := s.getSessionUser(c)
-    if username != "" && auth.IsExternalUser(username) && !s.userEnvironmentReady(username) {
-      c.Redirect(http.StatusFound, "/initializing")
-      return
-    }
-    serveHTML(c, "manage.html")
+    c.Redirect(http.StatusMovedPermanently, "/manage/channels")
   })
-  r.GET("/manage/", func(c *gin.Context) {
-    c.Redirect(http.StatusMovedPermanently, "/manage")
-  })
+  manageSections := []string{"skills", "channels", "files", "teamspace", "password"}
+  for _, section := range manageSections {
+    sectionPath := "/manage/" + section
+    r.GET(sectionPath, func(c *gin.Context) {
+      if !requireManageUser(c) {
+        return
+      }
+      username := s.getSessionUser(c)
+      if username != "" && auth.IsExternalUser(username) && !s.userEnvironmentReady(username) {
+        c.Redirect(http.StatusFound, "/initializing")
+        return
+      }
+      serveHTML(c, "manage/index.html")
+    })
+  }
   r.GET("/admin", func(c *gin.Context) {
     c.Redirect(http.StatusMovedPermanently, "/admin/dashboard")
   })
@@ -106,7 +110,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
     })
   }
 
-  staticPrefixes := []string{"/css/", "/js/", "/images/", "/admin/modules/", "/admin/templates/"}
+  staticPrefixes := []string{"/css/", "/js/", "/images/", "/admin/modules/", "/admin/templates/", "/manage/modules/", "/manage/templates/"}
   for _, prefix := range staticPrefixes {
     r.GET(prefix+"*filepath", func(c *gin.Context) {
       cleanPath := strings.TrimPrefix(c.Request.URL.Path, "/")
@@ -114,6 +118,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
       serveFile(c)
     })
   }
+  r.GET("/manage/manage.js", serveFile)
   r.GET("/manage.js", serveFile)
   r.GET("/login.js", serveFile)
   r.GET("/initializing.js", serveFile)

@@ -15,6 +15,7 @@ import (
 func testInitAuthDB(t *testing.T) string {
   t.Helper()
   tmpDir := t.TempDir()
+  config.DefaultWorkDir = tmpDir
   auth.ResetDB()
   if err := auth.InitDB(tmpDir); err != nil {
     t.Fatalf("InitDB: %v", err)

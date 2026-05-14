@@ -6,16 +6,44 @@ export async function init(ctx) {
   function initTagSel(prefix) {
     var input = document.getElementById(prefix + '-input');
     var dd = document.getElementById(prefix + '-dropdown');
+    var wrap = document.getElementById(prefix + '-wrap');
+    var arrow = document.getElementById(prefix + '-arrow');
     if (!input) return;
 
-    input.addEventListener('focus', render);
-    input.addEventListener('blur', function() { setTimeout(function() { dd.classList.remove('open'); }, 200); });
+    var suppressFocus = false;
+
+    function openDrop() { if (!dd.classList.contains('open')) { render(); dd.classList.add('open'); if (arrow) arrow.classList.add('open'); } }
+    function closeDrop() { dd.classList.remove('open'); if (arrow) arrow.classList.remove('open'); }
+
+    if (arrow) arrow.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+      if (dd.classList.contains('open')) closeDrop();
+      else { openDrop(); input.focus(); }
+    });
+    if (wrap) wrap.addEventListener('mousedown', function(e) {
+      if (e.target === arrow) return;
+      e.preventDefault(); input.focus();
+    });
+    input.addEventListener('focus', function() {
+      if (suppressFocus) { suppressFocus = false; return; }
+      openDrop();
+    });
+    input.addEventListener('blur', function() {
+      suppressFocus = true;
+      closeDrop();
+      setTimeout(function() { suppressFocus = false; }, 0);
+    });
     input.addEventListener('input', render);
     input.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') { e.preventDefault(); var hl = dd.querySelector('.highlighted'); if (hl) { pick(hl); render(); } }
+      if (e.key === 'Escape') { toggleDrop(false); input.blur(); return; }
+      if (e.key === 'Enter') {
+        e.preventDefault(); var hl = dd.querySelector('.highlighted');
+        if (hl) { toggleItem(hl); render(); }
+        return;
+      }
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
-        var items = dd.querySelectorAll('.sf-tag-option');
+        var items = dd.querySelectorAll('.sf-tag-option:not(.disabled)');
         if (!items.length) return;
         var cur = dd.querySelector('.highlighted'), idx = -1;
         for (var i = 0; i < items.length; i++) { if (items[i] === cur) { idx = i; break; } }
@@ -25,13 +53,14 @@ export async function init(ctx) {
       }
     });
 
-    function pick(el) {
+    function toggleItem(el) {
       var ids = JSON.parse(input.dataset.selected || '[]');
       var id = Number(el.dataset.id), name = el.dataset.name;
-      if (ids.some(function(x) { return x.id === id; })) return;
-      ids.push({id: id, name: name});
+      var idx = ids.findIndex(function(x) { return x.id === id; });
+      if (idx >= 0) ids.splice(idx, 1);
+      else ids.push({id: id, name: name});
       input.dataset.selected = JSON.stringify(ids);
-      renderChips(); input.value = ''; input.focus();
+      renderChips();
     }
 
     function render() {
@@ -39,14 +68,17 @@ export async function init(ctx) {
       var q = input.value.trim().toLowerCase();
       if (q) groups = allGroups.filter(function(g) { return g.name.toLowerCase().indexOf(q) !== -1; });
       var sel = {}; JSON.parse(input.dataset.selected || '[]').forEach(function(x) { sel[x.id] = true; });
-      var avail = groups.filter(function(g) { return !sel[g.id]; });
-      if (!avail.length) { dd.innerHTML = ''; dd.classList.remove('open'); return; }
-      dd.innerHTML = avail.map(function(g) { return '<div class="sf-tag-option" data-id="' + g.id + '" data-name="' + esc(g.name) + '">' + esc(g.name) + '</div>'; }).join('');
-      var fst = dd.querySelector('.sf-tag-option'); if (fst) fst.classList.add('highlighted');
+      if (!groups.length) { dd.innerHTML = '<div class="sf-tag-option disabled">无匹配组</div>'; dd.classList.add('open'); if (arrow) arrow.classList.add('open'); return; }
+      dd.innerHTML = groups.map(function(g) {
+        var checked = sel[g.id];
+        return '<div class="sf-tag-option' + (checked ? ' highlighted' : '') + '" data-id="' + g.id + '" data-name="' + esc(g.name) + '">' +
+          '<span class="sf-tag-opt-check' + (checked ? ' checked' : '') + '"></span>' +
+          esc(g.name) + '</div>';
+      }).join('');
       [].forEach.call(dd.querySelectorAll('.sf-tag-option'), function(el) {
-        el.addEventListener('mousedown', function(e) { e.preventDefault(); pick(el); render(); });
+        el.addEventListener('mousedown', function(e) { e.preventDefault(); toggleItem(el); render(); });
       });
-      dd.classList.add('open');
+      dd.classList.add('open'); if (arrow) arrow.classList.add('open');
     }
 
     function renderChips() {
@@ -55,14 +87,12 @@ export async function init(ctx) {
       if (!ids.length) { chips.innerHTML = '<span class="text-sm text-muted">未选择</span>'; return; }
       chips.innerHTML = ids.map(function(x) { return '<span class="chip">' + esc(x.name) + '<button type="button" class="chip-remove" data-id="' + x.id + '">&times;</button></span>'; }).join('');
       [].forEach.call(chips.querySelectorAll('.chip-remove'), function(btn) {
-        btn.addEventListener('click', function() {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
           var xid = Number(btn.dataset.id);
           var cur = JSON.parse(input.dataset.selected || '[]');
           input.dataset.selected = JSON.stringify(cur.filter(function(c) { return c.id !== xid; }));
-          var upd = document.getElementById(prefix + '-chips');
-          var remain = JSON.parse(input.dataset.selected || '[]');
-          if (!remain.length) { upd.innerHTML = '<span class="text-sm text-muted">未选择</span>'; return; }
-          upd.innerHTML = remain.map(function(x) { return '<span class="chip">' + esc(x.name) + '<button type="button" class="chip-remove" data-id="' + x.id + '">&times;</button></span>'; }).join('');
+          renderChips();
         });
       });
     }
@@ -81,7 +111,8 @@ export async function init(ctx) {
     if (!items.length) { chips.innerHTML = '<span class="text-sm text-muted">未选择</span>'; return; }
     chips.innerHTML = items.map(function(x) { return '<span class="chip">' + esc(x.name) + '<button type="button" class="chip-remove" data-id="' + x.id + '">&times;</button></span>'; }).join('');
     [].forEach.call(chips.querySelectorAll('.chip-remove'), function(btn) {
-      btn.addEventListener('click', function() {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
         var xid = Number(btn.dataset.id);
         var cur = JSON.parse(input.dataset.selected || '[]');
         input.dataset.selected = JSON.stringify(cur.filter(function(c) { return c.id !== xid; }));
@@ -165,18 +196,53 @@ export async function init(ctx) {
     } else {
       $('#sf-view-groups').innerHTML = '<span class="text-muted">无关联组</span>';
     }
+    // 成员列表改为查看按钮
     var tb = $('#sf-member-tbody');
-    if (!f.members || !f.members.length) {
-      tb.innerHTML = '<tr><td colspan="4" class="text-center text-muted">暂无成员</td></tr>';
-    } else {
-      tb.innerHTML = f.members.map(function(m) {
-        var c = m.mounted ? 'badge-ok' : 'badge-muted', t = m.mounted ? '✓ 已挂载' : '✗ 未挂载';
-        return '<tr><td>' + esc(m.username) + '</td><td><span class="badge ' + c + '">' + t + '</span></td><td class="text-sm text-muted">' + (m.checked_at || '-') + '</td><td class="actions-cell"><button class="btn btn-sm btn-outline chk-single" data-u="' + esc(m.username) + '">检查</button></td></tr>';
-      }).join('');
-      [].forEach.call(tb.querySelectorAll('.chk-single'), function(btn) {
-        btn.addEventListener('click', function() { checkSingle(f.id, btn.dataset.u); });
-      });
+    var hasMembers = f.members && f.members.length > 0;
+    tb.innerHTML = '<tr><td colspan="4" class="text-center">' +
+      (hasMembers
+        ? '<button class="btn btn-sm btn-outline" id="sf-btn-view-members">查看成员 (' + f.member_count + ' 人)</button>'
+        : '<span class="text-muted">暂无成员</span>') +
+      '</td></tr>';
+    var viewBtn = document.getElementById('sf-btn-view-members');
+    if (viewBtn) {
+      viewBtn.addEventListener('click', function() { showMembersModal(f); });
     }
+  }
+
+  // ====== 成员弹窗 ======
+  function showMembersModal(f) {
+    var membersHtml = (!f.members || !f.members.length)
+      ? '<p class="text-muted text-center">暂无成员</p>'
+      : '<div class="table-wrap"><table class="compact-table"><thead><tr><th>用户名</th><th>挂载状态</th><th>最后检查</th><th>操作</th></tr></thead><tbody>' +
+        f.members.map(function(m) {
+          var c = m.mounted ? 'badge-ok' : 'badge-muted', t = m.mounted ? '✓ 已挂载' : '✗ 未挂载';
+          return '<tr><td>' + esc(m.username) + '</td><td><span class="badge ' + c + '">' + t + '</span></td><td class="text-sm text-muted">' + (m.checked_at || '-') + '</td><td class="actions-cell"><button class="btn btn-sm btn-outline chk-single" data-u="' + esc(m.username) + '">检查</button></td></tr>';
+        }).join('') +
+        '</tbody></table></div>';
+
+    showModal({ title: '成员列表 - ' + f.name, width: '600px', body: membersHtml, footer: [
+      { label: '关闭', value: 'close' }
+    ]}).catch(function() {});
+
+    // 为弹窗内的检查按钮绑定事件
+    setTimeout(function() {
+      document.querySelectorAll('.chk-single').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          await checkSingle(f.id, btn.dataset.u);
+          // 刷新数据后更新弹窗内容
+          var refreshed = await Api.get('/api/admin/shared-folders');
+          if (refreshed.success) {
+            var folder = (refreshed.folders || []).find(function(x) { return x.id === f.id; });
+            if (folder) {
+              // 关闭当前弹窗，重新打开
+              document.querySelector('.modal-overlay')?.remove();
+              showMembersModal(folder);
+            }
+          }
+        });
+      });
+    }, 100);
   }
 
   // ====== 新建 ======
@@ -193,44 +259,70 @@ export async function init(ctx) {
     var f = allFolders.find(function(x) { return x.id === currentId; });
     if (!f) return;
 
-    var tagHtml = '<div class="sf-tag-selector" id="sf-modal-tag">' +
-      '<div class="sf-tag-chips" id="sf-modal-chips"></div>' +
-      '<input type="text" class="sf-tag-input" id="sf-modal-input" placeholder="搜索用户组...">' +
-      '<div class="sf-tag-dropdown" id="sf-modal-dropdown"></div></div>';
-
     var body = '<div class="field"><label>名称 *</label><input type="text" id="sf-modal-name" value="' + esc(f.name) + '"></div>' +
       '<div class="field"><label>描述</label><textarea id="sf-modal-desc" rows="2">' + esc(f.description || '') + '</textarea></div>' +
       '<div class="field"><label>类型</label>' +
         '<label class="toggle-switch"><input type="checkbox" id="sf-modal-public"' + (f.is_public ? ' checked' : '') + '>' +
         '<span class="toggle-switch-control"></span><span class="toggle-switch-label">公共共享</span></label></div>' +
-      '<div class="field"><label>关联用户组</label>' + tagHtml + '</div>' +
-      '<div id="sf-modal-msg" class="msg"></div>';
+      '<div class="field"><label>关联用户组</label>' +
+        '<div class="sf-tag-selector" id="sf-modal-tag">' +
+          '<div class="sf-tag-chips" id="sf-modal-chips"></div>' +
+          '<div class="sf-tag-input-wrap" id="sf-modal-wrap">' +
+            '<input type="text" class="sf-tag-input" id="sf-modal-input" placeholder="搜索用户组...">' +
+            '<span class="sf-tag-arrow" id="sf-modal-arrow">▾</span>' +
+          '</div>' +
+          '<div class="sf-tag-dropdown" id="sf-modal-dropdown"></div>' +
+        '</div></div>' +
+      '<div id="sf-modal-msg" class="msg"></div>' +
+      '<div class="toolbar" style="margin-top:.75rem">' +
+        '<button class="btn btn-primary" id="sf-modal-save-btn">保存修改</button>' +
+        '<button class="btn btn-outline" id="sf-modal-cancel-btn">取消</button>' +
+      '</div>';
 
-    showModal({ title: '编辑 - ' + f.name, width: '520px', body: body, footer: [
-      { label: '保存修改', value: 'save', primary: true },
-      { label: '取消', value: 'cancel' }
-    ]}).then(async function(val) {
-      if (val !== 'save') return;
-      var name = document.getElementById('sf-modal-name').value.trim();
-      if (!name) { document.getElementById('sf-modal-msg').textContent = '名称不能为空';
-        document.getElementById('sf-modal-msg').className = 'msg msg-err'; return; }
-      var r1 = await Api.post('/api/admin/shared-folders/update', {
-        id: String(currentId), name: name,
-        description: document.getElementById('sf-modal-desc').value.trim(),
-        is_public: document.getElementById('sf-modal-public').checked ? '1' : '0',
-      });
-      if (!r1.success) { showMsg('#sf-modal-msg', r1.error, false); return; }
-      var r2 = await Api.post('/api/admin/shared-folders/groups/set', {
-        folder_id: String(currentId), group_ids: selIds('sf-modal').join(','),
-      });
-      showMsg('#sf-view-msg', r2.message || '已保存', r2.success);
-      if (r2.success) { await loadFolders(); }
-    }).catch(function() {});
+    showModal({ title: '编辑 - ' + f.name, width: '520px', body: body });
 
-    // 初始化模态框内的标签选择器
+    // 初始化标签选择器
     setTimeout(function() {
       initTagSel('sf-modal');
       setSel('sf-modal', f.groups || []);
+    }, 50);
+
+    async function handleSave() {
+      var name = document.getElementById('sf-modal-name').value.trim();
+      if (!name) { document.getElementById('sf-modal-msg').textContent = '名称不能为空';
+        document.getElementById('sf-modal-msg').className = 'msg msg-err'; return; }
+      var desc = document.getElementById('sf-modal-desc').value.trim();
+      var isPublic = document.getElementById('sf-modal-public').checked;
+      var groupIDs = selIds('sf-modal').join(',');
+
+      var r1 = await Api.post('/api/admin/shared-folders/update', {
+        id: String(currentId), name: name,
+        description: desc, is_public: isPublic ? '1' : '0',
+      });
+      if (!r1.success) { showMsg('#sf-modal-msg', r1.error, false); return; }
+      // 仅当组选择有变化时才调用 groups/set，避免不必要重启容器
+      var oldIDs = (f.groups || []).map(function(g) { return String(g.id); }).sort().join(',');
+      if (groupIDs !== oldIDs) {
+        var r2 = await Api.post('/api/admin/shared-folders/groups/set', {
+          folder_id: String(currentId), group_ids: groupIDs,
+        });
+        showMsg('#sf-view-msg', r2.message || '已保存', r2.success);
+      } else {
+        showMsg('#sf-view-msg', '已保存', true);
+      }
+      // 关闭弹窗
+      var overlay = document.querySelector('.modal-overlay');
+      if (overlay) overlay.remove();
+      if (r2.success) { await loadFolders(); }
+    }
+
+    // 延迟绑定，确保元素已渲染
+    setTimeout(function() {
+      document.getElementById('sf-modal-save-btn').addEventListener('click', handleSave);
+      document.getElementById('sf-modal-cancel-btn').addEventListener('click', function() {
+        var overlay = document.querySelector('.modal-overlay');
+        if (overlay) overlay.remove();
+      });
     }, 50);
   }
 
