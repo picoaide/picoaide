@@ -22,7 +22,7 @@ import (
 const AppName = "picoaide"
 
 // DefaultWorkDir 默认工作目录
-const DefaultWorkDir = "/data/picoaide"
+var DefaultWorkDir = "/data/picoaide"
 
 // WorkDir 返回工作目录
 func WorkDir() string {
