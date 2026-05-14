@@ -1,8 +1,11 @@
 package auth
 
 import (
+  "encoding/json"
   "fmt"
-  "sort"
+  "os"
+  "path/filepath"
+  "strings"
   "time"
 )
 
@@ -65,178 +68,146 @@ func GetUsersBySkill(skillName string) ([]string, error) {
   return list, nil
 }
 
-// BindSkillByGroupID 通过 group_id 绑定技能到组
-func BindSkillByGroupID(groupID int64, skillName, source string) error {
-  if err := ensureDB(); err != nil {
-    return err
-  }
-  _, err := engine.Exec(
-    `INSERT INTO group_skills (group_id, skill_name, source) VALUES (?, ?, ?)
-     ON CONFLICT(group_id, skill_name) DO UPDATE SET source = ?`,
-    groupID, skillName, source, source,
-  )
-  return err
-}
-
-// UnbindSkillByGroupID 通过 group_id 解绑组技能
-func UnbindSkillByGroupID(groupID int64, skillName string) error {
-  if err := ensureDB(); err != nil {
-    return err
-  }
-  _, err := engine.Where("group_id = ? AND skill_name = ?", groupID, skillName).Delete(&GroupSkill{})
-  return err
-}
-
 // ============================================================
-// 智能查询（含子组继承）
+// 智能查询（仅查 user_skills，组展开为直接绑定后不再需要 group_skills 继承）
 // ============================================================
 
-// groupIDsWithSubs 获取组 ID 及其所有子组 ID（递归去重）
-func groupIDsWithSubs(groupID int64) []int64 {
-  seen := map[int64]bool{groupID: true}
-  var walk func(pid int64)
-  walk = func(pid int64) {
-    subs, err := GetSubGroupIDs(pid)
-    if err != nil {
-      return
-    }
-    for _, id := range subs {
-      if !seen[id] {
-        seen[id] = true
-        walk(id)
-      }
-    }
-  }
-  walk(groupID)
-  result := make([]int64, 0, len(seen))
-  for id := range seen {
-    result = append(result, id)
-  }
-  return result
-}
-
-// GetUsersForSkill 返回所有应该拥有此技能的用户（直接绑定 + 组成员，含子组继承）
+// GetUsersForSkill 返回 user_skills 中直接绑定了此技能的所有用户
 func GetUsersForSkill(skillName string) ([]string, error) {
-  if err := ensureDB(); err != nil {
-    return nil, err
-  }
-
-  userSet := make(map[string]bool)
-
-  // 直接绑定
-  direct, err := GetUsersBySkill(skillName)
-  if err != nil {
-    return nil, err
-  }
-  for _, u := range direct {
-    userSet[u] = true
-  }
-
-  // 组绑定（含子组继承）
-  var groupSkills []GroupSkill
-  if err := engine.Where("skill_name = ?", skillName).Find(&groupSkills); err != nil {
-    return nil, err
-  }
-  for _, gs := range groupSkills {
-    allIDs := groupIDsWithSubs(gs.GroupID)
-    for _, gid := range allIDs {
-      var members []UserGroup
-      if err := engine.Where("group_id = ?", gid).Find(&members); err != nil {
-        continue
-      }
-      for _, m := range members {
-        userSet[m.Username] = true
-      }
-    }
-  }
-
-  result := make([]string, 0, len(userSet))
-  for u := range userSet {
-    result = append(result, u)
-  }
-  sort.Strings(result)
-  return result, nil
+  return GetUsersBySkill(skillName)
 }
 
-// UserHasSkillFromAnySource 判断用户是否应拥有此技能（直接绑定或组成员，含子组继承）
+// UserHasSkillFromAnySource 判断用户是否有此技能（仅查 user_skills）
 func UserHasSkillFromAnySource(username, skillName string) (bool, error) {
   if err := ensureDB(); err != nil {
     return false, err
   }
 
-  // 1. 直接绑定
   count, err := engine.Where("username = ? AND skill_name = ?", username, skillName).Count(&UserSkill{})
   if err != nil {
     return false, err
   }
-  if count > 0 {
-    return true, nil
-  }
-
-  // 2. 组绑定（含子组继承）
-  var groupSkills []GroupSkill
-  if err := engine.Where("skill_name = ?", skillName).Find(&groupSkills); err != nil {
-    return false, err
-  }
-  for _, gs := range groupSkills {
-    allIDs := groupIDsWithSubs(gs.GroupID)
-    for _, gid := range allIDs {
-      count, err := engine.Where("username = ? AND group_id = ?", username, gid).Count(&UserGroup{})
-      if err != nil {
-        continue
-      }
-      if count > 0 {
-        return true, nil
-      }
-    }
-  }
-
-  return false, nil
+  return count > 0, nil
 }
 
-// GetUserAllSkillSources 返回用户拥有此技能的所有来源（含子组继承）
+// GetUserAllSkillSources 返回用户拥有此技能的所有来源（仅查 user_skills）
 func GetUserAllSkillSources(username, skillName string) ([]string, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
-  var sources []string
 
-  count, err := engine.Where("username = ? AND skill_name = ?", username, skillName).Count(&UserSkill{})
+  var skill UserSkill
+  has, err := engine.Where("username = ? AND skill_name = ?", username, skillName).Get(&skill)
   if err != nil {
-    return nil, fmt.Errorf("查询直接绑定失败: %w", err)
+    return nil, fmt.Errorf("查询失败: %w", err)
   }
-  if count > 0 {
-    sources = append(sources, "direct")
+  if has {
+    return []string{skill.Source}, nil
   }
+  return []string{}, nil
+}
 
-  // 通过组（含子组）继承
-  var groupSkills []GroupSkill
-  if err := engine.Where("skill_name = ?", skillName).Find(&groupSkills); err != nil {
+// ============================================================
+// 默认技能
+// ============================================================
+
+const defaultSkillsKey = "internal.default_skills"
+
+func loadDefaultSkillsRaw() ([]string, error) {
+  var setting Setting
+  has, err := engine.Where("key = ?", defaultSkillsKey).Get(&setting)
+  if err != nil {
     return nil, err
   }
-  for _, gs := range groupSkills {
-    allIDs := groupIDsWithSubs(gs.GroupID)
-    for _, gid := range allIDs {
-      var group Group
-      has, err := engine.ID(gid).Get(&group)
-      if err != nil || !has {
-        continue
-      }
-      count, err := engine.Where("username = ? AND group_id = ?", username, gid).Count(&UserGroup{})
-      if err != nil {
-        continue
-      }
-      if count > 0 {
-        sources = append(sources, "group:"+group.Name)
-        break
-      }
+  if !has || setting.Value == "" {
+    return []string{}, nil
+  }
+  var skills []string
+  if err := json.Unmarshal([]byte(setting.Value), &skills); err != nil {
+    return []string{}, nil
+  }
+  return skills, nil
+}
+
+func saveDefaultSkills(skills []string) error {
+  data, _ := json.Marshal(skills)
+  _, err := engine.Exec(
+    "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
+    defaultSkillsKey, string(data),
+  )
+  return err
+}
+
+func skillExistsOnDisk(name string) bool {
+  entries, err := os.ReadDir(SkillsRootDir)
+  if err != nil {
+    return false
+  }
+  for _, e := range entries {
+    if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+      continue
+    }
+    if _, err := os.Stat(filepath.Join(SkillsRootDir, e.Name(), name, "SKILL.md")); err == nil {
+      return true
     }
   }
+  return false
+}
 
-  if sources == nil {
-    sources = []string{}
+// LoadDefaultSkills 读取默认技能列表，自动剔除不存在的技能
+func LoadDefaultSkills() ([]string, error) {
+  skills, err := loadDefaultSkillsRaw()
+  if err != nil {
+    return nil, err
   }
-  return sources, nil
+  var valid []string
+  for _, name := range skills {
+    if skillExistsOnDisk(name) {
+      valid = append(valid, name)
+    }
+  }
+  if len(valid) != len(skills) {
+    saveDefaultSkills(valid)
+  }
+  return valid, nil
+}
+
+// ToggleDefaultSkill 切换技能是否在默认列表中
+func ToggleDefaultSkill(name string) ([]string, error) {
+  skills, err := loadDefaultSkillsRaw()
+  if err != nil {
+    return nil, err
+  }
+  found := false
+  for i, s := range skills {
+    if s == name {
+      skills = append(skills[:i], skills[i+1:]...)
+      found = true
+      break
+    }
+  }
+  if !found {
+    skills = append(skills, name)
+  }
+  if err := saveDefaultSkills(skills); err != nil {
+    return nil, err
+  }
+  return skills, nil
+}
+
+// RemoveFromDefaultSkills 从默认列表中移除指定技能
+func RemoveFromDefaultSkills(name string) error {
+  skills, err := loadDefaultSkillsRaw()
+  if err != nil {
+    return err
+  }
+  var filtered []string
+  for _, s := range skills {
+    if s != name {
+      filtered = append(filtered, s)
+    }
+  }
+  return saveDefaultSkills(filtered)
 }
 
 // DeleteSkill 删除技能所有绑定关系
@@ -250,10 +221,6 @@ func DeleteSkill(name string) error {
     return err
   }
   if _, err := session.Where("skill_name = ?", name).Delete(&UserSkill{}); err != nil {
-    _ = session.Rollback()
-    return err
-  }
-  if _, err := session.Where("skill_name = ?", name).Delete(&GroupSkill{}); err != nil {
     _ = session.Rollback()
     return err
   }

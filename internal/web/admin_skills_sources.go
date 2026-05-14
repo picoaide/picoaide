@@ -351,6 +351,7 @@ func (s *Server) handleAdminSkillsRegistryInstall(c *gin.Context) {
 
   meta, pErr := skill.ParseAndValidate(filepath.Join(skill.SkillsRootDir(), sourceName, slug))
   if pErr != nil {
+    os.RemoveAll(filepath.Join(skill.SkillsRootDir(), sourceName, slug))
     writeError(c, http.StatusInternalServerError, "技能格式校验失败: "+pErr.Error())
     return
   }

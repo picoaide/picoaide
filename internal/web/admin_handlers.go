@@ -80,6 +80,7 @@ func (s *Server) initExternalUser(username string) error {
   if err := user.InitUser(s.cfg, username, imageTag); err != nil {
     return err
   }
+  s.applyDefaultSkillsToUser(username)
   if s.dockerAvailable {
     go s.autoStartUserContainer(username)
   }

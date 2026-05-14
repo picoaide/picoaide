@@ -224,6 +224,9 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
     return
   }
 
+  // 部署默认技能
+  s.applyDefaultSkillsToUser(username)
+
   // 异步启动容器并下发配置
   if s.dockerAvailable {
     go s.autoStartUserContainer(username)
@@ -341,6 +344,7 @@ func (s *Server) createLocalUserWithImage(username, imageTag string) adminUserBa
     result.Error = "初始化用户目录失败: " + err.Error()
     return result
   }
+  s.applyDefaultSkillsToUser(username)
   if s.dockerAvailable {
     go s.autoStartUserContainer(username)
   }

@@ -29,7 +29,7 @@ func CreateGroup(name, source, description string, parentID *int64) error {
   return nil
 }
 
-// DeleteGroup 删除组及其成员、技能绑定，并将子组提升为顶级组。
+// DeleteGroup 删除组及成员关系，并将子组提升为顶级组。
 func DeleteGroup(name string) error {
   if err := ensureDB(); err != nil {
     return err
@@ -44,10 +44,6 @@ func DeleteGroup(name string) error {
     return err
   }
   if _, err := session.Where("group_id = ?", gid).Delete(&UserGroup{}); err != nil {
-    _ = session.Rollback()
-    return err
-  }
-  if _, err := session.Where("group_id = ?", gid).Delete(&GroupSkill{}); err != nil {
     _ = session.Rollback()
     return err
   }
@@ -73,8 +69,7 @@ func ListGroups() ([]GroupInfo, error) {
     return nil, err
   }
   rows, err := engine.DB().Query(`SELECT g.id, g.name, g.parent_id, g.source, g.description,
-    (SELECT COUNT(*) FROM user_groups ug WHERE ug.group_id = g.id) AS member_count,
-    (SELECT COUNT(*) FROM group_skills gs WHERE gs.group_id = g.id) AS skill_count
+    (SELECT COUNT(*) FROM user_groups ug WHERE ug.group_id = g.id) AS member_count
     FROM groups g ORDER BY g.name`)
   if err != nil {
     return nil, err
@@ -92,7 +87,6 @@ func ListGroups() ([]GroupInfo, error) {
       &group.Source,
       &group.Description,
       &group.MemberCount,
-      &group.SkillCount,
     ); err != nil {
       return nil, err
     }
@@ -296,42 +290,6 @@ func ReplaceGroupMembersBySource(source string, groupMembers map[string][]string
     slog.Info("audit", "type", "AUDIT", "action", "group.members.replace", "source", source, "group", groupName, "members", members)
   }
   return nil
-}
-
-// BindSkillToGroup 绑定技能到组（通过组名查找 ID）
-func BindSkillToGroup(groupName, skillName, source string) error {
-  gid, err := GetGroupID(groupName)
-  if err != nil {
-    return err
-  }
-  return BindSkillByGroupID(gid, skillName, source)
-}
-
-// UnbindSkillFromGroup 解绑技能（通过组名）
-func UnbindSkillFromGroup(groupName, skillName string) error {
-  gid, err := GetGroupID(groupName)
-  if err != nil {
-    return err
-  }
-  return UnbindSkillByGroupID(gid, skillName)
-}
-
-// GetGroupSkills 获取组绑定的技能列表
-func GetGroupSkills(groupName string) ([]string, error) {
-  gid, err := GetGroupID(groupName)
-  if err != nil {
-    return nil, err
-  }
-  var skills []GroupSkill
-  err = engine.Where("group_id = ?", gid).OrderBy("skill_name").Find(&skills)
-  if err != nil {
-    return nil, err
-  }
-  list := make([]string, 0, len(skills))
-  for _, s := range skills {
-    list = append(list, s.SkillName)
-  }
-  return list, nil
 }
 
 // GetGroupMembersForDeploy 获取组成员的用户名列表（包含子组成员）。

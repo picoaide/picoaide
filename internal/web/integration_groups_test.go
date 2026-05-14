@@ -2,10 +2,13 @@ package web
 
 import (
   "net/url"
+  "os"
+  "path/filepath"
   "testing"
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/authsource"
+  "github.com/picoaide/picoaide/internal/config"
 )
 
 func TestWhitelist_GetEmpty(t *testing.T) {
@@ -263,24 +266,126 @@ func TestSyncGroupParentsUpdatesListHierarchy(t *testing.T) {
   }
 }
 
-func TestGroupSkills_BindUnbind(t *testing.T) {
+func TestGroupSkills_BindExpandsToMembers(t *testing.T) {
   env := setupTestServer(t)
   if err := auth.CreateGroup("team-b", "local", "", nil); err != nil {
     t.Fatalf("CreateGroup: %v", err)
   }
+  if err := auth.AddUsersToGroup("team-b", []string{"testuser"}); err != nil {
+    t.Fatalf("AddUsersToGroup: %v", err)
+  }
 
+  // 创建技能目录（deploy 需要实际技能文件）
+  skillDir := filepath.Join(config.DefaultWorkDir, "skills", "test-source", "test-skill")
+  os.MkdirAll(skillDir, 0755)
+  os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test\n---\n# Content\n"), 0644)
+
+  // Bind skill to group
   form := url.Values{
     "group_name": {"team-b"},
     "skill_name": {"test-skill"},
   }
   resp := env.postForm(t, "/api/admin/groups/skills/bind", "testadmin", form)
-  // 绑定可能成功也可能因技能目录不存在而失败
-  t.Logf("bind status=%d", resp.StatusCode)
+  assertStatus(t, resp, 200)
 
+  // user_skills 记录应被创建（组成员获得了直接绑定）
+  src, err := auth.GetUserSkillSource("testuser", "test-skill")
+  if err != nil {
+    t.Fatalf("GetUserSkillSource: %v", err)
+  }
+  if src == "" {
+    t.Error("testuser should have user_skills record after group bind")
+  }
+  if src != "group" {
+    t.Errorf("source = %q, want %q", src, "group")
+  }
+
+  // Unbind
   form = url.Values{
     "group_name": {"team-b"},
     "skill_name": {"test-skill"},
   }
   resp = env.postForm(t, "/api/admin/groups/skills/unbind", "testadmin", form)
   assertStatus(t, resp, 200)
+
+  // user_skills 记录应被删除
+  src, _ = auth.GetUserSkillSource("testuser", "test-skill")
+  if src != "" {
+    t.Error("testuser should NOT have user_skills after unbind")
+  }
+}
+
+func TestDefaultSkills_ToggleAndList(t *testing.T) {
+  env := setupTestServer(t)
+
+  // 创建技能目录（auth.SkillsRootDir 由 InitDB 设置，指向临时目录）
+  skillDir := filepath.Join(auth.SkillsRootDir, "test-source", "default-skill")
+  os.MkdirAll(skillDir, 0755)
+  os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: default-skill\ndescription: Default test\n---\n"), 0644)
+
+  // 初始列表应为空
+  resp := env.get(t, "/api/admin/skills/defaults", "testadmin")
+  var listResp struct {
+    Success bool     `json:"success"`
+    Skills  []string `json:"skills"`
+  }
+  parseJSON(t, resp, &listResp)
+  if !listResp.Success {
+    t.Fatalf("GET defaults failed: %v", listResp)
+  }
+  if len(listResp.Skills) != 0 {
+    t.Errorf("initial skills = %v, want empty", listResp.Skills)
+  }
+
+  // Toggle 设为默认
+  form := url.Values{"skill_name": {"default-skill"}}
+  resp = env.postForm(t, "/api/admin/skills/defaults/toggle", "testadmin", form)
+  var toggleResp struct {
+    Success bool     `json:"success"`
+    Skills  []string `json:"skills"`
+  }
+  parseJSON(t, resp, &toggleResp)
+  if !toggleResp.Success {
+    t.Fatalf("toggle failed: %v", toggleResp)
+  }
+  if len(toggleResp.Skills) != 1 || toggleResp.Skills[0] != "default-skill" {
+    t.Errorf("after toggle = %v, want [default-skill]", toggleResp.Skills)
+  }
+
+  // 再 Toggle 取消默认
+  resp = env.postForm(t, "/api/admin/skills/defaults/toggle", "testadmin", form)
+  parseJSON(t, resp, &toggleResp)
+  if !toggleResp.Success {
+    t.Fatalf("toggle off failed: %v", toggleResp)
+  }
+  if len(toggleResp.Skills) != 0 {
+    t.Errorf("after toggle off = %v, want empty", toggleResp.Skills)
+  }
+}
+
+func TestDefaultSkills_AppliedToNewUser(t *testing.T) {
+  env := setupTestServer(t)
+
+  // 创建技能目录
+  skillDir := filepath.Join(auth.SkillsRootDir, "test-source", "default-skill")
+  os.MkdirAll(skillDir, 0755)
+  os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: default-skill\ndescription: Default test\n---\n"), 0644)
+
+  // 设置为默认技能
+  resp := env.postForm(t, "/api/admin/skills/defaults/toggle", "testadmin", url.Values{"skill_name": {"default-skill"}})
+  assertStatus(t, resp, 200)
+
+  // 创建新用户（免镜像标签，测试环境无 Docker）
+  form := url.Values{"username": {"newuser"}, "password": {"pass123"}, "image_tag": {"test-tag"}}
+  resp = env.postForm(t, "/api/admin/users/create", "testadmin", form)
+  assertStatus(t, resp, 200)
+
+  // 验证新用户被绑定了默认技能
+  src, err := auth.GetUserSkillSource("newuser", "default-skill")
+  if err != nil {
+    t.Fatalf("GetUserSkillSource: %v", err)
+  }
+  if src == "" {
+    t.Error("newuser should have default-skill bound after creation")
+  }
 }

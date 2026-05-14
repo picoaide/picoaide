@@ -55,9 +55,6 @@ export async function init(ctx) {
       } else if (sk.install_status === 'installed' && !sk.user_installed) {
         statusBadge = '<span class="badge badge-info" style="font-size:.78rem;padding:.2rem .6rem">已部署</span>';
         actionHtml = '<span class="text-muted text-sm" style="font-size:.78rem">管理员部署</span>';
-      } else if (sk.install_status === 'group') {
-        statusBadge = '<span class="badge badge-muted" style="font-size:.78rem;padding:.2rem .6rem">组继承</span>';
-        actionHtml = '<span class="text-muted text-sm" style="font-size:.78rem">通过组继承</span>';
       } else {
         statusBadge = '<span class="badge" style="font-size:.78rem;padding:.2rem .6rem">未安装</span>';
         actionHtml = '<button class="btn btn-sm btn-primary install-btn" data-name="' + esc(sk.name) + '">安装</button>';
@@ -71,7 +68,10 @@ export async function init(ctx) {
         footerMeta = parts.join('<span style="color:var(--border);margin:0 5px">|</span>');
       }
 
-      card.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;transition:all .22s ease;box-shadow:0 1px 3px rgba(15,23,42,.04);display:flex;flex-direction:column';
+      var desc = sk.description || '';
+      if (desc.length > 300) desc = desc.substring(0, 300) + '…';
+
+      card.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;transition:all .22s ease;box-shadow:0 1px 3px rgba(15,23,42,.04);display:flex;flex-direction:column;min-height:200px';
       card.onmouseenter = function() { this.style.boxShadow = '0 10px 32px rgba(15,23,42,.09)'; this.style.borderColor = '#cbd5e1'; this.style.transform = 'translateY(-3px)'; };
       card.onmouseleave = function() { this.style.boxShadow = '0 1px 3px rgba(15,23,42,.04)'; this.style.borderColor = 'var(--border)'; this.style.transform = 'none'; };
 
@@ -84,7 +84,7 @@ export async function init(ctx) {
                 '<span style="font-weight:700;font-size:1rem;color:var(--text)">' + esc(sk.name) + '</span>' +
                 statusBadge +
               '</div>' +
-              (sk.description ? '<div style="color:var(--text-secondary);font-size:.88rem;line-height:1.6">' + esc(sk.description) + '</div>' : '') +
+              (desc ? '<div style="color:var(--text-secondary);font-size:.88rem;line-height:1.6;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical">' + esc(desc) + '</div>' : '') +
             '</div>' +
           '</div>' +
         '</div>' +

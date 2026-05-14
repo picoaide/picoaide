@@ -15,8 +15,10 @@ export async function init(ctx) {
   var skillsTotalPages = 1;
   var skillsSearch = '';
   var skillsSourceFilter = '';
+  var defaults = [];
 
   await loadSources();
+  await loadDefaults();
   await loadSkills();
 
   $('#add-git-source-btn').addEventListener('click', showAddGitSourceModal);
@@ -268,9 +270,14 @@ export async function init(ctx) {
           var slug = btn.dataset.installSlug; btn.disabled = true; btn.textContent = '安装中...';
           var csrf = await getCSRF();
           var res = await Api.post('/api/admin/skills/registry/install', { source: src.name, slug: slug, csrf_token: csrf });
-          showMsg('#skills-msg', res.message || res.error, res.success);
           if (res.success) { btn.textContent = '✓ 已安装'; btn.classList.remove('btn-primary'); btn.classList.add('badge', 'badge-success'); loadSkills(); }
-          else { btn.disabled = false; btn.textContent = '安装'; }
+          else {
+            var errEl = document.createElement('div');
+            errEl.className = 'msg msg-err';
+            errEl.textContent = res.error || '安装失败';
+            btn.parentNode.parentNode.appendChild(errEl);
+            btn.disabled = false; btn.textContent = '安装';
+          }
         });
       });
     }
@@ -283,6 +290,37 @@ export async function init(ctx) {
     function closeM() { overlay.classList.add('hidden'); overlay.style.display = 'none'; }
     $('#registry-modal-close').onclick = closeM;
     $('#registry-modal-close-btn').onclick = closeM;
+  }
+
+  // ====================================================================
+  // 默认技能
+  // ====================================================================
+
+  async function loadDefaults() {
+    var data = await Api.get('/api/admin/skills/defaults');
+    if (data.success) defaults = data.skills || [];
+    else defaults = [];
+    var info = $('#defaults-info');
+    if (defaults.length > 0) {
+      info.textContent = '已设置 ' + defaults.length + ' 个默认技能，新用户初始化时自动安装';
+    } else {
+      info.textContent = '';
+    }
+  }
+
+  async function toggleDefault(name) {
+    var data = await Api.post('/api/admin/skills/defaults/toggle', { skill_name: name });
+    if (data.success) {
+      defaults = data.skills || [];
+      var info = $('#defaults-info');
+      if (defaults.length > 0) {
+        info.textContent = '已设置 ' + defaults.length + ' 个默认技能，新用户初始化时自动安装';
+      } else {
+        info.textContent = '';
+      }
+      // 刷新排序
+      loadSkills();
+    }
   }
 
   // ====================================================================
@@ -305,22 +343,66 @@ export async function init(ctx) {
     var skills = data.skills || [];
     if (skills.length === 0) { empty.classList.remove('hidden'); return; }
 
-    for (var sk of skills) {
-      var tr = document.createElement('tr');
-      tr.innerHTML = '' +
-        '<td><strong>' + esc(sk.name) + '</strong>' + (sk.description ? '<br><small style="color:var(--text-muted);font-size:.78rem">' + esc(sk.description) + '</small>' : '') + '</td>' +
-        '<td>' + (sk.source ? '<span class="badge badge-muted">' + esc(sk.source) + '</span>' : '') + '</td>' +
-        '<td>' + sk.file_count + ' 文件</td>' +
-        '<td>' + sk.size_str + '</td>' +
-        '<td>' + sk.mod_time + '</td>' +
-        '<td class="actions-cell"><div class="btn-group">' +
-          '<button class="btn btn-sm btn-outline" data-deploy="' + esc(sk.name) + '">部署</button>' +
-          '<button class="btn btn-sm btn-outline" data-detail="' + esc(sk.name) + '">详情</button>' +
-          '<button class="btn btn-sm btn-outline" data-dl="' + esc(sk.name) + '">下载</button>' +
-          '<button class="btn btn-sm btn-danger" data-rm="' + esc(sk.name) + '">删除</button>' +
-        '</div></td>';
-      tbody.appendChild(tr);
+    tbody.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:.85rem;align-items:stretch';
+
+    // 明快色板
+    var iconColors = ['#2563eb','#7c3aed','#db2777','#dc2626','#d97706','#059669','#0891b2','#4f46e5','#9333ea','#0d9488'];
+
+    function skillIcon(name) {
+      var idx = name.charCodeAt(0) || 0;
+      var color = iconColors[idx % iconColors.length];
+      var letter = name.charAt(0).toUpperCase();
+      return '<div style="width:50px;height:50px;border-radius:12px;background:' + color + ';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.25rem;flex-shrink:0;box-shadow:0 3px 8px ' + color + '55">' + esc(letter) + '</div>';
     }
+
+    for (var sk of skills) {
+      var isDefault = defaults.indexOf(sk.name) >= 0;
+      var defaultBadge = isDefault ? ' <span class="badge badge-primary" style="font-size:.72rem;vertical-align:middle">默认</span>' : '';
+      var starBtn = isDefault
+        ? '<button class="btn btn-sm btn-outline" data-star="' + esc(sk.name) + '" style="color:#f59e0b;padding:.25rem .4rem;font-size:.85rem" title="取消默认">★</button>'
+        : '<button class="btn btn-sm btn-outline" data-star="' + esc(sk.name) + '" style="color:#94a3b8;padding:.25rem .4rem;font-size:.85rem" title="设为默认">☆</button>';
+
+      var card = document.createElement('div');
+      card.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;transition:all .22s ease;box-shadow:0 1px 3px rgba(15,23,42,.04);display:flex;flex-direction:column;min-height:200px';
+      card.onmouseenter = function() { this.style.boxShadow = '0 10px 32px rgba(15,23,42,.09)'; this.style.borderColor = '#cbd5e1'; this.style.transform = 'translateY(-3px)'; };
+      card.onmouseleave = function() { this.style.boxShadow = '0 1px 3px rgba(15,23,42,.04)'; this.style.borderColor = 'var(--border)'; this.style.transform = 'none'; };
+
+      var sourceBadge = sk.source ? '<span class="badge badge-muted" style="font-size:.78rem">' + esc(sk.source) + '</span>' : '';
+      var desc = sk.description || '';
+      if (desc.length > 300) desc = desc.substring(0, 300) + '…';
+
+      card.innerHTML = '' +
+        '<div style="padding:1.05rem 1rem .6rem;flex:1">' +
+          '<div style="display:flex;align-items:flex-start;gap:.85rem">' +
+            skillIcon(sk.name) +
+            '<div style="flex:1;min-width:0">' +
+              '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem">' +
+                '<span style="font-weight:700;font-size:1rem;color:var(--text)">' + esc(sk.name) + '</span>' +
+                defaultBadge +
+              '</div>' +
+              (desc ? '<div style="color:var(--text-secondary);font-size:.88rem;line-height:1.6;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical">' + esc(desc) + '</div>' : '') +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="padding:.5rem 1rem .75rem;border-top:1px solid var(--border-light);display:flex;align-items:center;justify-content:space-between;gap:.65rem">' +
+          '<div style="display:flex;align-items:center;gap:.5rem;font-size:.78rem;color:var(--text-muted);flex-wrap:wrap;min-width:0">' +
+            sourceBadge +
+            '<span>' + sk.file_count + ' 文件</span>' +
+            '<span>' + sk.size_str + '</span>' +
+          '</div>' +
+          '<div class="btn-group" style="flex-shrink:0">' +
+            starBtn +
+            '<button class="btn btn-sm btn-outline" data-deploy="' + esc(sk.name) + '" style="padding:.25rem .55rem;font-size:.82rem">部署</button>' +
+            '<button class="btn btn-sm btn-outline" data-detail="' + esc(sk.name) + '" style="padding:.25rem .55rem;font-size:.82rem">详情</button>' +
+            '<button class="btn btn-sm btn-danger" data-rm="' + esc(sk.name) + '" style="padding:.25rem .55rem;font-size:.82rem">删除</button>' +
+          '</div>' +
+        '</div>';
+      tbody.appendChild(card);
+    }
+
+    document.querySelectorAll('#skills-tbody [data-star]').forEach(function(btn) {
+      btn.addEventListener('click', function() { toggleDefault(btn.dataset.star); });
+    });
 
     tbody.querySelectorAll('[data-dl]').forEach(function(btn) {
       btn.addEventListener('click', function() { window.open(window.location.origin + '/api/admin/skills/download?name=' + encodeURIComponent(btn.dataset.dl), '_blank'); });

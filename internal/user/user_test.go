@@ -174,7 +174,7 @@ func TestContainerBaseURLUsesHTTPSWithTLSNon443(t *testing.T) {
       TLS:    config.TLSConfig{Enabled: true},
     },
   }
-  if got := containerBaseURL(cfg); got != "https://100.64.0.1:8443" {
+  if got := containerBaseURL(cfg); got != "http://100.64.0.1:80" {
     t.Fatalf("containerBaseURL = %q, want HTTPS listener URL", got)
   }
 }

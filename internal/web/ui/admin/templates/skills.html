@@ -25,6 +25,7 @@
 <div class="toolbar" style="margin-bottom:.65rem">
   <div>
     <div class="toolbar-title">已安装技能</div>
+    <div class="toolbar-subtitle" id="defaults-info"></div>
   </div>
   <div id="skills-source-filter" style="display:flex;gap:.25rem"></div>
 </div>
@@ -34,12 +35,7 @@
     <button class="btn btn-outline btn-sm" id="skills-search-btn">搜索</button>
   </div>
 </div>
-<div class="table-wrap">
-  <table>
-    <thead><tr><th>技能名称</th><th>来源</th><th>文件数</th><th>大小</th><th>更新时间</th><th class="actions-cell">操作</th></tr></thead>
-    <tbody id="skills-tbody"></tbody>
-  </table>
-</div>
+<div id="skills-tbody"></div>
 <div class="pager" id="skills-pager">
   <span class="pager-info" id="skills-page-info"></span>
   <select id="skills-page-size">

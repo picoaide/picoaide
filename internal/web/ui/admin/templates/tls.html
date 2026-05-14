@@ -1,0 +1,39 @@
+<section class="page-header">
+  <div>
+    <div class="page-kicker">平台配置</div>
+    <h2>证书配置</h2>
+    <p>管理 HTTPS 加密访问和 SSL 证书。</p>
+  </div>
+</section>
+<div id="tls-msg" class="msg"></div>
+
+<div class="card">
+  <div class="card-header">当前状态</div>
+  <div id="tls-status">
+    <div class="text-sm text-muted">加载中...</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">HTTPS 开关</div>
+  <div class="field">
+    <label>启用 HTTPS</label>
+    <select id="tls-enabled">
+      <option value="false">关闭</option>
+      <option value="true">开启</option>
+    </select>
+  </div>
+</div>
+
+<div class="card" id="cert-upload-card" style="display:none">
+  <div class="card-header">证书文件</div>
+  <div id="current-cert-info" class="text-sm text-muted mb-1"></div>
+  <div class="field"><label>证书文件 (PEM)</label><input type="file" id="cert-file" accept=".pem,.crt,.cert"></div>
+  <div class="field"><label>私钥文件 (PEM)</label><input type="file" id="key-file" accept=".pem,.key"></div>
+  <p class="text-sm text-muted">上传后将校验证书域名与当前浏览器访问的域名是否一致。保存后服务将自动重启。</p>
+</div>
+
+<div class="btn-group mt-2" style="justify-content:flex-end">
+  <button class="btn btn-ghost" id="reset-btn">重置</button>
+  <button class="btn btn-primary" id="save-btn">保存配置</button>
+</div>

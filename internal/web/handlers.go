@@ -155,7 +155,10 @@ func (s *Server) handleLogin(c *gin.Context) {
   // 场景 A：本地模式或超管 → 直接登录
   if isSuperadmin || !s.cfg.UnifiedAuthEnabled() {
     if rec, _ := auth.GetContainerByUsername(username); rec == nil && !isSuperadmin {
-      go user.InitUser(s.cfg, username, "")
+      go func(u string) {
+        user.InitUser(s.cfg, u, "")
+        s.applyDefaultSkillsToUser(u)
+      }(username)
     }
     s.setSessionCookie(c, s.createSessionToken(username), 86400)
     logger.Audit("user.login", "username", username, "method", "local")

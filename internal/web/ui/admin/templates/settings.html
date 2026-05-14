@@ -2,7 +2,7 @@
   <div>
     <div class="page-kicker">平台配置</div>
     <h2>系统配置</h2>
-    <p>集中维护镜像、网关、用户目录、Web 服务和 Picoclaw 配置适配包。</p>
+    <p>集中维护镜像、网关、用户目录和 Picoclaw 配置适配包。</p>
   </div>
 </section>
 <div id="settings-msg" class="msg"></div>
@@ -63,18 +63,7 @@
 
 <div class="card">
   <div class="card-header">Web 服务</div>
-  <div class="field"><label>监听地址</label><input type="text" data-path="web.listen" placeholder=":80"></div>
-  <div class="field"><label>启用 HTTPS</label>
-    <select data-path="web.tls.enabled">
-      <option value="false">关闭</option>
-      <option value="true">开启</option>
-    </select>
-  </div>
-  <div class="grid-2">
-    <div class="field"><label>证书文件 (PEM)</label><input type="text" data-path="web.tls.cert_file" placeholder="/path/to/cert.pem"></div>
-    <div class="field"><label>私钥文件 (PEM)</label><input type="text" data-path="web.tls.key_file" placeholder="/path/to/key.pem"></div>
-  </div>
-  <p class="text-sm text-muted">容器访问地址由系统按监听地址和 Docker 内网默认值自动生成，不允许手动配置。HTTPS 监听 :443 时，Docker 内网仍使用 http://100.64.0.1:80。启用 HTTPS 后需重启服务生效。</p>
+  <p class="text-sm text-muted">HTTPS 证书配置已移至 <a href="/admin/tls">证书配置</a> 页面。</p>
 </div>
 
 <div class="card">

@@ -33,8 +33,9 @@ var passwordHashParams = struct {
 }
 
 var (
-  engine    *xorm.Engine
-  dbDataDir string
+  engine       *xorm.Engine
+  dbDataDir    string
+  SkillsRootDir string
 )
 
 // ============================================================
@@ -44,6 +45,7 @@ var (
 // InitDB 打开或创建 SQLite 数据库
 func InitDB(dataDir string) error {
   dbDataDir = dataDir
+  SkillsRootDir = filepath.Join(dataDir, "skills")
 
   if err := os.MkdirAll(dataDir, 0755); err != nil {
     return fmt.Errorf("创建数据库目录失败: %w", err)
@@ -199,16 +201,7 @@ func syncSchema() error {
   if err != nil {
     return err
   }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS group_skills (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    skill_name TEXT NOT NULL,
-    source TEXT NOT NULL DEFAULT '',
-    UNIQUE(group_id, skill_name)
-  )`)
-  if err != nil {
-    return err
-  }
+  // group_skills 表已移除，技能绑定展开后直接写入 user_skills
   _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS user_channels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL,
@@ -260,8 +253,7 @@ func syncSchema() error {
 
   // 迁移：旧数据库 groups 表没有 parent_id 列
   engine.Exec(`ALTER TABLE groups ADD COLUMN parent_id INTEGER REFERENCES groups(id) ON DELETE SET NULL`)
-  // 迁移：group_skills / user_skills 加 source 列
-  engine.Exec(`ALTER TABLE group_skills ADD COLUMN source TEXT NOT NULL DEFAULT ''`)
+  // 迁移：user_skills 加 source 列
   engine.Exec(`ALTER TABLE user_skills ADD COLUMN source TEXT NOT NULL DEFAULT ''`)
   engine.Exec(`ALTER TABLE user_skills ADD COLUMN updated_at TEXT NOT NULL DEFAULT '2000-01-01 00:00:00'`)
 
