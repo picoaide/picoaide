@@ -366,13 +366,10 @@ func TestDefaultSkills_ToggleAndList(t *testing.T) {
 func TestDefaultSkills_AppliedToNewUser(t *testing.T) {
   env := setupTestServer(t)
 
-  // 创建技能目录（需同时写入 auth.SkillsRootDir 和 skill.SkillsRootDir，
-  // 前者给 LoadDefaultSkills 用，后者给 deploySkillToUser 用）
-  for _, root := range []string{auth.SkillsRootDir, skill.SkillsRootDir()} {
-    d := filepath.Join(root, "test-source", "default-skill")
-    os.MkdirAll(d, 0755)
-    os.WriteFile(filepath.Join(d, "SKILL.md"), []byte("---\nname: default-skill\ndescription: Default test\n---\n"), 0644)
-  }
+  // 创建技能目录
+  skillDir := filepath.Join(skill.SkillsRootDir(), "test-source", "default-skill")
+  os.MkdirAll(skillDir, 0755)
+  os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: default-skill\ndescription: Default test\n---\n"), 0644)
 
   // 设置为默认技能
   resp := env.postForm(t, "/api/admin/skills/defaults/toggle", "testadmin", url.Values{"skill_name": {"default-skill"}})
