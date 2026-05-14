@@ -1,7 +1,6 @@
 package config
 
 import (
-  "bufio"
   "bytes"
   "encoding/json"
   "fmt"
@@ -361,24 +360,9 @@ func InstallService(cfg *GlobalConfig) error {
   }
   newContent := buf.Bytes()
 
-  // 检查现有服务文件
-  existing, err := os.ReadFile(serviceFilePath)
-  if err == nil {
-    if bytes.Equal(existing, newContent) {
-      fmt.Println("服务文件已存在且一致，跳过")
-      return nil
-    }
-    fmt.Println("检测到服务文件内容不一致:")
-    fmt.Printf("  现有文件: %s\n", serviceFilePath)
-    fmt.Printf("  是否覆盖？[y/N] ")
-
-    reader := bufio.NewReader(os.Stdin)
-    answer, _ := reader.ReadString('\n')
-    answer = strings.TrimSpace(strings.ToLower(answer))
-    if answer != "y" && answer != "yes" {
-      fmt.Println("已跳过服务文件更新")
-      return nil
-    }
+  if existing, err := os.ReadFile(serviceFilePath); err == nil && bytes.Equal(existing, newContent) {
+    fmt.Println("服务文件已存在且一致，跳过")
+    return nil
   }
 
   if err := os.WriteFile(serviceFilePath, newContent, 0644); err != nil {

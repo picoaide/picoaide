@@ -497,10 +497,8 @@ func httpsRedirectTarget(r *http.Request) string {
 }
 
 // Serve 创建并启动 Web 管理面板服务器
-func Serve(cfg *config.GlobalConfig, listenAddr string) error {
-  if listenAddr == "" {
-    listenAddr = cfg.Web.Listen
-  }
+func Serve(cfg *config.GlobalConfig) error {
+  listenAddr := cfg.Web.Listen
   if listenAddr == "" {
     listenAddr = ":80"
   }
