@@ -213,3 +213,19 @@ type GroupInfo struct {
   Description string `json:"description"`
   MemberCount int    `json:"member_count"`
 }
+
+// PicoclawAdapterPackage 适配器包数据库记录
+type PicoclawAdapterPackage struct {
+  ID                          int64  `xorm:"pk autoincr 'id'"`
+  AdapterVersion              string `xorm:"notnull 'adapter_version'"`
+  AdapterSchemaVersion        int    `xorm:"notnull 'adapter_schema_version'"`
+  LatestSupportedConfigVersion int   `xorm:"notnull 'latest_supported_config_version'"`
+  Content                     string `xorm:"notnull 'content'"`
+  Hash                        string `xorm:"notnull 'hash'"`
+  RefreshedAt                 string `xorm:"notnull 'refreshed_at'"`
+  CreatedAt                   string `xorm:"notnull 'created_at'"`
+}
+
+func (PicoclawAdapterPackage) TableName() string {
+  return "picoclaw_adapter_packages"
+}
