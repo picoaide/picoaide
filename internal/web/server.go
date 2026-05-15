@@ -606,26 +606,48 @@ func httpsRedirectTarget(r *http.Request) string {
   return target
 }
 
-// Serve 创建并启动 Web 管理面板服务器
-func Serve(cfg *config.GlobalConfig) error {
-  // 确保工作目录存在
+// Serve 初始化并启动 Web 管理面板服务器（DB → 配置 → 日志 → 服务）
+func Serve() error {
   wd, _ := os.Getwd()
   if wd != "" {
     os.MkdirAll(wd, 0755)
   }
 
+  // 初始化数据库
+  if err := auth.InitDB(wd); err != nil {
+    os.MkdirAll(wd, 0755)
+    if err := auth.InitDB(wd); err != nil {
+      return fmt.Errorf("初始化数据库失败: %w", err)
+    }
+  }
+
+  // 首次运行自动初始化
+  count, _ := config.SettingsCount()
+  if count == 0 {
+    if err := config.InitDBDefaults(); err != nil {
+      return fmt.Errorf("初始化默认配置失败: %w", err)
+    }
+  }
+
+  cfg, err := config.LoadFromDB()
+  if err != nil {
+    return fmt.Errorf("加载配置失败: %w", err)
+  }
+
+  if err := user.ReleasePicoClawMigrationRulesCacheIfValid(config.RuleCacheDir()); err != nil {
+    slog.Warn("初始化迁移规则缓存失败", "error", err)
+  }
+
+  retention := cfg.Web.LogRetention
+  if retention == "" {
+    retention = "6m"
+  }
+  logger.Init(wd, retention, false, cfg.Web.LogLevel)
+  defer logger.Close()
+
   // 确保 users/ 和 archive/ 目录存在
   if err := user.EnsureUsersRoot(cfg); err != nil {
     slog.Warn("创建用户目录失败", "error", err)
-  }
-
-  // 初始化本地用户数据库（失败时重试一次）
-  if err := auth.InitDB(wd); err != nil {
-    slog.Warn("数据库初始化失败，正在重试", "error", err)
-    os.MkdirAll(wd, 0755)
-    if err := auth.InitDB(wd); err != nil {
-      return fmt.Errorf("初始化用户数据库失败: %w", err)
-    }
   }
 
   secret, err := ensureSessionSecret()

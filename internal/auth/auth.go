@@ -12,6 +12,8 @@ import (
 
   _ "modernc.org/sqlite"
   "xorm.io/xorm"
+
+  "github.com/picoaide/picoaide/internal/auth/migrations"
 )
 
 const dbFileName = "picoaide.db"
@@ -125,8 +127,6 @@ func syncSchema() error {
   if err != nil {
     return err
   }
-  // 迁移：旧数据库 local_users 表没有 source 列
-  engine.Exec(`ALTER TABLE local_users ADD COLUMN source TEXT NOT NULL DEFAULT 'local'`)
   _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS containers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
@@ -143,8 +143,6 @@ func syncSchema() error {
   if err != nil {
     return err
   }
-  // 迁移：已有表添加 mcp_token 字段
-  engine.Exec(`ALTER TABLE containers ADD COLUMN mcp_token TEXT DEFAULT ''`)
   _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT '',
@@ -251,12 +249,6 @@ func syncSchema() error {
     return err
   }
 
-  // 迁移：旧数据库 groups 表没有 parent_id 列
-  engine.Exec(`ALTER TABLE groups ADD COLUMN parent_id INTEGER REFERENCES groups(id) ON DELETE SET NULL`)
-  // 迁移：user_skills 加 source 列
-  engine.Exec(`ALTER TABLE user_skills ADD COLUMN source TEXT NOT NULL DEFAULT ''`)
-  engine.Exec(`ALTER TABLE user_skills ADD COLUMN updated_at TEXT NOT NULL DEFAULT '2000-01-01 00:00:00'`)
-
   _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS shared_folders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -269,12 +261,6 @@ func syncSchema() error {
   if err != nil {
     return err
   }
-  // 迁移：旧数据库 shared_folders 表可能缺少某些列
-  engine.Exec(`ALTER TABLE shared_folders ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
-  engine.Exec(`ALTER TABLE shared_folders ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0`)
-  engine.Exec(`ALTER TABLE shared_folders ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'`)
-  engine.Exec(`ALTER TABLE shared_folders ADD COLUMN created_at TEXT NOT NULL DEFAULT '2000-01-01 00:00:00'`)
-  engine.Exec(`ALTER TABLE shared_folders ADD COLUMN updated_at TEXT NOT NULL DEFAULT '2000-01-01 00:00:00'`)
   _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS shared_folder_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     folder_id INTEGER NOT NULL REFERENCES shared_folders(id) ON DELETE CASCADE,
@@ -325,6 +311,11 @@ func syncSchema() error {
   }
   _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_cookies_username ON user_cookies(username)`)
   if err != nil {
+    return err
+  }
+
+  // 执行数据库迁移（新增列、改名、数据迁移等）
+  if err := migrations.RunAll(engine); err != nil {
     return err
   }
 
