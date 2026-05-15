@@ -402,36 +402,49 @@ internal/web/
 
 ## API 端点
 
-### 基础端点
+所有路由均注册在 `/api` 和 `/api/v1` 双前缀下（如 `/api/health` 和 `/api/v1/health` 均可访问）。
+`/api/version` 为单一路径。
+
+### 基础端点（无需认证 / 公开）
 
 ```
-GET  /api/health              健康检查（返回版本号）
-POST /api/login                用户名密码登录 → 会话 Cookie
-POST /api/login/oidc/auth     获取 OIDC 授权 URL
-POST /api/login/oidc/callback  OIDC 回调 → 会话 Cookie
-GET  /api/login/mode          返回当前认证模式（local/ldap/oidc）
-POST /api/logout              清除会话
-GET  /api/csrf                获取 CSRF token
+GET  /api/version              获取服务端版本号
+GET  /api/health               健康检查
+POST /api/login                用户名密码登录 → 设置 session Cookie（需 CSRF token）
+GET  /api/login/auth           浏览器认证跳转（OIDC 等，获取授权 URL 并重定向）
+GET  /api/login/callback       浏览器认证回调（统一入口，处理 OIDC callback 等）
+GET  /api/login/mode           返回当前认证模式（local/ldap/oidc）
+POST /api/logout               清除会话
+GET  /api/csrf                 获取 CSRF token（用于后续 POST/PUT/PATCH 请求）
 ```
 
-### 普通用户端点
+### 普通用户端点（需 session Cookie）
 
 ```
-GET  /api/user/info           当前用户信息（用户名、角色、来源）
-POST /api/user/password       修改密码（仅本地模式）
-GET  /api/user/channels       当前用户的渠道列表及启用状态
-POST /api/user/channels       设置渠道启用/禁用
-GET  /api/user/config/fields  获取渠道配置字段定义
-POST /api/user/config/fields  保存渠道配置字段
-GET  /api/dingtalk            读取钉钉配置（client_id/client_secret）
-POST /api/dingtalk            保存钉钉配置 + 重启容器
-GET  /api/config              读取全局 Picoclaw 配置
-POST /api/config              保存全局 Picoclaw 配置
-GET  /api/mcp/token           获取当前用户的 MCP token
-GET  /api/mcp/sse/{service}   建立 MCP SSE 连接（browser/computer）
-POST /api/mcp/sse/{service}   发送 MCP JSON-RPC 消息
-GET  /api/browser/ws          浏览器代理 WebSocket（?token=xxx）
-GET  /api/computer/ws         桌面代理 WebSocket（?token=xxx）
+GET  /api/user/info            当前用户信息（用户名、角色、来源）
+GET  /api/user/init-status     用户目录初始化状态
+POST /api/user/password        修改密码（仅本地认证模式）
+GET  /api/picoclaw/channels    当前用户的渠道列表及启用状态
+GET  /api/picoclaw/config-fields  获取渠道配置字段定义
+POST /api/picoclaw/config-fields  保存渠道配置字段
+GET  /api/dingtalk             读取钉钉配置（client_id/client_secret）
+POST /api/dingtalk             保存钉钉配置 + 重启容器
+GET  /api/config               读取全局 Picoclaw 配置
+POST /api/config               保存全局 Picoclaw 配置
+GET  /api/mcp/token            获取当前用户的 MCP token
+GET  /api/mcp/sse/:service     建立 MCP SSE 连接（browser/computer）
+POST /api/mcp/sse/:service     发送 MCP JSON-RPC 消息
+GET  /api/mcp/cookies          MCP token 认证的 Cookie API（容器内技能读写 cookie）
+POST /api/mcp/cookies          写入 cookie（MCP token 认证）
+GET  /api/browser/ws           浏览器代理 WebSocket（?token=xxx）
+GET  /api/computer/ws          桌面代理 WebSocket（?token=xxx）
+POST /api/cookies              写入用户 .security.yml（Cookie 同步）
+GET  /api/user/cookies         查看已授权的 Cookie 域名列表
+POST /api/user/cookies/delete  取消 Cookie 域名授权
+GET  /api/shared-folders       查看可见的团队空间文件夹列表
+GET  /api/user/skills          用户已安装的技能列表
+POST /api/user/skills/install  安装技能
+POST /api/user/skills/uninstall  卸载技能
 ```
 
 ### 文件管理端点（用户在 `.picoclaw/workspace/` 中的沙盒目录）
@@ -446,51 +459,121 @@ GET  /api/files/edit           读取文本文件内容（JSON）
 POST /api/files/edit           保存文本文件内容
 ```
 
-### 超管端点
+### 超管端点（需 superadmin 角色 + session Cookie）
 
+**用户管理**
 ```
 GET  /api/admin/users                  用户列表（分页+搜索）
 POST /api/admin/users/create           创建用户
+POST /api/admin/users/batch-create     批量导入用户（异步任务队列）
 POST /api/admin/users/delete           删除用户（含目录归档）
-POST /api/admin/users/import           批量导入用户（异步任务队列）
-POST /api/admin/container/start        启动容器（单用户或批量）
-POST /api/admin/container/stop         停止容器
-POST /api/admin/container/restart      重启容器
-GET  /api/admin/whitelist              白名单列表
-POST /api/admin/whitelist              更新白名单
-GET  /api/admin/groups                 用户组列表（含成员预览，支持树形结构）
-POST /api/admin/groups/create          创建组
-POST /api/admin/groups/delete          删除组
-POST /api/admin/groups/members/add     添加组成员
-POST /api/admin/groups/members/remove  移除组成员
-POST /api/admin/groups/skills/add      绑定技能到组
-POST /api/admin/groups/skills/remove   解绑组技能
-POST /api/admin/groups/ldap/test       测试 LDAP 组查询连接
-POST /api/admin/groups/ldap/sync       手动同步 LDAP 组
-GET  /api/admin/images                 本地镜像列表（含标签和使用用户）
-POST /api/admin/images/pull            拉取镜像（SSE 流式进度）
-GET  /api/admin/images/registry        远程仓库标签（按版本号降序排列）
-GET  /api/admin/images/local-tags      本地镜像标签列表
-GET  /api/admin/skills                 技能仓库列表
-POST /api/admin/skills/deploy          部署技能到用户/组
-POST /api/admin/skills/install         安装技能仓库（Git clone，支持 SSH/HTTPS 认证）
 GET  /api/admin/superadmins            超管列表
 POST /api/admin/superadmins/create     创建超管（返回随机密码）
 POST /api/admin/superadmins/delete     删除超管（至少保留一个）
 POST /api/admin/superadmins/reset      重置超管密码（返回新密码）
-GET  /api/admin/channels               渠道管理列表
-POST /api/admin/channels              更新渠道允许状态
-GET  /api/admin/picoclaw/users         用户 Picoclaw 配置列表
-GET  /api/admin/picoclaw/user          获取指定用户配置
-POST /api/admin/picoclaw/user          保存指定用户配置
-GET  /api/admin/picoclaw/adapter/info  Picoclaw Adapter 信息（版本、缓存时间）
-POST /api/admin/picoclaw/adapter/refresh  刷新 Adapter（从远程 URL 或上传 ZIP）
-GET  /api/admin/task/status            异步任务状态查询（批量导入进度）
+```
+
+**容器管理**
+```
+POST /api/admin/container/start        启动容器（单用户或批量）
+POST /api/admin/container/stop         停止容器
+POST /api/admin/container/restart      重启容器
+POST /api/admin/container/debug        进入容器调试模式
+GET  /api/admin/container/logs         获取容器日志
+```
+
+**认证与白名单**
+```
+GET  /api/admin/whitelist              白名单列表
+POST /api/admin/whitelist              更新白名单
+POST /api/admin/auth/test-ldap         测试 LDAP 连接
+GET  /api/admin/auth/ldap-users        获取 LDAP 用户列表
+POST /api/admin/auth/sync-users        手动同步 LDAP/OIDC 用户
+POST /api/admin/auth/sync-groups       手动同步 LDAP 组
+GET  /api/admin/auth/providers         已注册的认证源列表
+```
+
+**用户组管理**
+```
+GET  /api/admin/groups                 用户组列表（支持树形结构）
+POST /api/admin/groups/create          创建组
+POST /api/admin/groups/delete          删除组
+GET  /api/admin/groups/members         查看组成员
+POST /api/admin/groups/members/add     添加组成员
+POST /api/admin/groups/members/remove  移除组成员
+POST /api/admin/groups/skills/bind     绑定技能到组
+POST /api/admin/groups/skills/unbind   解绑组技能
+```
+
+**技能管理**
+```
+GET  /api/admin/skills                 已安装的技能列表
+POST /api/admin/skills/deploy          部署技能到用户/组
+POST /api/admin/skills/remove          移除技能
+POST /api/admin/skills/user/bind       绑定技能到单个用户
+POST /api/admin/skills/user/unbind     解绑用户技能
+GET  /api/admin/skills/user/sources    用户技能来源列表
+GET  /api/admin/skills/sources         技能仓库来源列表
+POST /api/admin/skills/sources/git     添加 Git 技能仓库
+POST /api/admin/skills/sources/remove  移除技能仓库
+POST /api/admin/skills/sources/pull    拉取技能仓库更新
+POST /api/admin/skills/sources/refresh  刷新技能仓库
+GET  /api/admin/skills/registry/list   技能注册中心列表
+POST /api/admin/skills/registry/install  从注册中心安装技能
+GET  /api/admin/skills/defaults        默认技能列表
+POST /api/admin/skills/defaults/toggle  切换技能默认安装
+```
+
+**镜像管理**
+```
+GET  /api/admin/images                 本地镜像列表
+POST /api/admin/images/pull            拉取镜像（SSE 流式进度）
+POST /api/admin/images/delete          删除本地镜像
+POST /api/admin/images/migrate         镜像迁移
+POST /api/admin/images/upgrade         容器镜像升级
+GET  /api/admin/images/registry        远程仓库标签（按版本号降序）
+GET  /api/admin/images/local-tags      本地镜像标签列表
+GET  /api/admin/images/upgrade-candidates  可升级的版本列表
+GET  /api/admin/images/users           使用指定镜像的用户列表
+GET  /api/admin/images/pull-status     镜像拉取状态查询
+```
+
+**团队空间（共享文件夹）**
+```
+GET  /api/admin/shared-folders          共享文件夹列表
+POST /api/admin/shared-folders/create   创建共享文件夹
+POST /api/admin/shared-folders/update   更新共享文件夹
+POST /api/admin/shared-folders/delete   删除共享文件夹
+POST /api/admin/shared-folders/groups/set  设置文件夹的组可见范围
+POST /api/admin/shared-folders/test     测试文件夹挂载
+POST /api/admin/shared-folders/mount    手动挂载文件夹
+```
+
+**Picoclaw 配置管理**
+```
+POST /api/admin/config/apply             下发 Picoclaw 配置给用户
+GET  /api/admin/migration-rules          查看迁移规则信息
+POST /api/admin/migration-rules/refresh  刷新迁移规则（远程拉取）
+POST /api/admin/migration-rules/upload   上传迁移规则 ZIP
+GET  /api/admin/picoclaw/channels        渠道管理列表
+```
+
+**TLS 证书管理**
+```
+GET  /api/admin/tls/status               TLS 证书状态
+POST /api/admin/tls/upload               上传 TLS 证书
+```
+
+**其他**
+```
+GET  /api/admin/task/status              异步任务状态查询
+GET  /api/admin/skill-install-policy     技能安装策略
+POST /api/admin/skill-install-policy     设置技能安装策略
 ```
 
 ### MCP 工具列表
 
-**Browser MCP**（18 个工具）：navigate, screenshot, click, type, get_content, execute, tabs_list, tab_new, tab_close, go_back, go_forward, reload, current_tab, tab_select, scroll, key_press, get_attribute, get_links, wait
+**Browser MCP**（19 个工具）：navigate, screenshot, click, type, get_content, execute, tabs_list, tab_new, tab_close, go_back, go_forward, reload, current_tab, tab_select, scroll, key_press, get_attribute, get_links, wait
 
 **Computer MCP**（15 个工具）：screenshot, screen_size, active_window, mouse_click, mouse_move, mouse_drag, mouse_scroll, keyboard_type, keyboard_press, screen_text(OCR), file_read, file_write, file_list, whitelist, file_search
 
