@@ -46,6 +46,6 @@ validate-release-version:
 release: validate-release-version
 	@echo "构建服务端二进制... (版本: $(PROGRAM_VERSION))"
 	@mkdir -p dist
-	GOOS=linux GOARCH=amd64 go build -ldflags "$(SERVER_VERSION_LDFLAGS)" -o dist/picoaide-linux-amd64 ./cmd/picoaide/
-	GOOS=linux GOARCH=arm64 go build -ldflags "$(SERVER_VERSION_LDFLAGS)" -o dist/picoaide-linux-arm64 ./cmd/picoaide/
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(SERVER_VERSION_LDFLAGS)" -o dist/picoaide-linux-amd64 ./cmd/picoaide/
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(SERVER_VERSION_LDFLAGS)" -o dist/picoaide-linux-arm64 ./cmd/picoaide/
 	@echo "服务端构建完成，产物在 dist/ 目录"

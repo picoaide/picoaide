@@ -27,11 +27,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Format check
+        run: ./format.sh --check
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
-
       - name: Go tests
         run: go test ./internal/... -v -count=1
 
@@ -63,7 +64,9 @@ jobs:
         run: |
           ext=""
           [ "${GOOS}" = "windows" ] && ext=".exe"
-          go build -ldflags "-X github.com/picoaide/picoaide/internal/config.Version=dev" -o picoaide-${{ matrix.suffix }}${ext} ./cmd/picoaide/
+          version="${GITHUB_REF_NAME#v}"
+          [ -z "$version" ] && version="dev"
+          go build -ldflags "-X github.com/picoaide/picoaide/internal/config.Version=${version}" -o picoaide-${{ matrix.suffix }}${ext} ./cmd/picoaide/
 
       - uses: actions/upload-artifact@v7
         with:
