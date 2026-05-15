@@ -10,7 +10,6 @@ linters:
     - ineffassign
     - errcheck
     - staticcheck
-    - gosimple
     - unused
 
 issues:
