@@ -169,7 +169,7 @@ func LoadPicoClawAdapterPackage(root string) (*PicoClawAdapterPackage, error) {
 
 func RefreshPicoClawAdapterFromRemote(cacheDir, remoteBaseURL string, client *http.Client) (*PicoClawAdapterPackage, error) {
   if strings.TrimSpace(remoteBaseURL) == "" {
-    return nil, errors.New("Picoclaw adapter remote base URL is empty")
+    return nil, errors.New("picoclaw adapter remote base URL is empty")
   }
   if client == nil {
     client = &http.Client{Timeout: 20 * time.Second}
@@ -186,7 +186,7 @@ func RefreshPicoClawAdapterFromRemote(cacheDir, remoteBaseURL string, client *ht
       return nil, err
     }
     if got := sha256Hex(data); got != entry.SHA256 {
-      return nil, fmt.Errorf("Picoclaw adapter 文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
+      return nil, fmt.Errorf("picoclaw adapter 文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
     }
     files[entry.Path] = data
   }

@@ -37,7 +37,7 @@ func FetchUsers(cfg *config.GlobalConfig) ([]string, error) {
   if err != nil {
     errStr := err.Error()
     if strings.Contains(errStr, "32") || strings.Contains(errStr, "No Such Object") {
-      return nil, fmt.Errorf("Base DN '%s' 不存在或无权访问，请检查 LDAP 配置", cfg.LDAP.BaseDN)
+      return nil, fmt.Errorf("base DN '%s' 不存在或无权访问，请检查 LDAP 配置", cfg.LDAP.BaseDN)
     }
     return nil, fmt.Errorf("LDAP 搜索失败: %w", err)
   }
@@ -316,7 +316,7 @@ func TestConnection(host, bindDN, bindPassword, baseDN, filter, usernameAttr str
   if err != nil {
     errStr := err.Error()
     if strings.Contains(errStr, "32") || strings.Contains(errStr, "No Such Object") {
-      return nil, fmt.Errorf("Base DN '%s' 不存在或无权访问，请检查 Base DN 配置", baseDN)
+      return nil, fmt.Errorf("base DN '%s' 不存在或无权访问，请检查 Base DN 配置", baseDN)
     }
     return nil, fmt.Errorf("LDAP 搜索失败（Base DN: %s, Filter: %s）: %w", baseDN, filter, err)
   }

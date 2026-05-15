@@ -39,7 +39,7 @@ func InitClient() error {
   defer cancel()
   _, err = cli.Ping(ctx)
   if err != nil {
-    return fmt.Errorf("Docker daemon 不可达: %w", err)
+    return fmt.Errorf("docker daemon 不可达: %w", err)
   }
   return nil
 }
@@ -123,10 +123,10 @@ func CreateContainerWithOptions(ctx context.Context, username, imageRef, userDir
     RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
   }
   if cpuLimit > 0 {
-    hostConfig.Resources.NanoCPUs = int64(cpuLimit * 1e9)
+    hostConfig.NanoCPUs = int64(cpuLimit * 1e9)
   }
   if memMB > 0 {
-    hostConfig.Resources.Memory = memMB * 1024 * 1024
+    hostConfig.Memory = memMB * 1024 * 1024
   }
 
   netConfig := &network.NetworkingConfig{
@@ -306,7 +306,7 @@ func TestContainerDir(ctx context.Context, containerID, dirPath string) (bool, e
 
 // ImageExists 检查镜像是否已存在于本地
 func ImageExists(ctx context.Context, imageRef string) bool {
-  _, _, err := cli.ImageInspectWithRaw(ctx, imageRef)
+  _, _, err := cli.ImageInspectWithRaw(ctx, imageRef) //nolint:staticcheck // SA1019: 兼容旧版 Docker SDK
   return err == nil
 }
 
