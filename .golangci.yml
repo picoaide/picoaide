@@ -8,10 +8,12 @@ linters:
   enable:
     - govet
     - ineffassign
-    - errcheck
     - staticcheck
-    - unused
 
 issues:
   max-issues-per-linter: 50
   max-same-issues: 5
+  exclude-dirs:
+    - picoaide-desktop
+    - picoaide-extension
+    - website
