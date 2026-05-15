@@ -19,6 +19,9 @@ import (
   "strconv"
   "strings"
   "time"
+
+  "github.com/picoaide/picoaide/internal/auth"
+  "xorm.io/xorm"
 )
 
 const PicoAideSupportedAdapterSchemaVersion = 1
@@ -100,39 +103,42 @@ type PicoClawAdapterPackage struct {
   Migrations    map[string]PicoClawConfigMigration
 }
 
+type SerializableAdapterContent struct {
+  Index         PicoClawAdapterIndex              `json:"index"`
+  ConfigSchemas map[int]PicoClawConfigSchema      `json:"config_schemas"`
+  UISchemas     map[int]PicoClawUISchema          `json:"ui_schemas"`
+  Migrations    map[string]PicoClawConfigMigration `json:"migrations"`
+}
+
 type PicoClawAdapterHashEntry struct {
   SHA256 string
   Path   string
 }
 
 func NewPicoClawAdapterPackage(cacheDir string) (*PicoClawAdapterPackage, error) {
-  if err := ReleasePicoClawAdapterCacheIfValid(cacheDir); err != nil {
+  engine, err := auth.GetEngine()
+  if err == nil {
+    pkg, err := PicoClawAdapterPackageFromDB(engine)
+    if err == nil && pkg != nil {
+      return pkg, nil
+    }
+  }
+  // DB 无数据，从 embed 加载并写入 DB
+  pkg, err := NewPicoClawAdapterPackageFromEmbed()
+  if err != nil {
     return nil, err
   }
-  return LoadPicoClawAdapterPackage(filepath.Join(cacheDir, picoclawAdapterDir))
+  if engine != nil {
+    _ = SavePicoClawAdapterPackageToDB(engine, pkg, "")
+  }
+  return pkg, nil
 }
 
 func ForceReleasePicoClawAdapterCache(cacheDir string) error {
-  targetRoot := filepath.Join(cacheDir, picoclawAdapterDir)
-  os.RemoveAll(targetRoot)
-  if picoclawAdapterEmbedExists() {
-    return releasePicoClawAdapterFromEmbed(targetRoot)
-  }
-  bundledRoot, err := findBundledPicoClawAdapterRoot()
-  if err != nil {
-    return err
-  }
-  return copyPicoClawAdapterDir(bundledRoot, targetRoot)
+  return nil
 }
 
 func ReleasePicoClawAdapterCacheIfValid(cacheDir string) error {
-  targetRoot := filepath.Join(cacheDir, picoclawAdapterDir)
-  if _, err := os.Stat(filepath.Join(targetRoot, picoclawAdapterIndexFile)); err != nil {
-    return ForceReleasePicoClawAdapterCache(cacheDir)
-  }
-  if _, err := LoadPicoClawAdapterPackage(targetRoot); err != nil {
-    return ForceReleasePicoClawAdapterCache(cacheDir)
-  }
   return nil
 }
 
@@ -173,11 +179,7 @@ func RefreshPicoClawAdapterFromRemote(cacheDir, remoteBaseURL string, client *ht
   if err != nil {
     return nil, err
   }
-  tmpRoot, err := os.MkdirTemp("", "picoaide-picoclaw-adapter-*")
-  if err != nil {
-    return nil, err
-  }
-  defer os.RemoveAll(tmpRoot)
+  files := make(map[string][]byte, len(entries))
   for _, entry := range entries {
     data, err := fetchPicoClawAdapterFile(client, base, entry.Path)
     if err != nil {
@@ -186,25 +188,20 @@ func RefreshPicoClawAdapterFromRemote(cacheDir, remoteBaseURL string, client *ht
     if got := sha256Hex(data); got != entry.SHA256 {
       return nil, fmt.Errorf("Picoclaw adapter 文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
     }
-    target := filepath.Join(tmpRoot, filepath.FromSlash(entry.Path))
-    if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-      return nil, err
-    }
-    if err := os.WriteFile(target, data, 0644); err != nil {
-      return nil, err
-    }
+    files[entry.Path] = data
   }
-  if err := os.WriteFile(filepath.Join(tmpRoot, picoclawAdapterHashFile), hashData, 0644); err != nil {
+  pkg, err := parsePicoClawAdapterFiles(files)
+  if err != nil {
     return nil, err
   }
-  if _, err := LoadPicoClawAdapterPackage(tmpRoot); err != nil {
+  engine, err := auth.GetEngine()
+  if err != nil {
+    return nil, fmt.Errorf("获取数据库连接失败: %w", err)
+  }
+  if err := SavePicoClawAdapterPackageToDB(engine, pkg, string(hashData)); err != nil {
     return nil, err
   }
-  activeRoot := filepath.Join(cacheDir, picoclawAdapterDir)
-  if err := activatePicoClawAdapter(tmpRoot, activeRoot); err != nil {
-    return nil, err
-  }
-  return LoadPicoClawAdapterPackage(activeRoot)
+  return pkg, nil
 }
 
 // RefreshPicoClawAdapterFromRemoteIfChanged 仅当远程 hash 与本地不同时执行刷新
@@ -217,9 +214,15 @@ func RefreshPicoClawAdapterFromRemoteIfChanged(cacheDir string, remoteBaseURLs [
   if client == nil {
     client = &http.Client{Timeout: 20 * time.Second}
   }
-  // 读取本地 hash
-  localHashPath := filepath.Join(cacheDir, picoclawAdapterDir, picoclawAdapterHashFile)
-  localHash, localErr := os.ReadFile(localHashPath)
+  // 从 DB 读取本地 hash
+  engine, err := auth.GetEngine()
+  localHash := ""
+  if err == nil {
+    record := &auth.PicoclawAdapterPackage{}
+    if has, _ := engine.Desc("id").Get(record); has && record.ID > 0 {
+      localHash = record.Hash
+    }
+  }
 
   // 尝试每个远程 URL
   var lastErr error
@@ -234,12 +237,12 @@ func RefreshPicoClawAdapterFromRemoteIfChanged(cacheDir string, remoteBaseURLs [
       lastErr = err
       continue
     }
-    // 比较 hash：如果本地有 hash 文件且内容一致，跳过下载
-    if localErr == nil && bytes.Equal(localHash, remoteHash) {
+    // 比较 hash：如果本地 hash 一致，跳过下载
+    if localHash != "" && string(remoteHash) == localHash {
       return nil, false, nil
     }
     // hash 不同或本地无 hash，执行完整下载
-    pkg, err := doRefreshPicoClawAdapter(cacheDir, baseURL, client, entries, remoteHash)
+    pkg, err := doRefreshPicoClawAdapterToDB(baseURL, client, entries, remoteHash)
     if err != nil {
       lastErr = err
       continue
@@ -249,51 +252,44 @@ func RefreshPicoClawAdapterFromRemoteIfChanged(cacheDir string, remoteBaseURLs [
   return nil, false, fmt.Errorf("所有远程 URL 均失败: %w", lastErr)
 }
 
-// doRefreshPicoClawAdapter 从指定 URL 完整下载适配器
-func doRefreshPicoClawAdapter(cacheDir, base string, client *http.Client, entries []PicoClawAdapterHashEntry, hashData []byte) (*PicoClawAdapterPackage, error) {
-  tmpRoot, err := os.MkdirTemp("", "picoaide-picoclaw-adapter-*")
-  if err != nil {
-    return nil, err
-  }
-  defer os.RemoveAll(tmpRoot)
+func doRefreshPicoClawAdapterToDB(base string, client *http.Client, entries []PicoClawAdapterHashEntry, hashData []byte) (*PicoClawAdapterPackage, error) {
+  files := make(map[string][]byte, len(entries))
   for _, entry := range entries {
     data, err := fetchPicoClawAdapterFile(client, base, entry.Path)
     if err != nil {
       return nil, err
     }
     if got := sha256Hex(data); got != entry.SHA256 {
-      return nil, fmt.Errorf("Picoclaw adapter 文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
+      return nil, fmt.Errorf("文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
     }
-    target := filepath.Join(tmpRoot, filepath.FromSlash(entry.Path))
-    if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-      return nil, err
-    }
-    if err := os.WriteFile(target, data, 0644); err != nil {
-      return nil, err
-    }
+    files[entry.Path] = data
   }
-  if err := os.WriteFile(filepath.Join(tmpRoot, picoclawAdapterHashFile), hashData, 0644); err != nil {
+  pkg, err := parsePicoClawAdapterFiles(files)
+  if err != nil {
     return nil, err
   }
-  if _, err := LoadPicoClawAdapterPackage(tmpRoot); err != nil {
+  engine, err := auth.GetEngine()
+  if err != nil {
+    return nil, fmt.Errorf("获取数据库连接失败: %w", err)
+  }
+  if err := SavePicoClawAdapterPackageToDB(engine, pkg, string(hashData)); err != nil {
     return nil, err
   }
-  activeRoot := filepath.Join(cacheDir, picoclawAdapterDir)
-  if err := activatePicoClawAdapter(tmpRoot, activeRoot); err != nil {
-    return nil, err
-  }
-  return LoadPicoClawAdapterPackage(activeRoot)
+  return pkg, nil
 }
 
 // AutoRefreshPicoClawAdapter 后台自动刷新适配器
-// 阶段一：释放本地嵌入版（从 //go:embed 复制到缓存目录）
+// 阶段一：确保 DB 中有适配器数据
 // 阶段二：远程更新检测（hash 对比，失败指数退避，成功后每 24h 检查）
 func AutoRefreshPicoClawAdapter(cacheDir string, remoteBaseURLs []string) {
-  // 阶段一：确保本地嵌入版已释放（含损坏检测）
-  if err := ReleasePicoClawAdapterCacheIfValid(cacheDir); err != nil {
-    slog.Warn("释放本地 Picoclaw 适配器失败", "error", err)
-  } else {
-    slog.Info("本地 Picoclaw 适配器已就绪")
+  // 阶段一：确保 DB 中有适配器数据
+  engine, err := auth.GetEngine()
+  if err != nil {
+    slog.Warn("获取数据库连接失败，跳过适配器刷新", "error", err)
+    return
+  }
+  if err := SeedPicoClawAdapterToDB(engine); err != nil {
+    slog.Warn("初始化 Picoclaw 适配器失败", "error", err)
   }
 
   if len(remoteBaseURLs) == 0 {
@@ -324,6 +320,78 @@ func AutoRefreshPicoClawAdapter(cacheDir string, remoteBaseURLs []string) {
   }
 }
 
+// parsePicoClawAdapterFiles 从内存中的文件内容解析适配器包
+func parsePicoClawAdapterFiles(files map[string][]byte) (*PicoClawAdapterPackage, error) {
+  indexData, ok := files[picoclawAdapterIndexFile]
+  if !ok {
+    return nil, fmt.Errorf("缺少 %s", picoclawAdapterIndexFile)
+  }
+  var index PicoClawAdapterIndex
+  if err := json.Unmarshal(indexData, &index); err != nil {
+    return nil, fmt.Errorf("解析 %s 失败: %w", picoclawAdapterIndexFile, err)
+  }
+  pkg := &PicoClawAdapterPackage{
+    Index:         index,
+    ConfigSchemas: make(map[int]PicoClawConfigSchema),
+    UISchemas:     make(map[int]PicoClawUISchema),
+    Migrations:    make(map[string]PicoClawConfigMigration),
+  }
+  for versionStr, schemaPath := range index.ConfigSchemas {
+    version, err := strconv.Atoi(versionStr)
+    if err != nil {
+      return nil, fmt.Errorf("config_schemas key %q 不是数字", versionStr)
+    }
+    data, ok := files[schemaPath]
+    if !ok {
+      return nil, fmt.Errorf("缺少 schema 文件: %s", schemaPath)
+    }
+    var schema PicoClawConfigSchema
+    if err := json.Unmarshal(data, &schema); err != nil {
+      return nil, fmt.Errorf("解析 %s 失败: %w", schemaPath, err)
+    }
+    if schema.ConfigVersion != version {
+      return nil, fmt.Errorf("%s config_version=%d 与 index key=%d 不一致", schemaPath, schema.ConfigVersion, version)
+    }
+    pkg.ConfigSchemas[version] = schema
+  }
+  for versionStr, uiPath := range index.UISchemas {
+    version, err := strconv.Atoi(versionStr)
+    if err != nil {
+      return nil, fmt.Errorf("ui_schemas key %q 不是数字", versionStr)
+    }
+    data, ok := files[uiPath]
+    if !ok {
+      return nil, fmt.Errorf("缺少 UI schema 文件: %s", uiPath)
+    }
+    var schema PicoClawUISchema
+    if err := json.Unmarshal(data, &schema); err != nil {
+      return nil, fmt.Errorf("解析 %s 失败: %w", uiPath, err)
+    }
+    if schema.ConfigVersion != version {
+      return nil, fmt.Errorf("%s config_version=%d 与 index key=%d 不一致", uiPath, schema.ConfigVersion, version)
+    }
+    pkg.UISchemas[version] = schema
+  }
+  for _, ref := range index.Migrations {
+    data, ok := files[ref.Path]
+    if !ok {
+      return nil, fmt.Errorf("缺少 migration 文件: %s", ref.Path)
+    }
+    var migration PicoClawConfigMigration
+    if err := json.Unmarshal(data, &migration); err != nil {
+      return nil, fmt.Errorf("解析 %s 失败: %w", ref.Path, err)
+    }
+    if migration.FromConfig != ref.FromConfig || migration.ToConfig != ref.ToConfig {
+      return nil, fmt.Errorf("%s from/to 与 index 不一致", ref.Path)
+    }
+    pkg.Migrations[migrationKey(ref.FromConfig, ref.ToConfig)] = migration
+  }
+  if err := pkg.Validate(); err != nil {
+    return nil, err
+  }
+  return pkg, nil
+}
+
 func SavePicoClawAdapterZip(cacheDir string, data []byte) (*PicoClawAdapterPackage, error) {
   if len(data) == 0 {
     return nil, errors.New("adapter zip 为空")
@@ -332,18 +400,7 @@ func SavePicoClawAdapterZip(cacheDir string, data []byte) (*PicoClawAdapterPacka
   if err != nil {
     return nil, fmt.Errorf("读取 adapter zip 失败: %w", err)
   }
-  tmpRoot, err := os.MkdirTemp("", "picoaide-picoclaw-adapter-upload-*")
-  if err != nil {
-    return nil, err
-  }
-  defer os.RemoveAll(tmpRoot)
-  tmpRootHandle, err := os.OpenRoot(tmpRoot)
-  if err != nil {
-    return nil, err
-  }
-  defer tmpRootHandle.Close()
-
-  seen := map[string]bool{}
+  files := make(map[string][]byte)
   for _, file := range reader.File {
     name := strings.TrimSpace(strings.ReplaceAll(file.Name, "\\", "/"))
     if name == "" {
@@ -364,47 +421,38 @@ func SavePicoClawAdapterZip(cacheDir string, data []byte) (*PicoClawAdapterPacka
         return nil, fmt.Errorf("adapter zip 文件 %s 不合法: %w", clean, err)
       }
     }
-    if seen[clean] {
+    if _, exists := files[clean]; exists {
       return nil, fmt.Errorf("adapter zip 文件重复: %s", clean)
     }
-    seen[clean] = true
     rc, err := file.Open()
     if err != nil {
       return nil, err
     }
     content, readErr := io.ReadAll(io.LimitReader(rc, 4<<20))
-    closeErr := rc.Close()
+    rc.Close()
     if readErr != nil {
       return nil, fmt.Errorf("读取 adapter zip 文件 %s 失败: %w", clean, readErr)
     }
-    if closeErr != nil {
-      return nil, fmt.Errorf("关闭 adapter zip 文件 %s 失败: %w", clean, closeErr)
-    }
-    target := filepath.FromSlash(clean)
-    if err := tmpRootHandle.MkdirAll(filepath.Dir(target), 0755); err != nil {
-      return nil, err
-    }
-    if err := tmpRootHandle.WriteFile(target, content, 0644); err != nil {
-      return nil, err
-    }
+    files[clean] = content
   }
-  if !seen[picoclawAdapterIndexFile] {
+  if _, ok := files[picoclawAdapterIndexFile]; !ok {
     return nil, errors.New("adapter zip 缺少 index.json")
   }
-  if !seen[picoclawAdapterHashFile] {
+  if _, ok := files[picoclawAdapterHashFile]; !ok {
     return nil, errors.New("adapter zip 缺少 hash")
   }
-  if err := VerifyPicoClawAdapterHash(tmpRoot); err != nil {
+  pkg, err := parsePicoClawAdapterFiles(files)
+  if err != nil {
     return nil, err
   }
-  if _, err := LoadPicoClawAdapterPackage(tmpRoot); err != nil {
+  engine, err := auth.GetEngine()
+  if err != nil {
+    return nil, fmt.Errorf("获取数据库连接失败: %w", err)
+  }
+  if err := SavePicoClawAdapterPackageToDB(engine, pkg, string(files[picoclawAdapterHashFile])); err != nil {
     return nil, err
   }
-  activeRoot := filepath.Join(cacheDir, picoclawAdapterDir)
-  if err := activatePicoClawAdapter(tmpRoot, activeRoot); err != nil {
-    return nil, err
-  }
-  return LoadPicoClawAdapterPackage(activeRoot)
+  return pkg, nil
 }
 
 func (p *PicoClawAdapterPackage) loadReferencedFiles() error {
@@ -513,6 +561,68 @@ func (p *PicoClawAdapterPackage) Validate() error {
     if err := p.validateUIChannelCoverage(version); err != nil {
       return err
     }
+  }
+  return nil
+}
+
+func (p *PicoClawAdapterPackage) Serialize() (string, error) {
+  content := SerializableAdapterContent{
+    Index:         p.Index,
+    ConfigSchemas: p.ConfigSchemas,
+    UISchemas:     p.UISchemas,
+    Migrations:    p.Migrations,
+  }
+  data, err := json.Marshal(content)
+  if err != nil {
+    return "", fmt.Errorf("序列化适配器包失败: %w", err)
+  }
+  return string(data), nil
+}
+
+var picoclawAdapterTableName = (&auth.PicoclawAdapterPackage{}).TableName()
+
+func PicoClawAdapterPackageFromDB(engine *xorm.Engine) (*PicoClawAdapterPackage, error) {
+  record := &auth.PicoclawAdapterPackage{}
+  has, err := engine.Desc("id").Get(record)
+  if err != nil {
+    return nil, fmt.Errorf("读取数据库适配器包失败: %w", err)
+  }
+  if !has {
+    return nil, nil
+  }
+  var content SerializableAdapterContent
+  if err := json.Unmarshal([]byte(record.Content), &content); err != nil {
+    return nil, fmt.Errorf("解析适配器包内容失败: %w", err)
+  }
+  pkg := &PicoClawAdapterPackage{
+    Index:         content.Index,
+    ConfigSchemas: content.ConfigSchemas,
+    UISchemas:     content.UISchemas,
+    Migrations:    content.Migrations,
+  }
+  return pkg, nil
+}
+
+func SavePicoClawAdapterPackageToDB(engine *xorm.Engine, pkg *PicoClawAdapterPackage, hash string) error {
+  content, err := pkg.Serialize()
+  if err != nil {
+    return err
+  }
+  now := time.Now().Format("2006-01-02 15:04:05")
+  record := &auth.PicoclawAdapterPackage{
+    AdapterVersion:               pkg.Index.AdapterVersion,
+    AdapterSchemaVersion:         pkg.Index.AdapterSchemaVersion,
+    LatestSupportedConfigVersion: pkg.Index.LatestSupportedConfigVersion,
+    Content:                      content,
+    Hash:                         hash,
+    RefreshedAt:                  now,
+    CreatedAt:                    now,
+  }
+  if _, err := engine.Where("1=1").Delete(&auth.PicoclawAdapterPackage{}); err != nil {
+    return fmt.Errorf("清理旧适配器包失败: %w", err)
+  }
+  if _, err := engine.Insert(record); err != nil {
+    return fmt.Errorf("保存适配器包到数据库失败: %w", err)
   }
   return nil
 }
@@ -767,62 +877,7 @@ func findBundledPicoClawAdapterRoot() (string, error) {
   return "", errors.New("未找到内置 Picoclaw adapter")
 }
 
-func copyPicoClawAdapterDir(srcRoot, dstRoot string) error {
-  if err := os.MkdirAll(dstRoot, 0755); err != nil {
-    return err
-  }
-  return filepath.WalkDir(srcRoot, func(src string, entry os.DirEntry, err error) error {
-    if err != nil {
-      return err
-    }
-    rel, err := filepath.Rel(srcRoot, src)
-    if err != nil {
-      return err
-    }
-    if rel == "." {
-      return nil
-    }
-    dst := filepath.Join(dstRoot, rel)
-    if entry.IsDir() {
-      return os.MkdirAll(dst, 0755)
-    }
-    if filepath.Ext(entry.Name()) != ".json" && entry.Name() != picoclawAdapterHashFile {
-      return nil
-    }
-    data, err := os.ReadFile(src)
-    if err != nil {
-      return err
-    }
-    return os.WriteFile(dst, data, 0644)
-  })
-}
 
-func activatePicoClawAdapter(tmpRoot, activeRoot string) error {
-  parent := filepath.Dir(activeRoot)
-  if err := os.MkdirAll(parent, 0755); err != nil {
-    return err
-  }
-  nextRoot := activeRoot + ".next"
-  oldRoot := activeRoot + ".old"
-  _ = os.RemoveAll(nextRoot)
-  if err := copyPicoClawAdapterDir(tmpRoot, nextRoot); err != nil {
-    return err
-  }
-  _ = os.RemoveAll(oldRoot)
-  if _, err := os.Stat(activeRoot); err == nil {
-    if err := os.Rename(activeRoot, oldRoot); err != nil {
-      return err
-    }
-  }
-  if err := os.Rename(nextRoot, activeRoot); err != nil {
-    if _, statErr := os.Stat(oldRoot); statErr == nil {
-      _ = os.Rename(oldRoot, activeRoot)
-    }
-    return err
-  }
-  _ = os.RemoveAll(oldRoot)
-  return nil
-}
 
 func migrationKey(from, to int) string {
   return fmt.Sprintf("%d:%d", from, to)
