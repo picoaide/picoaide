@@ -28,7 +28,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Format check
-        run: ./format.sh --check
+        run: bash format.sh --check
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
