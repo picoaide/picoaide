@@ -77,7 +77,15 @@ func (s *Server) handleMCPSSEServiceGet(c *gin.Context) {
     if host == "" {
       host = "100.64.0.1:80"
     }
-    postEndpoint := fmt.Sprintf("%s://%s/api/mcp/sse/%s?token=%s", scheme, host, serviceName, token)
+    // 动态提取路径前缀，兼容 /api/mcp/sse 和 /api/v1/mcp/sse 等任意前缀
+    ssePath := "/api/mcp/sse/" + serviceName
+    pathPrefix := c.Request.URL.Path
+    if idx := strings.Index(pathPrefix, ssePath); idx >= 0 {
+      pathPrefix = pathPrefix[:idx]
+    } else {
+      pathPrefix = "/api"
+    }
+    postEndpoint := fmt.Sprintf("%s://%s%s/mcp/sse/%s?token=%s", scheme, host, pathPrefix, serviceName, token)
     fmt.Fprintf(c.Writer, "event: endpoint\ndata: %s\n\n", postEndpoint)
   } else {
     // Flush a comment frame so Streamable HTTP clients finish the standalone

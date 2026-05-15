@@ -103,6 +103,15 @@ func (s *Server) handleHealth(c *gin.Context) {
   })
 }
 
+// handleVersion 返回 API 版本信息
+func (s *Server) handleVersion(c *gin.Context) {
+  writeJSON(c, http.StatusOK, gin.H{
+    "current":   "v1",
+    "supported": []string{"v1"},
+    "version":   config.Version,
+  })
+}
+
 // ============================================================
 // 认证 Handler
 // ============================================================
