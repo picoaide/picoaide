@@ -116,10 +116,22 @@ type PicoClawAdapterHashEntry struct {
 }
 
 func NewPicoClawAdapterPackage(cacheDir string) (*PicoClawAdapterPackage, error) {
-  if err := ReleasePicoClawAdapterCacheIfValid(cacheDir); err != nil {
+  engine, err := auth.GetEngine()
+  if err == nil {
+    pkg, err := PicoClawAdapterPackageFromDB(engine)
+    if err == nil && pkg != nil {
+      return pkg, nil
+    }
+  }
+  // DB 无数据，从 embed 加载并写入 DB
+  pkg, err := NewPicoClawAdapterPackageFromEmbed()
+  if err != nil {
     return nil, err
   }
-  return LoadPicoClawAdapterPackage(filepath.Join(cacheDir, picoclawAdapterDir))
+  if engine != nil {
+    _ = SavePicoClawAdapterPackageToDB(engine, pkg, "")
+  }
+  return pkg, nil
 }
 
 func ForceReleasePicoClawAdapterCache(cacheDir string) error {
