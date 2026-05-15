@@ -1,4 +1,4 @@
-var rawConfig = {};
+var rawConfig = Object.create(null);
 var providers = [];
 var whitelistLoadSeq = 0;
 var initialized = false;
@@ -50,23 +50,20 @@ function getConfigValue(key) {
 }
 
 function setConfigValue(key, value) {
+  if (key.indexOf('__proto__') >= 0) return;
+  if (key === 'constructor' || key.indexOf('.constructor') >= 0) return;
+  if (key === 'prototype' || key.indexOf('.prototype') >= 0) return;
   var parts = key.split('.');
   var current = rawConfig;
   for (var i = 0; i < parts.length - 1; i++) {
     var part = parts[i];
-    if (part === '__proto__' || part === 'constructor' || part === 'prototype') {
-      return;
-    }
-    if (!Object.prototype.hasOwnProperty.call(current, part) || typeof current[part] !== 'object') {
+    if (typeof current[part] !== 'object' || current[part] === null) {
       current[part] = Object.create(null);
     }
     current = current[part];
   }
-  var lastPart = parts[parts.length - 1];
-  if (lastPart === '__proto__' || lastPart === 'constructor' || lastPart === 'prototype') {
-    return;
-  }
-  current[lastPart] = value;
+  var lastKey = parts[parts.length - 1];
+  current[lastKey] = value;
 }
 
 // ============================================================
