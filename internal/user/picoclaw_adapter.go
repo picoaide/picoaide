@@ -209,7 +209,7 @@ func RefreshPicoClawAdapterFromRemote(cacheDir, remoteBaseURL string, client *ht
 // 支持多个回退 URL，按顺序尝试，成功后立即返回
 func RefreshPicoClawAdapterFromRemoteIfChanged(cacheDir string, remoteBaseURLs []string, client *http.Client) (*PicoClawAdapterPackage, bool, error) {
   if len(remoteBaseURLs) == 0 {
-    return nil, false, errors.New("Picoclaw adapter remote base URLs are empty")
+    return nil, false, errors.New("picoclaw adapter remote base URLs are empty")
   }
   if client == nil {
     client = &http.Client{Timeout: 20 * time.Second}
@@ -528,17 +528,17 @@ func (p *PicoClawAdapterPackage) Validate() error {
   seenVersions := map[string]bool{}
   for _, version := range p.Index.PicoClawVersions {
     if !validPicoClawVersion(version.Version) {
-      return fmt.Errorf("Picoclaw 版本格式不合法: %s", version.Version)
+      return fmt.Errorf("picoclaw 版本格式不合法: %s", version.Version)
     }
     if version.ConfigVersion <= 0 {
-      return fmt.Errorf("Picoclaw %s 缺少 config_version", version.Version)
+      return fmt.Errorf("picoclaw %s 缺少 config_version", version.Version)
     }
     if version.ConfigVersion > p.Index.LatestSupportedConfigVersion {
-      return fmt.Errorf("Picoclaw %s config_version=%d 超过 adapter latest_supported_config_version=%d", version.Version, version.ConfigVersion, p.Index.LatestSupportedConfigVersion)
+      return fmt.Errorf("picoclaw %s config_version=%d 超过 adapter latest_supported_config_version=%d", version.Version, version.ConfigVersion, p.Index.LatestSupportedConfigVersion)
     }
     normalized := normalizeVersion(version.Version)
     if seenVersions[normalized] {
-      return fmt.Errorf("Picoclaw 版本重复: %s", version.Version)
+      return fmt.Errorf("picoclaw 版本重复: %s", version.Version)
     }
     seenVersions[normalized] = true
     if _, ok := p.ConfigSchemas[version.ConfigVersion]; !ok {

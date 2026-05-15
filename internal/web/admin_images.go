@@ -60,9 +60,7 @@ func (s *Server) handleAdminImages(c *gin.Context) {
   for _, img := range images {
     // 短 ID（去掉 sha256: 前缀，取 12 位）
     shortID := img.ID
-    if strings.HasPrefix(shortID, "sha256:") {
-      shortID = shortID[7:]
-    }
+    shortID = strings.TrimPrefix(shortID, "sha256:")
     if len(shortID) > 12 {
       shortID = shortID[:12]
     }
