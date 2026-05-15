@@ -68,6 +68,7 @@ RUN NODE_BIN=$(find /root/.nvm/versions/node -name node -path "*/bin/node" 2>/de
     echo "NODE_DIR=$NODE_DIR" && \
     echo "export PATH=\"${NODE_DIR}/bin:\$PATH\"" >> /etc/profile.d/nvm.sh && \
     echo "export NODE_PATH=\"${NODE_DIR}/lib/node_modules\"" >> /etc/profile.d/nvm.sh
+# Node.js 版本由 nvm 安装决定，如需更新：检查 docker/CLAUDE.md 中的 LTS 版本
 ENV PATH="/root/.nvm/versions/node/v24.15.0/bin:$PATH" \
     NODE_PATH="/root/.nvm/versions/node/v24.15.0/lib/node_modules"
 

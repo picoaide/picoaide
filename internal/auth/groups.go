@@ -123,9 +123,22 @@ func AddUsersToGroup(groupName string, usernames []string) error {
   if err != nil {
     return err
   }
+  if err := ensureDB(); err != nil {
+    return err
+  }
+  session := engine.NewSession()
+  defer session.Close()
+  if err := session.Begin(); err != nil {
+    return err
+  }
   for _, u := range usernames {
-    // INSERT OR IGNORE 避免重复插入
-    engine.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", u, gid)
+    if _, err := session.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", u, gid); err != nil {
+      session.Rollback()
+      return err
+    }
+  }
+  if err := session.Commit(); err != nil {
+    return err
   }
   slog.Info("audit", "type", "AUDIT", "action", "group.members.add", "group", groupName, "usernames", usernames)
   return nil

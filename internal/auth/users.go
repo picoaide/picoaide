@@ -5,6 +5,7 @@ import (
   "crypto/subtle"
   "encoding/base64"
   "fmt"
+  "log/slog"
   "math/big"
   "strings"
 
@@ -170,7 +171,11 @@ func AuthenticateLocal(username, password string) (bool, string, error) {
   }
   if needsUpgrade {
     if hash, err := hashPassword(password); err == nil {
-      _, _ = engine.ID(user.ID).Cols("password_hash").Update(&LocalUser{PasswordHash: hash})
+      if _, err := engine.ID(user.ID).Cols("password_hash").Update(&LocalUser{PasswordHash: hash}); err != nil {
+        slog.Warn("密码哈希升级写入失败", "username", username, "error", err)
+      }
+    } else {
+      slog.Warn("密码哈希升级生成失败", "username", username, "error", err)
     }
   }
 
@@ -182,7 +187,11 @@ func UserExists(username string) bool {
   if ensureDB() != nil {
     return false
   }
-  has, _ := engine.Where("username = ?", username).Exist(&LocalUser{})
+  has, err := engine.Where("username = ?", username).Exist(&LocalUser{})
+  if err != nil {
+    slog.Error("检查用户是否存在失败", "username", username, "error", err)
+    return false
+  }
   return has
 }
 

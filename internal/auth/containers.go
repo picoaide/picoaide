@@ -148,7 +148,10 @@ func AllocateNextIP() (string, error) {
     return "", err
   }
   var rec ContainerRecord
-  has, _ := engine.Where("ip IS NOT NULL AND ip != ''").OrderBy("id DESC").Limit(1).Get(&rec)
+  has, err := engine.Where("ip IS NOT NULL AND ip != ''").OrderBy("id DESC").Limit(1).Get(&rec)
+  if err != nil {
+    return "100.64.0.2", nil
+  }
   if !has || rec.IP == "" {
     return "100.64.0.2", nil
   }
