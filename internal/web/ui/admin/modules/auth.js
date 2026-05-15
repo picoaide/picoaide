@@ -51,19 +51,22 @@ function getConfigValue(key) {
 
 function setConfigValue(key, value) {
   var parts = key.split('.');
-  for (var i = 0; i < parts.length; i++) {
-    if (parts[i] === '__proto__' || parts[i] === 'constructor' || parts[i] === 'prototype') {
-      return;
-    }
-  }
   var current = rawConfig;
   for (var i = 0; i < parts.length - 1; i++) {
-    if (!current[parts[i]] || typeof current[parts[i]] !== 'object') {
-      current[parts[i]] = {};
+    var part = parts[i];
+    if (part === '__proto__' || part === 'constructor' || part === 'prototype') {
+      return;
     }
-    current = current[parts[i]];
+    if (!Object.prototype.hasOwnProperty.call(current, part) || typeof current[part] !== 'object') {
+      current[part] = Object.create(null);
+    }
+    current = current[part];
   }
-  current[parts[parts.length - 1]] = value;
+  var lastPart = parts[parts.length - 1];
+  if (lastPart === '__proto__' || lastPart === 'constructor' || lastPart === 'prototype') {
+    return;
+  }
+  current[lastPart] = value;
 }
 
 // ============================================================
