@@ -19,6 +19,9 @@ import (
   "strconv"
   "strings"
   "time"
+
+  "github.com/picoaide/picoaide/internal/auth"
+  "xorm.io/xorm"
 )
 
 const PicoAideSupportedAdapterSchemaVersion = 1
@@ -98,6 +101,13 @@ type PicoClawAdapterPackage struct {
   ConfigSchemas map[int]PicoClawConfigSchema
   UISchemas     map[int]PicoClawUISchema
   Migrations    map[string]PicoClawConfigMigration
+}
+
+type SerializableAdapterContent struct {
+  Index         PicoClawAdapterIndex              `json:"index"`
+  ConfigSchemas map[int]PicoClawConfigSchema      `json:"config_schemas"`
+  UISchemas     map[int]PicoClawUISchema          `json:"ui_schemas"`
+  Migrations    map[string]PicoClawConfigMigration `json:"migrations"`
 }
 
 type PicoClawAdapterHashEntry struct {
@@ -513,6 +523,68 @@ func (p *PicoClawAdapterPackage) Validate() error {
     if err := p.validateUIChannelCoverage(version); err != nil {
       return err
     }
+  }
+  return nil
+}
+
+func (p *PicoClawAdapterPackage) Serialize() (string, error) {
+  content := SerializableAdapterContent{
+    Index:         p.Index,
+    ConfigSchemas: p.ConfigSchemas,
+    UISchemas:     p.UISchemas,
+    Migrations:    p.Migrations,
+  }
+  data, err := json.Marshal(content)
+  if err != nil {
+    return "", fmt.Errorf("序列化适配器包失败: %w", err)
+  }
+  return string(data), nil
+}
+
+var picoclawAdapterTableName = (&auth.PicoclawAdapterPackage{}).TableName()
+
+func PicoClawAdapterPackageFromDB(engine *xorm.Engine) (*PicoClawAdapterPackage, error) {
+  record := &auth.PicoclawAdapterPackage{}
+  has, err := engine.Desc("id").Get(record)
+  if err != nil {
+    return nil, fmt.Errorf("读取数据库适配器包失败: %w", err)
+  }
+  if !has {
+    return nil, nil
+  }
+  var content SerializableAdapterContent
+  if err := json.Unmarshal([]byte(record.Content), &content); err != nil {
+    return nil, fmt.Errorf("解析适配器包内容失败: %w", err)
+  }
+  pkg := &PicoClawAdapterPackage{
+    Index:         content.Index,
+    ConfigSchemas: content.ConfigSchemas,
+    UISchemas:     content.UISchemas,
+    Migrations:    content.Migrations,
+  }
+  return pkg, nil
+}
+
+func SavePicoClawAdapterPackageToDB(engine *xorm.Engine, pkg *PicoClawAdapterPackage, hash string) error {
+  content, err := pkg.Serialize()
+  if err != nil {
+    return err
+  }
+  now := time.Now().Format("2006-01-02 15:04:05")
+  record := &auth.PicoclawAdapterPackage{
+    AdapterVersion:               pkg.Index.AdapterVersion,
+    AdapterSchemaVersion:         pkg.Index.AdapterSchemaVersion,
+    LatestSupportedConfigVersion: pkg.Index.LatestSupportedConfigVersion,
+    Content:                      content,
+    Hash:                         hash,
+    RefreshedAt:                  now,
+    CreatedAt:                    now,
+  }
+  if _, err := engine.Where("1=1").Delete(&auth.PicoclawAdapterPackage{}); err != nil {
+    return fmt.Errorf("清理旧适配器包失败: %w", err)
+  }
+  if _, err := engine.Insert(record); err != nil {
+    return fmt.Errorf("保存适配器包到数据库失败: %w", err)
   }
   return nil
 }
