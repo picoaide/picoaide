@@ -13,7 +13,6 @@ import (
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
   dockerpkg "github.com/picoaide/picoaide/internal/docker"
-  "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
   "github.com/picoaide/picoaide/internal/web"
@@ -28,7 +27,8 @@ func printUsage() {
   %s <command> [options]
 
 命令:
-  init                    静默全自动初始化
+  init                    首次运行全自动初始化
+  serve                   启动 Web 管理面板
   reset-password <用户>   重置超管密码
 
 全局选项:
@@ -65,6 +65,12 @@ func main() {
   case "init":
     runInitSilent()
 
+  case "serve":
+    if err := web.Serve(); err != nil {
+      fmt.Fprintf(os.Stderr, "Web 服务启动失败: %v\n", err)
+      os.Exit(1)
+    }
+
   case "reset-password":
     _, positional := util.ParseFlags(cmdArgs)
     if len(positional) == 0 {
@@ -85,44 +91,7 @@ func main() {
     }
 
   default:
-    wd, _ := os.Getwd()
-    if err := auth.InitDB(wd); err != nil {
-      os.MkdirAll(wd, 0755)
-      if err := auth.InitDB(wd); err != nil {
-        fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
-        os.Exit(1)
-      }
-    }
-
-    count, _ := config.SettingsCount()
-    if count == 0 {
-      if err := config.InitDBDefaults(); err != nil {
-        fmt.Fprintf(os.Stderr, "初始化默认配置失败: %v\n", err)
-        os.Exit(1)
-      }
-    }
-
-  cfg, err := config.LoadFromDB()
-  if err != nil {
-    fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
-    os.Exit(1)
-  }
-  if err := user.ReleasePicoClawMigrationRulesCacheIfValid(config.RuleCacheDir()); err != nil {
-    fmt.Fprintf(os.Stderr, "警告: 初始化迁移规则缓存失败: %v\n", err)
-  }
-
-  wd, _ = os.Getwd()
-    retention := cfg.Web.LogRetention
-    if retention == "" {
-      retention = "6m"
-    }
-    logger.Init(wd, retention, false, cfg.Web.LogLevel)
-    defer logger.Close()
-
-    if err := web.Serve(cfg); err != nil {
-      fmt.Fprintf(os.Stderr, "Web 服务启动失败: %v\n", err)
-      os.Exit(1)
-    }
+    printUsage()
   }
 }
 

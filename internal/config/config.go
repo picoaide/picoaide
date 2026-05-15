@@ -340,7 +340,7 @@ After=network.target docker.service
 
 [Service]
 Type=simple
-ExecStart=/usr/sbin/picoaide
+ExecStart=/usr/sbin/picoaide serve
 WorkingDirectory={{.WorkingDir}}
 Restart=always
 RestartSec=5
