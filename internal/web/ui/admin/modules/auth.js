@@ -54,6 +54,11 @@ function setConfigValue(key, value) {
   if (key === 'constructor' || key.indexOf('.constructor') >= 0) return;
   if (key === 'prototype' || key.indexOf('.prototype') >= 0) return;
   var parts = key.split('.');
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i] === '__proto__' || parts[i] === 'constructor' || parts[i] === 'prototype') {
+      return;
+    }
+  }
   var current = rawConfig;
   for (var i = 0; i < parts.length - 1; i++) {
     var part = parts[i];
