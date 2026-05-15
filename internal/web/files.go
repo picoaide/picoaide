@@ -90,7 +90,7 @@ func (s *Server) resolveFileRoot(username, relPath string) (*fileRoot, error) {
 
   if parts[0] == "share" {
     // 访问共享文件夹
-    shareName := parts[1]
+    shareName := filepath.Base(parts[1])
     if err := util.SafePathSegment(shareName); err != nil {
       return nil, fmt.Errorf("非法共享文件夹名称")
     }
