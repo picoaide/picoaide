@@ -201,7 +201,8 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
   // 获取镜像标签参数，未指定时自动使用本地最新标签
   imageTag := c.PostForm("image_tag")
   if imageTag == "" {
-    ctx := contextWithTimeout(10)
+    ctx, cancel := contextWithTimeout(10)
+    defer cancel()
     defaultTag, err := s.defaultUserImageTag(ctx)
     if err != nil {
       auth.DeleteUser(username)
@@ -273,7 +274,8 @@ func (s *Server) handleAdminUserBatchCreate(c *gin.Context) {
 
   imageTag := strings.TrimSpace(c.PostForm("image_tag"))
   if imageTag == "" {
-    ctx := contextWithTimeout(10)
+    ctx, cancel := contextWithTimeout(10)
+    defer cancel()
     defaultTag, err := s.defaultUserImageTag(ctx)
     if err != nil {
       writeError(c, http.StatusInternalServerError, "获取默认镜像失败: "+err.Error())

@@ -625,7 +625,9 @@ func (s *Server) userEnvironmentReady(username string) bool {
   if rec.ContainerID == "" {
     return false
   }
-  return dockerpkg.ContainerStatus(contextWithTimeout(5), rec.ContainerID) == "running"
+  ctx, cancel := contextWithTimeout(5)
+  defer cancel()
+  return dockerpkg.ContainerStatus(ctx, rec.ContainerID) == "running"
 }
 
 func (s *Server) handleUserInitStatus(c *gin.Context) {
@@ -641,7 +643,9 @@ func (s *Server) handleUserInitStatus(c *gin.Context) {
   if rec != nil {
     status = rec.Status
     if s.dockerAvailable && rec.ContainerID != "" {
-      status = dockerpkg.ContainerStatus(contextWithTimeout(5), rec.ContainerID)
+      ctxSt, cancelSt := contextWithTimeout(5)
+      defer cancelSt()
+      status = dockerpkg.ContainerStatus(ctxSt, rec.ContainerID)
     }
     imageReady = rec.Image != ""
     if err := user.ValidateUsername(username); err == nil {

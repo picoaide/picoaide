@@ -28,7 +28,8 @@ func (s *Server) handleAdminImages(c *gin.Context) {
     return
   }
 
-  ctx := contextWithTimeout(10)
+  ctx, cancel := contextWithTimeout(10)
+  defer cancel()
   images, err := dockerpkg.ListLocalImages(ctx, s.cfg.Image.Name)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "获取镜像列表失败: "+err.Error())
@@ -229,7 +230,8 @@ func (s *Server) handleAdminImageDelete(c *gin.Context) {
   }
   if len(dependentUsers) > 0 {
     // 查找本地其他可用镜像作为迁移目标
-    ctxList := contextWithTimeout(10)
+    ctxList, cancelList := contextWithTimeout(10)
+    defer cancelList()
     localImgs, _ := dockerpkg.ListLocalImages(ctxList, s.cfg.Image.Name)
     var alternatives []string
     for _, img := range localImgs {
@@ -252,7 +254,8 @@ func (s *Server) handleAdminImageDelete(c *gin.Context) {
   }
 
   // 检查镜像是否存在
-  ctx := contextWithTimeout(30)
+  ctx, cancel := contextWithTimeout(30)
+  defer cancel()
   if !dockerpkg.ImageExists(ctx, imageRef) {
     writeError(c, http.StatusNotFound, "镜像 "+imageRef+" 不存在")
     return
@@ -277,7 +280,8 @@ func (s *Server) handleAdminImageRegistry(c *gin.Context) {
   }
 
   // 远程标签始终从 GitHub Container Registry 获取
-  ctx := contextWithTimeout(15)
+  ctx, cancel := contextWithTimeout(15)
+  defer cancel()
   tags, err := dockerpkg.ListRegistryTags(ctx, s.cfg.Image.RepoName())
   if err != nil {
     writeError(c, http.StatusInternalServerError, "获取远程标签失败: "+err.Error())
@@ -396,7 +400,8 @@ func (s *Server) handleAdminLocalTags(c *gin.Context) {
     return
   }
 
-  ctx := contextWithTimeout(10)
+  ctx, cancel := contextWithTimeout(10)
+  defer cancel()
   tags, err := dockerpkg.ListLocalTags(ctx, s.cfg.Image.Name)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "获取本地标签失败: "+err.Error())

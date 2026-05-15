@@ -664,7 +664,8 @@ func Serve() error {
   if err := dockerpkg.InitClient(); err != nil {
     slog.Warn("Docker 不可用，容器操作将被禁用", "error", err)
   } else {
-    ctx := contextWithTimeout(5)
+    ctx, cancel := contextWithTimeout(5)
+    defer cancel()
     if err := dockerpkg.EnsureNetwork(ctx); err != nil {
       slog.Warn("网络初始化失败", "error", err)
     }
@@ -790,11 +791,6 @@ func gracefulShutdown(srv, redirectSrv *http.Server, dockerOK bool, syncCancel c
   return nil
 }
 
-func contextWithTimeout(sec int) context.Context {
-  ctx, cancel := context.WithTimeout(context.Background(), time.Duration(sec)*time.Second)
-  go func() {
-    <-ctx.Done()
-    cancel()
-  }()
-  return ctx
+func contextWithTimeout(sec int) (context.Context, context.CancelFunc) {
+  return context.WithTimeout(context.Background(), time.Duration(sec)*time.Second)
 }
