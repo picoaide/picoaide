@@ -60,6 +60,32 @@ export async function init(ctx) {
     } catch (e) { showMsg('#settings-msg', e.message, false); }
   }
 
+  // 技能市场开关
+  await loadSkillPolicy();
+  $('#skill-install-toggle')?.addEventListener('change', async function() {
+    var disabled = !this.checked;
+    showMsg('#settings-msg', '保存中...', true);
+    try {
+      var res = await Api.post('/api/admin/skill-install-policy', { disabled: String(disabled) });
+      showMsg('#settings-msg', res.message || (res.success ? (disabled ? '已禁止市场安装' : '已允许市场安装') : res.error), res.success);
+    } catch (e) {
+      this.checked = !this.checked;
+      showMsg('#settings-msg', e.message, false);
+    }
+  });
+
+  async function loadSkillPolicy() {
+    try {
+      var res = await Api.get('/api/admin/skill-install-policy');
+      if (res.disabled !== undefined) {
+        $('#skill-install-toggle').checked = !res.disabled;
+      }
+    } catch (e) {
+      var el = $('#skill-install-toggle');
+      if (el) el.disabled = true;
+    }
+  }
+
   async function loadMigrationRulesInfo() {
     try {
       var res = await Api.get('/api/admin/migration-rules');

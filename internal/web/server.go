@@ -230,7 +230,6 @@ func (s *Server) sessionUserAllowed(username string) bool {
   return rec != nil
 }
 
-
 // getSessionUser 从请求的 cookie 中提取已登录的用户名
 func (s *Server) getSessionUser(c *gin.Context) string {
   cookie, err := c.Cookie("session")
@@ -553,6 +552,8 @@ func (s *Server) registerAPIRoutes(g *gin.RouterGroup) {
     admin.GET("/tls/status", s.handleAdminTLSStatus)
     admin.POST("/tls/upload", s.handleAdminTLSUpload)
     admin.GET("/task/status", s.handleAdminTaskStatus)
+    admin.GET("/skill-install-policy", s.handleAdminSkillInstallPolicyGet)
+    admin.POST("/skill-install-policy", s.handleAdminSkillInstallPolicySet)
   }
   // 普通用户 - 团队空间
   g.GET("/shared-folders", s.handleSharedFolders)

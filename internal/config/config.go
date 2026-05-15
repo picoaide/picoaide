@@ -113,9 +113,9 @@ type WebConfig struct {
   Listen           string
   ContainerBaseURL string
   LDAPEnabled      *bool
-  AuthMode         string    // "ldap" | "oidc" | "local"
-  LogRetention     string    // "1m","3m","6m","1y","3y","5y","forever"
-  LogLevel         string    // "debug","info","warn","error"
+  AuthMode         string // "ldap" | "oidc" | "local"
+  LogRetention     string // "1m","3m","6m","1y","3y","5y","forever"
+  LogLevel         string // "debug","info","warn","error"
   TLS              TLSConfig
 }
 
@@ -170,7 +170,7 @@ type SkillsSourceWrapper struct {
 }
 
 type SkillsConfig struct {
-  Repos   []SkillRepo          `json:"-"`
+  Repos   []SkillRepo           `json:"-"`
   Sources []SkillsSourceWrapper `json:"sources"`
 }
 
@@ -815,6 +815,19 @@ func DefaultGlobalConfig() *GlobalConfig {
         },
       },
       "tools": map[string]interface{}{
+        "install_skill": map[string]interface{}{
+          "enabled": false,
+        },
+        "skills": map[string]interface{}{
+          "registries": map[string]interface{}{
+            "clawhub": map[string]interface{}{
+              "enabled": false,
+            },
+            "github": map[string]interface{}{
+              "enabled": false,
+            },
+          },
+        },
         "web": map[string]interface{}{
           "duckduckgo": map[string]interface{}{
             "enabled": true,
