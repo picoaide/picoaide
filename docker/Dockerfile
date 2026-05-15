@@ -91,7 +91,8 @@ RUN ARCH=$(uname -m) && \
     mv /tmp/picoclaw /usr/bin/ && \
     rm /tmp/picoclaw.tar.gz && \
     picoclaw version && \
-    picoclaw onboard
+    picoclaw onboard && \
+    rm -rf /root/.picoclaw/workspace/skills/
 
 # MCP server 由 PicoAide Go 服务端直接提供，通过 SSE 连接
 

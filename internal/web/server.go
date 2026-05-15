@@ -230,7 +230,6 @@ func (s *Server) sessionUserAllowed(username string) bool {
   return rec != nil
 }
 
-
 // getSessionUser 从请求的 cookie 中提取已登录的用户名
 func (s *Server) getSessionUser(c *gin.Context) string {
   cookie, err := c.Cookie("session")
@@ -292,8 +291,8 @@ func (s *Server) secureHeaders() gin.HandlerFunc {
     c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 
     if (c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") &&
-      c.Request.URL.Path != "/api/files/upload" &&
-      c.Request.URL.Path != "/api/admin/migration-rules/upload" {
+      !strings.HasSuffix(c.Request.URL.Path, "/files/upload") &&
+      !strings.HasSuffix(c.Request.URL.Path, "/migration-rules/upload") {
       c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
     }
 
@@ -400,7 +399,9 @@ func (s *Server) imageRequiredMiddleware() gin.HandlerFunc {
       c.Next()
       return
     }
-    if strings.HasPrefix(c.Request.URL.Path, "/api/admin/images") {
+    // 兼容 /api/admin/images 和 /api/v1/admin/images 等任意前缀
+    path := c.Request.URL.Path
+    if strings.HasSuffix(path, "/admin/images") || strings.Contains(path, "/admin/images/") {
       c.Next()
       return
     }
@@ -424,63 +425,61 @@ func (s *Server) imageRequiredMiddleware() gin.HandlerFunc {
   }
 }
 
-// RegisterRoutes 将所有 API 路由注册到 Gin 引擎
-func (s *Server) RegisterRoutes(r *gin.Engine) {
-  s.registerUIRoutes(r)
-
+// registerAPIRoutes 将所有 API 路由注册到指定的路由组（用于 /api 和 /api/v1 双路径注册）
+func (s *Server) registerAPIRoutes(g *gin.RouterGroup) {
   // 健康检查（无需认证）
-  r.GET("/api/health", s.handleHealth)
+  g.GET("/health", s.handleHealth)
 
   // 认证
-  login := r.Group("/api/login")
+  login := g.Group("/login")
   login.Use(s.rateLimitLogin())
   login.POST("", s.handleLogin)
   login.GET("/auth", s.handleAuthStart)
   login.GET("/callback", s.handleAuthCallback)
-  r.GET("/api/login/mode", s.handleLoginMode)
+  g.GET("/login/mode", s.handleLoginMode)
 
-  r.POST("/api/logout", s.handleLogout)
-  r.GET("/api/user/info", s.handleUserInfo)
-  r.GET("/api/user/init-status", s.handleUserInitStatus)
-  r.POST("/api/user/password", s.handleChangePassword)
+  g.POST("/logout", s.handleLogout)
+  g.GET("/user/info", s.handleUserInfo)
+  g.GET("/user/init-status", s.handleUserInitStatus)
+  g.POST("/user/password", s.handleChangePassword)
   // 钉钉配置
-  r.GET("/api/dingtalk", s.handleDingTalkGet)
-  r.POST("/api/dingtalk", s.handleDingTalkSave)
+  g.GET("/dingtalk", s.handleDingTalkGet)
+  g.POST("/dingtalk", s.handleDingTalkSave)
   // 配置管理（超管）
-  r.GET("/api/config", s.handleConfigGet)
-  r.POST("/api/config", s.handleConfigSave)
-  r.GET("/api/picoclaw/channels", s.handlePicoClawChannelsGet)
-  r.GET("/api/picoclaw/config-fields", s.handlePicoClawConfigFieldsGet)
-  r.POST("/api/picoclaw/config-fields", s.handlePicoClawConfigFieldsSave)
+  g.GET("/config", s.handleConfigGet)
+  g.POST("/config", s.handleConfigSave)
+  g.GET("/picoclaw/channels", s.handlePicoClawChannelsGet)
+  g.GET("/picoclaw/config-fields", s.handlePicoClawConfigFieldsGet)
+  g.POST("/picoclaw/config-fields", s.handlePicoClawConfigFieldsSave)
   // 文件管理
-  r.GET("/api/files", s.handleFiles)
-  r.POST("/api/files/upload", s.handleFileUpload)
-  r.GET("/api/files/download", s.handleFileDownload)
-  r.POST("/api/files/delete", s.handleFileDelete)
-  r.POST("/api/files/mkdir", s.handleFileMkdir)
-  r.GET("/api/files/edit", s.handleFileEditGet)
-  r.POST("/api/files/edit", s.handleFileEditSave)
+  g.GET("/files", s.handleFiles)
+  g.POST("/files/upload", s.handleFileUpload)
+  g.GET("/files/download", s.handleFileDownload)
+  g.POST("/files/delete", s.handleFileDelete)
+  g.POST("/files/mkdir", s.handleFileMkdir)
+  g.GET("/files/edit", s.handleFileEditGet)
+  g.POST("/files/edit", s.handleFileEditSave)
   // Cookie 同步（写入用户 .security.yml）
-  r.POST("/api/cookies", s.handleCookies)
+  g.POST("/cookies", s.handleCookies)
   // 用户 Cookie 授权管理（查看已授权域名、取消授权）
-  r.GET("/api/user/cookies", s.handleUserCookies)
-  r.POST("/api/user/cookies/delete", s.handleUserCookiesDelete)
+  g.GET("/user/cookies", s.handleUserCookies)
+  g.POST("/user/cookies/delete", s.handleUserCookiesDelete)
   // CSRF token
-  r.GET("/api/csrf", s.handleCSRF)
+  g.GET("/csrf", s.handleCSRF)
   // MCP token（Extension 获取认证 token）
-  r.GET("/api/mcp/token", s.handleMCPToken)
+  g.GET("/mcp/token", s.handleMCPToken)
   // MCP SSE 服务（参数化路由，支持 browser、computer 等服务）
-  r.GET("/api/mcp/sse/:service", s.handleMCPSSEServiceGet)
-  r.POST("/api/mcp/sse/:service", s.handleMCPSSEServicePost)
+  g.GET("/mcp/sse/:service", s.handleMCPSSEServiceGet)
+  g.POST("/mcp/sse/:service", s.handleMCPSSEServicePost)
   // MCP Cookie API（MCP token 认证，供容器内技能读写 cookie）
-  r.GET("/api/mcp/cookies", s.handleMCPCookiesGet)
-  r.POST("/api/mcp/cookies", s.handleMCPCookiesPost)
+  g.GET("/mcp/cookies", s.handleMCPCookiesGet)
+  g.POST("/mcp/cookies", s.handleMCPCookiesPost)
   // Browser Extension WebSocket
-  r.GET("/api/browser/ws", s.handleBrowserWS)
+  g.GET("/browser/ws", s.handleBrowserWS)
   // Computer 桌面代理 WebSocket
-  r.GET("/api/computer/ws", s.handleComputerWS)
+  g.GET("/computer/ws", s.handleComputerWS)
   // 超管 API 路由组（含镜像拦截中间件）
-  admin := r.Group("/api/admin")
+  admin := g.Group("/admin")
   admin.Use(s.imageRequiredMiddleware())
   {
     admin.GET("/users", s.handleAdminUsers)
@@ -526,7 +525,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
     admin.POST("/skills/registry/install", s.handleAdminSkillsRegistryInstall)
     admin.GET("/skills/defaults", s.handleAdminSkillsDefaults)
     admin.POST("/skills/defaults/toggle", s.handleAdminSkillsDefaultsToggle)
-    // 镜像管理（中间件内部已放行 /api/admin/images 前缀）
+    // 镜像管理
     admin.GET("/images", s.handleAdminImages)
     admin.POST("/images/pull", s.handleAdminImagePull)
     admin.POST("/images/delete", s.handleAdminImageDelete)
@@ -553,13 +552,23 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
     admin.GET("/tls/status", s.handleAdminTLSStatus)
     admin.POST("/tls/upload", s.handleAdminTLSUpload)
     admin.GET("/task/status", s.handleAdminTaskStatus)
+    admin.GET("/skill-install-policy", s.handleAdminSkillInstallPolicyGet)
+    admin.POST("/skill-install-policy", s.handleAdminSkillInstallPolicySet)
   }
   // 普通用户 - 团队空间
-  r.GET("/api/shared-folders", s.handleSharedFolders)
+  g.GET("/shared-folders", s.handleSharedFolders)
   // 普通用户 - 技能中心
-  r.GET("/api/user/skills", s.handleUserSkills)
-  r.POST("/api/user/skills/install", s.handleUserSkillsInstall)
-  r.POST("/api/user/skills/uninstall", s.handleUserSkillsUninstall)
+  g.GET("/user/skills", s.handleUserSkills)
+  g.POST("/user/skills/install", s.handleUserSkillsInstall)
+  g.POST("/user/skills/uninstall", s.handleUserSkillsUninstall)
+}
+
+// RegisterRoutes 将所有 API 路由注册到 Gin 引擎
+func (s *Server) RegisterRoutes(r *gin.Engine) {
+  s.registerUIRoutes(r)
+  s.registerAPIRoutes(r.Group("/api"))
+  s.registerAPIRoutes(r.Group("/api/v1"))
+  r.GET("/api/version", s.handleVersion)
 }
 
 // setSessionCookie 设置 session cookie

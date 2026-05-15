@@ -67,6 +67,18 @@
 </div>
 
 <div class="card">
+  <div class="card-header">技能安装策略</div>
+  <div class="field">
+    <label>允许用户从三方市场安装技能</label>
+    <label class="toggle-switch">
+      <input type="checkbox" id="skill-install-toggle">
+      <span class="toggle-switch-control"></span>
+    </label>
+  </div>
+  <p class="text-sm text-muted" style="margin-top:8px" id="skill-policy-desc">关闭时，用户仅可通过 PicoAide 技能中心安装技能；开启后，用户还可通过 AI 助手从 ClawHub、GitHub 等三方市场自行搜索和安装。</p>
+</div>
+
+<div class="card">
   <div class="card-header">网关</div>
   <div class="grid-2">
     <div class="field"><label>监听地址</label><input type="text" data-path="picoclaw.gateway.host" placeholder="0.0.0.0"></div>
