@@ -8,6 +8,10 @@ linters:
   enable:
     - govet
     - ineffassign
+    - errcheck
+    - staticcheck
+    - gosimple
+    - unused
 
 issues:
   max-issues-per-linter: 50
