@@ -59,9 +59,6 @@ func NewPicoClawMigrationService(cacheDir string) (*PicoClawMigrationService, er
   svc := &PicoClawMigrationService{
     cacheDir: cacheDir,
   }
-  if err := svc.ReleaseBundledRulesCache(); err != nil {
-    return nil, err
-  }
   rules, err := svc.loadRules()
   if err != nil {
     return nil, err
