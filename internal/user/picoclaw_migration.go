@@ -139,7 +139,7 @@ func (s *PicoClawMigrationService) EnsureUpgradeable(fromTag, toTag string) erro
     return err
   }
   if missing := s.rules.UnsupportedEndpointVersions(fromTag, toTag); len(missing) > 0 {
-    return fmt.Errorf("Picoclaw 版本未在当前适配包中声明（%s），默认只支持已适配版本间升级/降级。请更新配置适配包或发送 issue 催促管理员适配：%s", strings.Join(missing, ", "), PicoAideIssueURL)
+    return fmt.Errorf("picoclaw 版本未在当前适配包中声明（%s），默认只支持已适配版本间升级/降级。请更新配置适配包或发送 issue 催促管理员适配：%s", strings.Join(missing, ", "), PicoAideIssueURL)
   }
   if compareVersionStrings(fromTag, toTag) >= 0 {
     return nil
@@ -183,7 +183,7 @@ func (r PicoClawMigrationRuleSet) EnsureSupportedByPicoAide() error {
   }
   for _, version := range r.Versions {
     if version.ConfigVersion > PicoAideSupportedPicoClawConfigVersion {
-      return fmt.Errorf("Picoclaw %s 使用配置版本 %d，但当前 PicoAide 只支持到 %d，暂不允许升级镜像。请发送 issue 催促管理员适配新配置版本：%s", version.Version, version.ConfigVersion, PicoAideSupportedPicoClawConfigVersion, PicoAideIssueURL)
+      return fmt.Errorf("picoclaw %s 使用配置版本 %d，但当前 PicoAide 只支持到 %d，暂不允许升级镜像。请发送 issue 催促管理员适配新配置版本：%s", version.Version, version.ConfigVersion, PicoAideSupportedPicoClawConfigVersion, PicoAideIssueURL)
     }
   }
   return nil

@@ -542,14 +542,14 @@ func (p *PicoClawAdapterPackage) Validate() error {
     }
     seenVersions[normalized] = true
     if _, ok := p.ConfigSchemas[version.ConfigVersion]; !ok {
-      return fmt.Errorf("Picoclaw %s 引用的 config schema v%d 不存在", version.Version, version.ConfigVersion)
+      return fmt.Errorf("picoclaw %s 引用的 config schema v%d 不存在", version.Version, version.ConfigVersion)
     }
     if len(version.ChannelTypes) > 0 {
       schema := p.ConfigSchemas[version.ConfigVersion]
       allowed := stringSet(schema.ChannelTypes)
       for _, channelType := range version.ChannelTypes {
         if !allowed[channelType] {
-          return fmt.Errorf("Picoclaw %s channel_types 包含 config v%d 未声明的渠道: %s", version.Version, version.ConfigVersion, channelType)
+          return fmt.Errorf("picoclaw %s channel_types 包含 config v%d 未声明的渠道: %s", version.Version, version.ConfigVersion, channelType)
         }
       }
     }
@@ -778,7 +778,7 @@ func VerifyPicoClawAdapterHash(root string) error {
       return fmt.Errorf("读取 adapter 文件 %s 失败: %w", entry.Path, err)
     }
     if got := sha256Hex(data); got != entry.SHA256 {
-      return fmt.Errorf("Picoclaw adapter 文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
+      return fmt.Errorf("picoclaw adapter 文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
     }
     seen[entry.Path] = true
   }
