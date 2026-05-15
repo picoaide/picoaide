@@ -50,15 +50,6 @@ jobs:
           - goos: linux
             goarch: arm64
             suffix: linux-arm64
-          - goos: darwin
-            goarch: amd64
-            suffix: darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            suffix: darwin-arm64
-          - goos: windows
-            goarch: amd64
-            suffix: windows-amd64
     steps:
       - uses: actions/checkout@v5
 
@@ -81,22 +72,6 @@ jobs:
           name: picoaide-bin-${{ matrix.suffix }}
           path: picoaide-${{ matrix.suffix }}*
 
-  build-extension:
-    needs: [test]
-    permissions:
-      contents: read
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Package extension
-        run: sh scripts/package-extension.sh "${GITHUB_REF_NAME#v}" picoaide-extension.zip
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: picoaide-extension
-          path: picoaide-extension.zip
-
   build-desktop:
     needs: [test]
     permissions:
@@ -106,6 +81,8 @@ jobs:
         include:
           - os: ubuntu-latest
             suffix: linux-amd64
+          - os: macos-13
+            suffix: darwin-amd64
           - os: macos-latest
             suffix: darwin-arm64
           - os: windows-latest
@@ -134,7 +111,7 @@ jobs:
             picoaide-desktop/dist/picoaide-desktop-${{ matrix.suffix }}*.exe
 
   release:
-    needs: [build-server, build-extension, build-desktop]
+    needs: [build-server, build-desktop]
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -160,19 +137,14 @@ jobs:
           |------|------|------|
           | \`picoaide-linux-amd64\` | Linux x86_64 | 服务器部署（推荐） |
           | \`picoaide-linux-arm64\` | Linux ARM64 | 树莓派、AWS Graviton 等 |
-          | \`picoaide-darwin-amd64\` | macOS Intel | Intel Mac |
-          | \`picoaide-darwin-arm64\` | macOS Apple Silicon | M1/M2/M3/M4 |
-          | \`picoaide-windows-amd64.exe\` | Windows x86_64 | Windows 服务器 |
 
           ### 🖥 桌面客户端 PicoAide Desktop
           | 文件 | 平台 |
           |------|------|
           | \`picoaide-desktop-linux-amd64\` | Linux |
-          | \`picoaide-desktop-darwin-arm64\` | macOS |
+          | \`picoaide-desktop-darwin-amd64\` | macOS Intel |
+          | \`picoaide-desktop-darwin-arm64\` | macOS Apple Silicon |
           | \`picoaide-desktop-windows-amd64.exe\` | Windows |
-
-          ### 🌐 浏览器插件 PicoAide Extension
-          - \`picoaide-extension.zip\` — Chrome/Edge/Chromium 浏览器插件
 
           ### ✅ 完整性校验
           - \`checksums.txt\` — 所有文件的 SHA256 哈希值
