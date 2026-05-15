@@ -81,8 +81,6 @@ jobs:
         include:
           - os: ubuntu-latest
             suffix: linux-amd64
-          - os: macos-13
-            suffix: darwin-amd64
           - os: macos-latest
             suffix: darwin-arm64
           - os: windows-latest
@@ -142,7 +140,6 @@ jobs:
           | 文件 | 平台 |
           |------|------|
           | \`picoaide-desktop-linux-amd64\` | Linux |
-          | \`picoaide-desktop-darwin-amd64\` | macOS Intel |
           | \`picoaide-desktop-darwin-arm64\` | macOS Apple Silicon |
           | \`picoaide-desktop-windows-amd64.exe\` | Windows |
 
