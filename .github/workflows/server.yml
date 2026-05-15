@@ -48,15 +48,6 @@ jobs:
           - goos: linux
             goarch: arm64
             suffix: linux-arm64
-          - goos: darwin
-            goarch: amd64
-            suffix: darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            suffix: darwin-arm64
-          - goos: windows
-            goarch: amd64
-            suffix: windows-amd64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
