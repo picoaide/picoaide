@@ -698,6 +698,7 @@ func Serve() error {
 
   gin.SetMode(gin.ReleaseMode)
   r := gin.New()
+  r.Use(gin.Recovery())
   r.Use(s.secureHeaders())
   s.RegisterRoutes(r)
   appHandler := logger.AccessMiddleware(r)
