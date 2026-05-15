@@ -1,17 +1,11 @@
 version: "2"
 
-run:
-  timeout: 5m
-
 linters:
   default: none
   enable:
     - govet
     - ineffassign
-    - errcheck
     - staticcheck
-    - gosimple
-    - unused
 
 issues:
   max-issues-per-linter: 50

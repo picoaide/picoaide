@@ -169,7 +169,7 @@ func LoadPicoClawAdapterPackage(root string) (*PicoClawAdapterPackage, error) {
 
 func RefreshPicoClawAdapterFromRemote(cacheDir, remoteBaseURL string, client *http.Client) (*PicoClawAdapterPackage, error) {
   if strings.TrimSpace(remoteBaseURL) == "" {
-    return nil, errors.New("Picoclaw adapter remote base URL is empty")
+    return nil, errors.New("picoclaw adapter remote base URL is empty")
   }
   if client == nil {
     client = &http.Client{Timeout: 20 * time.Second}
@@ -186,7 +186,7 @@ func RefreshPicoClawAdapterFromRemote(cacheDir, remoteBaseURL string, client *ht
       return nil, err
     }
     if got := sha256Hex(data); got != entry.SHA256 {
-      return nil, fmt.Errorf("Picoclaw adapter 文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
+      return nil, fmt.Errorf("picoclaw adapter 文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
     }
     files[entry.Path] = data
   }
@@ -209,7 +209,7 @@ func RefreshPicoClawAdapterFromRemote(cacheDir, remoteBaseURL string, client *ht
 // 支持多个回退 URL，按顺序尝试，成功后立即返回
 func RefreshPicoClawAdapterFromRemoteIfChanged(cacheDir string, remoteBaseURLs []string, client *http.Client) (*PicoClawAdapterPackage, bool, error) {
   if len(remoteBaseURLs) == 0 {
-    return nil, false, errors.New("Picoclaw adapter remote base URLs are empty")
+    return nil, false, errors.New("picoclaw adapter remote base URLs are empty")
   }
   if client == nil {
     client = &http.Client{Timeout: 20 * time.Second}
@@ -528,28 +528,28 @@ func (p *PicoClawAdapterPackage) Validate() error {
   seenVersions := map[string]bool{}
   for _, version := range p.Index.PicoClawVersions {
     if !validPicoClawVersion(version.Version) {
-      return fmt.Errorf("Picoclaw 版本格式不合法: %s", version.Version)
+      return fmt.Errorf("picoclaw 版本格式不合法: %s", version.Version)
     }
     if version.ConfigVersion <= 0 {
-      return fmt.Errorf("Picoclaw %s 缺少 config_version", version.Version)
+      return fmt.Errorf("picoclaw %s 缺少 config_version", version.Version)
     }
     if version.ConfigVersion > p.Index.LatestSupportedConfigVersion {
-      return fmt.Errorf("Picoclaw %s config_version=%d 超过 adapter latest_supported_config_version=%d", version.Version, version.ConfigVersion, p.Index.LatestSupportedConfigVersion)
+      return fmt.Errorf("picoclaw %s config_version=%d 超过 adapter latest_supported_config_version=%d", version.Version, version.ConfigVersion, p.Index.LatestSupportedConfigVersion)
     }
     normalized := normalizeVersion(version.Version)
     if seenVersions[normalized] {
-      return fmt.Errorf("Picoclaw 版本重复: %s", version.Version)
+      return fmt.Errorf("picoclaw 版本重复: %s", version.Version)
     }
     seenVersions[normalized] = true
     if _, ok := p.ConfigSchemas[version.ConfigVersion]; !ok {
-      return fmt.Errorf("Picoclaw %s 引用的 config schema v%d 不存在", version.Version, version.ConfigVersion)
+      return fmt.Errorf("picoclaw %s 引用的 config schema v%d 不存在", version.Version, version.ConfigVersion)
     }
     if len(version.ChannelTypes) > 0 {
       schema := p.ConfigSchemas[version.ConfigVersion]
       allowed := stringSet(schema.ChannelTypes)
       for _, channelType := range version.ChannelTypes {
         if !allowed[channelType] {
-          return fmt.Errorf("Picoclaw %s channel_types 包含 config v%d 未声明的渠道: %s", version.Version, version.ConfigVersion, channelType)
+          return fmt.Errorf("picoclaw %s channel_types 包含 config v%d 未声明的渠道: %s", version.Version, version.ConfigVersion, channelType)
         }
       }
     }
@@ -778,7 +778,7 @@ func VerifyPicoClawAdapterHash(root string) error {
       return fmt.Errorf("读取 adapter 文件 %s 失败: %w", entry.Path, err)
     }
     if got := sha256Hex(data); got != entry.SHA256 {
-      return fmt.Errorf("Picoclaw adapter 文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
+      return fmt.Errorf("picoclaw adapter 文件 %s hash 不匹配: got %s want %s", entry.Path, got, entry.SHA256)
     }
     seen[entry.Path] = true
   }

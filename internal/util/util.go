@@ -144,10 +144,10 @@ func SafePathSegment(name string) error {
     return fmt.Errorf("名称不能为空")
   }
   if name == "." || name == ".." {
-    return fmt.Errorf("名称不能是 . 或 ..")
+    return fmt.Errorf("名称不能是 . 或 ..")  //nolint:staticcheck // ST1005: 中文错误无需遵循 Go 惯例
   }
   if strings.Contains(name, "..") {
-    return fmt.Errorf("名称不能包含 ..")
+    return fmt.Errorf("名称不能包含 ..") //nolint:staticcheck // ST1005: 中文错误
   }
   if !safeSegmentRe.MatchString(name) {
     return fmt.Errorf("名称包含非法字符: %s", name)

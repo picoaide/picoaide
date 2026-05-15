@@ -24,10 +24,8 @@ func (s *Server) handleBrowserWS(c *gin.Context) {
   conn := browserSvc.Register(username, ws, &BrowserExtra{TabID: 0})
   slog.Info("Extension WebSocket 已连接", "username", username, "remote", ws.RemoteAddr())
 
-  select {
-  case <-conn.done:
-    slog.Info("Extension WebSocket 已断开", "username", username)
-  }
+  <-conn.done
+  slog.Info("Extension WebSocket 已断开", "username", username)
 
   ws.WriteControl(websocket.CloseMessage,
     websocket.FormatCloseMessage(websocket.CloseNormalClosure, "连接关闭"),

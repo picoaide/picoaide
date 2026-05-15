@@ -27,10 +27,8 @@ func (s *Server) handleComputerWS(c *gin.Context) {
   conn := computerSvc.Register(username, ws, nil)
   slog.Info("桌面代理已连接", "username", username, "remote", ws.RemoteAddr())
 
-  select {
-  case <-conn.done:
-    slog.Info("桌面代理已断开", "username", username)
-  }
+  <-conn.done
+  slog.Info("桌面代理已断开", "username", username)
 
   ws.WriteControl(websocket.CloseMessage,
     websocket.FormatCloseMessage(websocket.CloseNormalClosure, "连接关闭"),
