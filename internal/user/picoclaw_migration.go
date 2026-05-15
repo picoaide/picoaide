@@ -3,12 +3,12 @@ package user
 import (
   "fmt"
   "net/http"
-  "os"
-  "path/filepath"
   "regexp"
   "strconv"
   "strings"
   "time"
+
+  "github.com/picoaide/picoaide/internal/auth"
 )
 
 const PicoAideIssueURL = "https://github.com/picoaide/picoaide/issues"
@@ -108,16 +108,21 @@ func LoadPicoClawMigrationRulesInfo(cacheDir string) (PicoClawMigrationRulesInfo
     return PicoClawMigrationRulesInfo{}, err
   }
   rules := pkg.ToMigrationRuleSet()
+  updatedAt := ""
+  engine, err := auth.GetEngine()
+  if err == nil {
+    record := &auth.PicoclawAdapterPackage{}
+    if has, _ := engine.Desc("id").Get(record); has && record.ID > 0 {
+      updatedAt = record.RefreshedAt
+    }
+  }
   info := PicoClawMigrationRulesInfo{
     LatestSupportedConfigVersion:   rules.LatestSupportedConfigVersion,
     PicoAideSupportedConfigVersion: rules.LatestSupportedConfigVersion,
     AdapterSchemaVersion:           pkg.Index.AdapterSchemaVersion,
     AdapterVersion:                 pkg.Index.AdapterVersion,
     Versions:                       rules.Versions,
-    CachePath:                      filepath.Join(cacheDir, picoclawAdapterDir, picoclawAdapterIndexFile),
-  }
-  if st, err := os.Stat(info.CachePath); err == nil {
-    info.UpdatedAt = st.ModTime().Format(time.RFC3339)
+    UpdatedAt:                      updatedAt,
   }
   return info, nil
 }

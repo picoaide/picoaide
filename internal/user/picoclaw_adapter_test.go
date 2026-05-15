@@ -7,10 +7,10 @@ import (
   "encoding/hex"
   "net/http"
   "net/http/httptest"
-  "os"
-  "path/filepath"
   "strings"
   "testing"
+
+  "github.com/picoaide/picoaide/internal/auth"
 )
 
 func TestParsePicoClawAdapterHashRejectsUnsafePath(t *testing.T) {
@@ -47,6 +47,12 @@ func TestLoadPicoClawAdapterPackageBundled(t *testing.T) {
 }
 
 func TestRefreshPicoClawAdapterFromRemoteVerifiesHashes(t *testing.T) {
+  auth.ResetDB()
+  if err := auth.InitDB(t.TempDir()); err != nil {
+    t.Fatalf("InitDB() error = %v", err)
+  }
+  defer auth.ResetDB()
+
   files := map[string]string{
     "index.json": `{
   "adapter_schema_version": 1,
@@ -95,12 +101,28 @@ func TestRefreshPicoClawAdapterFromRemoteVerifiesHashes(t *testing.T) {
   if pkg.Index.AdapterVersion != "test" {
     t.Fatalf("AdapterVersion = %q", pkg.Index.AdapterVersion)
   }
-  if _, err := os.Stat(filepath.Join(cacheDir, picoclawAdapterDir, picoclawAdapterIndexFile)); err != nil {
-    t.Fatalf("active adapter index missing: %v", err)
+  // 验证数据写入 DB
+  engine, err := auth.GetEngine()
+  if err != nil {
+    t.Fatalf("GetEngine() error = %v", err)
+  }
+  record := &auth.PicoclawAdapterPackage{}
+  has, err := engine.Desc("id").Get(record)
+  if err != nil || !has {
+    t.Fatalf("DB record not found: err=%v, has=%v", err, has)
+  }
+  if record.AdapterVersion != "test" {
+    t.Fatalf("DB AdapterVersion = %q, want %q", record.AdapterVersion, "test")
   }
 }
 
 func TestSavePicoClawAdapterZipInstallsPackage(t *testing.T) {
+  auth.ResetDB()
+  if err := auth.InitDB(t.TempDir()); err != nil {
+    t.Fatalf("InitDB() error = %v", err)
+  }
+  defer auth.ResetDB()
+
   files := testAdapterFiles()
   cacheDir := t.TempDir()
   pkg, err := SavePicoClawAdapterZip(cacheDir, buildAdapterZip(t, files))
@@ -110,8 +132,18 @@ func TestSavePicoClawAdapterZipInstallsPackage(t *testing.T) {
   if pkg.Index.AdapterVersion != "test" {
     t.Fatalf("AdapterVersion = %q", pkg.Index.AdapterVersion)
   }
-  if _, err := os.Stat(filepath.Join(cacheDir, picoclawAdapterDir, picoclawAdapterIndexFile)); err != nil {
-    t.Fatalf("active adapter index missing: %v", err)
+  // 验证数据写入 DB
+  engine, err := auth.GetEngine()
+  if err != nil {
+    t.Fatalf("GetEngine() error = %v", err)
+  }
+  record := &auth.PicoclawAdapterPackage{}
+  has, err := engine.Desc("id").Get(record)
+  if err != nil || !has {
+    t.Fatalf("DB record not found: err=%v, has=%v", err, has)
+  }
+  if record.AdapterVersion != "test" {
+    t.Fatalf("DB AdapterVersion = %q, want %q", record.AdapterVersion, "test")
   }
 }
 
