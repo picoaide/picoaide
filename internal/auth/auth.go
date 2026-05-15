@@ -27,9 +27,9 @@ var passwordHashParams = struct {
   keyLen  uint32
   saltLen int
 }{
-  memory:  4 * 1024,
-  time:    1,
-  threads: 1,
+  memory:  64 * 1024,
+  time:    3,
+  threads: 4,
   keyLen:  32,
   saltLen: 16,
 }
@@ -78,6 +78,11 @@ func InitDB(dataDir string) error {
   engine.SetMaxOpenConns(1)
   // 禁用 xorm 缓存，避免与手动 SQL 操作产生不一致
   engine.SetDefaultCacher(nil)
+
+  // 启用外键约束（SQLite 默认关闭）
+  if _, err := engine.Exec("PRAGMA foreign_keys = ON"); err != nil {
+    return fmt.Errorf("启用外键约束失败: %w", err)
+  }
 
   if err := syncSchema(); err != nil {
     return fmt.Errorf("创建数据表失败: %w", err)
