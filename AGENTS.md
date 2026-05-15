@@ -243,6 +243,27 @@ ssh root@10.88.7.22 systemctl restart picoaide
 - 确认 E2E 测试通过
 - 提交 PR
 
+### 分支策略与工作流
+
+`main` 为稳定分支，`dev` 为开发分支。**以本地 `dev` 和远程 `main` 为准，`dev` 始终与 `main` 对齐**，禁止分叉。
+
+#### 开发流程
+
+```
+本地 dev → 提交 → 推送 origin/dev → 创建 PR 到 main → CI 通过 → 合并到 main
+```
+
+- **本地开发始终在 `dev` 分支上**，不要创建功能分支
+- 每次创建新功能前，先同步 `main`：
+  ```bash
+  git fetch origin main
+  git rebase origin/main
+  ```
+- 提交到本地 `dev`，然后推送 `origin/dev`
+- 从 `dev` 创建 PR 到 `main`
+
+#### 禁止操作
+
 ### 分支与合并策略
 
 #### Git 提交规范
