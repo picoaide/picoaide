@@ -345,7 +345,6 @@ ExecStart=/usr/sbin/picoaide serve
 WorkingDirectory={{.WorkingDir}}
 Restart=always
 RestartSec=5
-Environment=PICOAIDE_PICOCLAW_ADAPTER_URLS={{.AdapterURLs}}
 
 [Install]
 WantedBy=multi-user.target
@@ -353,8 +352,7 @@ WantedBy=multi-user.target
 
 // ServiceTemplateData 服务模板数据
 type ServiceTemplateData struct {
-  WorkingDir  string
-  AdapterURLs string
+  WorkingDir string
 }
 
 const serviceFilePath = "/etc/systemd/system/picoaide.service"
@@ -366,11 +364,8 @@ func InstallService(cfg *GlobalConfig) error {
     workDir = "/data/picoaide"
   }
 
-  adapterURLs := strings.Join(PicoClawAdapterRemoteBaseURLs(), ",")
-
   data := ServiceTemplateData{
-    WorkingDir:  workDir,
-    AdapterURLs: adapterURLs,
+    WorkingDir: workDir,
   }
 
   tmpl, err := template.New("service").Parse(SystemServiceTemplate)
