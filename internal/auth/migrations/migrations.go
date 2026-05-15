@@ -14,9 +14,9 @@ import (
 
 // Migration 定义一次数据库 Schema 迁移
 type Migration struct {
-  Timestamp string                     // 14 位：YYYYMMDDHHMMSS
-  Desc      string                     // 中文描述
-  Up        func(*xorm.Engine) error   // 迁移函数，必须幂等
+  Timestamp string                   // 14 位：YYYYMMDDHHMMSS
+  Desc      string                   // 中文描述
+  Up        func(*xorm.Engine) error // 迁移函数，必须幂等
 }
 
 var (

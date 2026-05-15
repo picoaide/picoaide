@@ -35,8 +35,8 @@ var passwordHashParams = struct {
 }
 
 var (
-  engine       *xorm.Engine
-  dbDataDir    string
+  engine        *xorm.Engine
+  dbDataDir     string
   SkillsRootDir string
 )
 

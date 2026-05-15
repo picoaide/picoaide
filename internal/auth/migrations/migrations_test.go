@@ -2,6 +2,7 @@ package migrations
 
 import (
   "path/filepath"
+  "strings"
   "testing"
 
   _ "modernc.org/sqlite"
@@ -342,5 +343,122 @@ func TestRunAllPartialUpgrade(t *testing.T) {
   ver := getSchemaVersion(engine)
   if ver <= "20250503000000" {
     t.Fatalf("版本应更新超过 20250503000000, 得到 %q", ver)
+  }
+}
+
+// ============================================================
+// 错误路径测试（提升覆盖率至 100%）
+// ============================================================
+
+func TestRunAllNoMigrations(t *testing.T) {
+  engine := setupTestDB(t)
+  defer engine.Close()
+
+  mu.Lock()
+  saved := registry
+  registry = nil
+  mu.Unlock()
+
+  defer func() {
+    mu.Lock()
+    registry = saved
+    mu.Unlock()
+  }()
+
+  if err := RunAll(engine); err != nil {
+    t.Fatalf("空迁移列表应直接返回 nil: %v", err)
+  }
+}
+
+func TestColumnExistsError(t *testing.T) {
+  engine := setupTestDB(t)
+  defer engine.Close()
+
+  _, err := engine.Exec("CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")
+  if err != nil {
+    t.Fatal(err)
+  }
+
+  engine.Close()
+
+  _, err = ColumnExists(engine, "test_table", "id")
+  if err == nil {
+    t.Fatal("ColumnExists 应在引擎关闭后返回错误")
+  }
+}
+
+func TestRunAllMigrationError(t *testing.T) {
+  engine := setupTestDB(t)
+  defer engine.Close()
+
+  createOldSchema(t, engine)
+
+  engine.Close()
+
+  err := RunAll(engine)
+  if err == nil {
+    t.Fatal("RunAll 应在引擎关闭后返回错误")
+  }
+  if !strings.Contains(err.Error(), "失败") {
+    t.Fatalf("错误应包含迁移失败信息: %v", err)
+  }
+}
+
+func TestRunAllSetSchemaVersionError(t *testing.T) {
+  engine := setupTestDB(t)
+  defer engine.Close()
+
+  createOldSchema(t, engine)
+
+  _, err := engine.Exec("DROP TABLE IF EXISTS settings")
+  if err != nil {
+    t.Fatal(err)
+  }
+
+  err = RunAll(engine)
+  if err == nil {
+    t.Fatal("RunAll 应在 settings 表缺失后返回错误")
+  }
+  if !strings.Contains(err.Error(), "更新 schema 版本") {
+    t.Fatalf("错误应包含版本更新失败信息: %v", err)
+  }
+}
+
+func TestSharedFoldersMigrationAlterError(t *testing.T) {
+  engine := setupTestDB(t)
+  defer engine.Close()
+
+  _, err := engine.Exec("DROP TABLE IF EXISTS shared_folders")
+  if err != nil {
+    t.Fatal(err)
+  }
+
+  all := All()
+  for _, m := range all {
+    if m.Timestamp == "20250506000000" {
+      err := m.Up(engine)
+      if err == nil {
+        t.Fatal("shared_folders 迁移应在表缺失后返回错误")
+      }
+      return
+    }
+  }
+  t.Fatal("未找到 20250506000000 迁移")
+}
+
+func TestAllMigrationsUpError(t *testing.T) {
+  engine := setupTestDB(t)
+  defer engine.Close()
+
+  createOldSchema(t, engine)
+
+  engine.Close()
+
+  all := All()
+  for _, m := range all {
+    err := m.Up(engine)
+    if err == nil {
+      t.Fatalf("迁移 %s (%s) 的 Up() 应在引擎关闭后返回错误", m.Timestamp, m.Desc)
+    }
   }
 }

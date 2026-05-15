@@ -377,4 +377,3 @@ func SetGroupParent(groupName string, parentID *int64) error {
     Update(&Group{ParentID: parentID})
   return err
 }
-
