@@ -643,10 +643,6 @@ func Serve() error {
     return fmt.Errorf("加载配置失败: %w", err)
   }
 
-  if err := user.ReleasePicoClawMigrationRulesCacheIfValid(config.RuleCacheDir()); err != nil {
-    slog.Warn("初始化迁移规则缓存失败", "error", err)
-  }
-
   retention := cfg.Web.LogRetention
   if retention == "" {
     retention = "6m"
