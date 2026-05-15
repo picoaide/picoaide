@@ -56,10 +56,11 @@ func main() {
   }
 
   command := ""
+  cmdArgs := []string{}
   if len(filteredArgs) > 0 {
     command = filteredArgs[0]
+    cmdArgs = filteredArgs[1:]
   }
-  cmdArgs := filteredArgs[1:]
 
   switch command {
   case "init":
