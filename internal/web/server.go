@@ -278,8 +278,8 @@ func (s *Server) secureHeaders() gin.HandlerFunc {
     if s.allowedExtensionOrigin(origin) {
       c.Header("Access-Control-Allow-Origin", origin)
       c.Header("Access-Control-Allow-Credentials", "true")
-      c.Header("Access-Control-Allow-Headers", "Content-Type")
-      c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+      c.Header("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token")
+      c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
     }
     // CORS preflight
     if c.Request.Method == "OPTIONS" {
@@ -309,8 +309,6 @@ func (s *Server) allowedExtensionOrigin(origin string) bool {
   }
   allowed := strings.TrimSpace(os.Getenv("PICOAIDE_ALLOWED_EXTENSION_ORIGINS"))
   if allowed == "" {
-    // Backward-compatible default: allow extension origins, but only extension
-    // code that can fetch a CSRF token can complete mutating requests.
     return true
   }
   for _, item := range strings.Split(allowed, ",") {
@@ -581,7 +579,7 @@ func (s *Server) setSessionCookie(c *gin.Context, value string, maxAge int) {
     SameSite: http.SameSiteLaxMode,
     MaxAge:   maxAge,
   }
-  if s.cfg.Web.TLS.Enabled {
+  if s.cfg.Web.TLS.Enabled || c.GetHeader("X-Forwarded-Proto") == "https" {
     cookie.Secure = true
   }
   http.SetCookie(c.Writer, cookie)
