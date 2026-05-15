@@ -16,12 +16,12 @@ func (s *Server) handleAdminSkillInstallPolicyGet(c *gin.Context) {
 
   pico, ok := s.cfg.PicoClaw.(map[string]interface{})
   if !ok {
-    writeJSON(c, http.StatusOK, gin.H{"disabled": true})
+    writeJSON(c, http.StatusOK, gin.H{"success": true, "disabled": true})
     return
   }
 
   disabled := isSkillInstallDisabled(pico)
-  writeJSON(c, http.StatusOK, gin.H{"disabled": disabled})
+  writeJSON(c, http.StatusOK, gin.H{"success": true, "disabled": disabled})
 }
 
 // handleAdminSkillInstallPolicySet 设置是否禁止用户通过三方市场安装技能

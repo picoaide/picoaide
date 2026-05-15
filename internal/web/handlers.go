@@ -255,8 +255,7 @@ func (s *Server) handleAuthStart(c *gin.Context) {
     Path:     "/api/login/callback",
     MaxAge:   600,
     HttpOnly: true,
-    Secure:   s.cfg.Web.TLS.Enabled,
-    SameSite: http.SameSiteLaxMode,
+    Secure:   s.cfg.Web.TLS.Enabled || c.GetHeader("X-Forwarded-Proto") == "https",
   })
   c.Redirect(http.StatusFound, authURL)
 }
@@ -273,7 +272,7 @@ func (s *Server) handleAuthCallback(c *gin.Context) {
     return
   }
   http.SetCookie(c.Writer, &http.Cookie{
-    Name: "auth_state", Value: "", Path: "/api/login/callback", MaxAge: -1, HttpOnly: true, Secure: s.cfg.Web.TLS.Enabled,
+    Name: "auth_state", Value: "", Path: "/api/login/callback", MaxAge: -1, HttpOnly: true, Secure: s.cfg.Web.TLS.Enabled || c.GetHeader("X-Forwarded-Proto") == "https",
   })
 
   identity, err := authsource.CompleteLogin(c.Request.Context(), s.cfg, c.Query("code"))
