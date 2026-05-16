@@ -116,8 +116,7 @@ COPY entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # 创建root目录备份（必须在所有文件复制之后）
-RUN mkdir -p /root.original && \
-    cp -a /root/. /root.original/
+RUN mv /root /root.original
 
 # 启动主服务
 CMD ["/usr/local/bin/entrypoint.sh"]
