@@ -173,6 +173,8 @@ jobs:
           file: ./docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
             PICOCLAW_VERSION=${{ matrix.version }}

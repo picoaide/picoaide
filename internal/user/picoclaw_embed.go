@@ -5,6 +5,7 @@ import (
   "encoding/json"
   "fmt"
   "io/fs"
+  "log/slog"
   "path"
   "strconv"
 
@@ -93,18 +94,27 @@ func loadFromBundledDir() (*PicoClawAdapterPackage, error) {
   return LoadPicoClawAdapterPackage(bundledRoot)
 }
 
-// SeedPicoClawAdapterToDB 将嵌入的适配器包种子写入数据库（仅当数据库为空时）
+// SeedPicoClawAdapterToDB 确保数据库中的适配器包与嵌入的版本一致
+// 嵌入版本变更时自动更新（避免代码更新后 DB 数据过时）
 func SeedPicoClawAdapterToDB(engine *xorm.Engine) error {
+  embedPkg, err := NewPicoClawAdapterPackageFromEmbed()
+  if err != nil {
+    return fmt.Errorf("从嵌入加载适配器失败: %w", err)
+  }
   existing, err := PicoClawAdapterPackageFromDB(engine)
   if err != nil {
     return fmt.Errorf("检查数据库适配器失败: %w", err)
   }
-  if existing != nil {
+  if existing != nil && existing.Index.AdapterVersion == embedPkg.Index.AdapterVersion {
     return nil
   }
-  pkg, err := NewPicoClawAdapterPackageFromEmbed()
-  if err != nil {
-    return fmt.Errorf("从嵌入加载适配器失败: %w", err)
+  dbVersion := ""
+  if existing != nil {
+    dbVersion = existing.Index.AdapterVersion
   }
-  return SavePicoClawAdapterPackageToDB(engine, pkg, "")
+  slog.Info("Picoclaw 适配器版本变更，更新数据库",
+    "db_version", dbVersion,
+    "embed_version", embedPkg.Index.AdapterVersion,
+  )
+  return SavePicoClawAdapterPackageToDB(engine, embedPkg, "")
 }

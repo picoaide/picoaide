@@ -150,7 +150,7 @@ func (s *Server) handleAdminImageUpgradeCandidates(c *gin.Context) {
     return
   }
 
-  targetTag := c.Query("tag")
+  targetTag := imageTagFromRef(c.Query("tag"))
   if targetTag == "" {
     writeError(c, http.StatusBadRequest, "必须指定目标版本标签")
     return
@@ -258,7 +258,7 @@ func (s *Server) handleAdminImageUpgrade(c *gin.Context) {
     return
   }
 
-  targetTag := c.PostForm("tag")
+  targetTag := imageTagFromRef(c.PostForm("tag"))
   if targetTag == "" {
     writeError(c, http.StatusBadRequest, "必须指定目标版本标签")
     return
@@ -326,35 +326,39 @@ func (s *Server) handleAdminImageUpgrade(c *gin.Context) {
     flush()
   }
 
-  // 1. 同步拉取新镜像
-  sendStatus("正在拉取镜像 " + newImage + " ...")
-  pullRef := s.cfg.Image.PullRef(targetTag)
+  // 1. 检查本地镜像是否已存在，不存在才拉取
   ctx := context.Background()
-  reader, err := dockerpkg.ImagePull(ctx, pullRef)
-  if err != nil {
-    fmt.Fprintf(c.Writer, "data: {\"status\":\"error\",\"error\":\"拉取失败: %s\"}\n\n", err.Error())
-    flush()
-    return
-  }
-  buf := make([]byte, 4096)
-  for {
-    n, err := reader.Read(buf)
-    if n > 0 {
-      c.Writer.Write(buf[:n])
-      flush()
-    }
+  if dockerpkg.ImageExists(ctx, newImage) {
+    sendStatus("镜像 " + newImage + " 已存在，跳过拉取")
+  } else {
+    sendStatus("正在拉取镜像 " + newImage + " ...")
+    pullRef := s.cfg.Image.PullRef(targetTag)
+    reader, err := dockerpkg.ImagePull(ctx, pullRef)
     if err != nil {
-      break
-    }
-  }
-
-  // 腾讯云模式 retag
-  if s.cfg.Image.IsTencent() && pullRef != newImage {
-    sendStatus("重命名镜像 " + pullRef + " -> " + newImage)
-    if err := dockerpkg.RetagImage(ctx, pullRef, newImage); err != nil {
-      fmt.Fprintf(c.Writer, "data: {\"status\":\"error\",\"error\":\"重命名失败: %s\"}\n\n", err.Error())
+      fmt.Fprintf(c.Writer, "data: {\"status\":\"error\",\"error\":\"拉取失败: %s\"}\n\n", err.Error())
       flush()
       return
+    }
+    buf := make([]byte, 4096)
+    for {
+      n, err := reader.Read(buf)
+      if n > 0 {
+        c.Writer.Write(buf[:n])
+        flush()
+      }
+      if err != nil {
+        break
+      }
+    }
+
+    // 腾讯云模式 retag
+    if s.cfg.Image.IsTencent() && pullRef != newImage {
+      sendStatus("重命名镜像 " + pullRef + " -> " + newImage)
+      if err := dockerpkg.RetagImage(ctx, pullRef, newImage); err != nil {
+        fmt.Fprintf(c.Writer, "data: {\"status\":\"error\",\"error\":\"重命名失败: %s\"}\n\n", err.Error())
+        flush()
+        return
+      }
     }
   }
 
@@ -400,6 +404,6 @@ func (s *Server) handleAdminImageUpgrade(c *gin.Context) {
   }
 
   sendStatus(fmt.Sprintf("镜像就绪，已提交升级任务 %s，共 %d 个用户排队中（每 2 秒处理一个）", taskID, len(upgradeUsers)))
-  fmt.Fprintf(c.Writer, "data: {\"status\":\"done\",\"message\":\"镜像拉取完成，%d 个用户已进入升级队列\",\"task_id\":%q,\"total\":%d}\n\n", len(upgradeUsers), taskID, len(upgradeUsers))
+  fmt.Fprintf(c.Writer, "data: {\"status\":\"done\",\"message\":\"升级任务已提交，%d 个用户已进入升级队列\",\"task_id\":%q,\"total\":%d}\n\n", len(upgradeUsers), taskID, len(upgradeUsers))
   flush()
 }

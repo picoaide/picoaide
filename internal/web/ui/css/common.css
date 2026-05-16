@@ -644,7 +644,7 @@ tbody tr:hover { background: #f8fbff; }
 .modal-header { display: flex; align-items: center; justify-content: space-between; padding: .9rem 1.1rem; border-bottom: 1px solid var(--border); font-weight: 800; font-size: .95rem; }
 .modal-header button { background: none; border: none; font-size: 1.25rem; color: var(--text-muted); cursor: pointer; line-height: 1; padding: 0; }
 .modal-header button:hover { color: var(--text); }
-.modal-body { padding: 1.1rem; overflow: visible; }
+.modal-body { padding: 1.1rem; overflow-y: auto; }
 .modal-footer { padding: .8rem 1.1rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: .5rem; }
 
 /* ===== Scrollbar ===== */
