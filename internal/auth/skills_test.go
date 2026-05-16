@@ -163,6 +163,19 @@ func TestGetUserAllSkillSources_ReturnsActualSource(t *testing.T) {
   }
 }
 
+func TestGetUserAllSkillSources_NoRecord(t *testing.T) {
+  testInitDB(t)
+  CreateUser("testuser", "pass", "user")
+
+  sources, err := GetUserAllSkillSources("testuser", "nonexistent")
+  if err != nil {
+    t.Fatalf("GetUserAllSkillSources: %v", err)
+  }
+  if len(sources) != 0 {
+    t.Errorf("sources = %v, want empty", sources)
+  }
+}
+
 func TestDeleteSkill_ClearsUserSkills(t *testing.T) {
   testInitDB(t)
   CreateUser("testuser", "pass", "user")

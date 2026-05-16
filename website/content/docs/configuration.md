@@ -38,16 +38,6 @@ PicoAide 的配置主要存储在 SQLite 数据库中，通过展平键值对存
     └── picoaide.log          # 结构化日志
 ```
 
-### 本机级配置
-
-`~/.picoaide-config.yaml` 保存本机级配置，使二进制文件可以从任意位置运行：
-
-```yaml
-work_dir: /data/picoaide
-rule_cache_dir: /data/picoaide/rules
-picoclaw_adapter_remote_base_url: https://raw.githubusercontent.com/picoaide/picoaide/main/rules/picoclaw
-```
-
 ## 全局配置字段
 
 全局配置存储在 SQLite `settings` 表中，以点分隔的键值对存储。以下是所有可用字段。

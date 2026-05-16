@@ -231,9 +231,6 @@ systemctl stop picoaide
 # 复制数据到新位置
 cp -a /data/picoaide /data2/picoaide
 
-# 更新 ~/.picoaide-config.yaml
-# work_dir: /data2/picoaide
-
 # 启动服务
 systemctl start picoaide
 ```
@@ -247,7 +244,7 @@ tar czf picoaide-backup.tar.gz \
   -C /data picoaide/picoaide.db \
   -C /data picoaide/users \
   -C /data picoaide/archive \
-  -C /root .picoaide-config.yaml
+  -C /data picoaide/picoaide.log
 
 # 2. 传输到新服务器
 scp picoaide-backup.tar.gz new-server:/tmp/

@@ -44,3 +44,5 @@ website/.hugo_build.lock
 /dist/
 picoaide-extension/dist/
 picoaide-extension/node_modules/
+images/
+-

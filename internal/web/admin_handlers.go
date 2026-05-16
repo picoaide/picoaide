@@ -69,7 +69,8 @@ func (s *Server) initExternalUser(username string) error {
   if err := user.ValidateUsername(username); err != nil {
     return err
   }
-  ctx := contextWithTimeout(10)
+  ctx, cancel := contextWithTimeout(10)
+  defer cancel()
   imageTag, err := s.defaultUserImageTag(ctx)
   if err != nil {
     return fmt.Errorf("获取默认镜像失败: %w", err)
@@ -169,7 +170,8 @@ func (s *Server) syncUsersFromDirectory(cleanupStaleUsers bool) (*userSyncResult
     GroupMemberCount:     userResult.GroupMemberCount,
   }
 
-  ctx := contextWithTimeout(10)
+  ctx, cancel := contextWithTimeout(10)
+  defer cancel()
   imageTag, err := s.defaultUserImageTag(ctx)
   if err != nil {
     return nil, fmt.Errorf("获取默认镜像失败: %w", err)

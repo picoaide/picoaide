@@ -69,7 +69,8 @@ func Init(dataDir string, retention string, isDev bool, level string) {
     }
 
     handler := slog.NewJSONHandler(multiWriter, &slog.HandlerOptions{
-      Level: logLevel,
+      Level:     logLevel,
+      AddSource: true,
       ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
         if a.Key == slog.SourceKey {
           s := a.Value.Any().(*slog.Source)

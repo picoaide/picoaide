@@ -564,6 +564,165 @@ func TestOnGroupMembersRemoved(t *testing.T) {
 // 清理钩子：认证源切换
 // ============================================================
 
+func TestGetSharedFolderMountsForUser_Empty(t *testing.T) {
+  testInitDBForSF(t)
+  mounts, err := GetSharedFolderMountsForUser("/work", "nobody")
+  if err != nil {
+    t.Fatalf("GetSharedFolderMountsForUser: %v", err)
+  }
+  if len(mounts) != 0 {
+    t.Errorf("mounts = %v, want empty", mounts)
+  }
+}
+
+func TestGetSharedFolderMountsForUser_WithFolders(t *testing.T) {
+  testInitDBForSF(t)
+  CreateUser("u1", "pass", "user")
+  CreateSharedFolder("shared1", "", true, "admin")
+
+  mounts, err := GetSharedFolderMountsForUser("/work", "u1")
+  if err != nil {
+    t.Fatalf("GetSharedFolderMountsForUser: %v", err)
+  }
+  if len(mounts) != 1 {
+    t.Fatalf("mounts = %d, want 1", len(mounts))
+  }
+  expected := ShareMount{
+    Source: "/work/shared/shared1",
+    Target: "/root/.picoclaw/workspace/share/shared1",
+  }
+  if mounts[0].Source != expected.Source || mounts[0].Target != expected.Target {
+    t.Errorf("mount = %+v, want %+v", mounts[0], expected)
+  }
+}
+
+func TestGetMountStatusesForFolder_Empty(t *testing.T) {
+  testInitDBForSF(t)
+  statuses, err := GetMountStatusesForFolder(999)
+  if err != nil {
+    t.Fatalf("GetMountStatusesForFolder: %v", err)
+  }
+  if len(statuses) != 0 {
+    t.Errorf("statuses = %v, want empty", statuses)
+  }
+}
+
+func TestGetMountStatusesForFolder_WithData(t *testing.T) {
+  testInitDBForSF(t)
+  CreateSharedFolder("test", "", false, "admin")
+  sf, _ := GetSharedFolderByName("test")
+  CreateUser("u1", "pass", "user")
+  CreateUser("u2", "pass", "user")
+  RecordMountTest(sf.ID, "u1", true)
+  RecordMountTest(sf.ID, "u2", false)
+
+  statuses, err := GetMountStatusesForFolder(sf.ID)
+  if err != nil {
+    t.Fatalf("GetMountStatusesForFolder: %v", err)
+  }
+  if len(statuses) != 2 {
+    t.Fatalf("statuses count = %d, want 2", len(statuses))
+  }
+  if !statuses["u1"] {
+    t.Error("u1 should be mounted")
+  }
+  if statuses["u2"] {
+    t.Error("u2 should not be mounted")
+  }
+}
+
+func TestBuildSharedFolderInfo(t *testing.T) {
+  testInitDBForSF(t)
+  CreateUser("u1", "pass", "user")
+  CreateSharedFolder("test", "desc", false, "admin")
+  sf, _ := GetSharedFolderByName("test")
+  CreateGroup("g1", "local", "", nil)
+  gid, _ := GetGroupID("g1")
+  AddUsersToGroup("g1", []string{"u1"})
+  SetSharedFolderGroups(sf.ID, []int64{gid})
+
+  info, err := BuildSharedFolderInfo(sf)
+  if err != nil {
+    t.Fatalf("BuildSharedFolderInfo: %v", err)
+  }
+  if info.MemberCount != 1 {
+    t.Errorf("MemberCount = %d, want 1", info.MemberCount)
+  }
+  if len(info.Groups) != 1 {
+    t.Errorf("Groups = %d, want 1", len(info.Groups))
+  }
+  if info.Orphaned {
+    t.Error("should not be orphaned")
+  }
+}
+
+func TestBuildSharedFolderInfo_Public(t *testing.T) {
+  testInitDBForSF(t)
+  CreateSharedFolder("pub", "", true, "admin")
+  sf, _ := GetSharedFolderByName("pub")
+  CreateUser("u1", "pass", "user")
+
+  info, err := BuildSharedFolderInfo(sf)
+  if err != nil {
+    t.Fatalf("BuildSharedFolderInfo public: %v", err)
+  }
+  if info.Orphaned {
+    t.Error("public folder should not be orphaned (is_public=true)")
+  }
+}
+
+func TestBuildSharedFolderInfo_Orphaned(t *testing.T) {
+  testInitDBForSF(t)
+  CreateSharedFolder("orph", "", false, "admin")
+  sf, _ := GetSharedFolderByName("orph")
+
+  info, err := BuildSharedFolderInfo(sf)
+  if err != nil {
+    t.Fatalf("BuildSharedFolderInfo orphan: %v", err)
+  }
+  if !info.Orphaned {
+    t.Error("folder with no groups should be orphaned")
+  }
+}
+
+func TestSetSharedFolderGroups_NonexistentFolder(t *testing.T) {
+  testInitDBForSF(t)
+  err := SetSharedFolderGroups(999, []int64{1})
+  if err == nil {
+    t.Error("should fail for nonexistent folder")
+  }
+}
+
+func TestRemoveGroupSourceFromSharedFolders_NoGroups(t *testing.T) {
+  testInitDBForSF(t)
+  err := RemoveGroupSourceFromSharedFolders("nonexistent-source")
+  if err != nil {
+    t.Fatalf("RemoveGroupSourceFromSharedFolders: %v", err)
+  }
+}
+
+func TestOnGroupMembersAdded_NoSharedFolders(t *testing.T) {
+  testInitDBForSF(t)
+  affected, err := OnGroupMembersAdded(999, []string{"u1"})
+  if err != nil {
+    t.Fatalf("OnGroupMembersAdded: %v", err)
+  }
+  if affected != nil {
+    t.Errorf("affected = %v, want nil", affected)
+  }
+}
+
+func TestOnGroupMembersRemoved_NoSharedFolders(t *testing.T) {
+  testInitDBForSF(t)
+  affected, err := OnGroupMembersRemoved(999, "u1")
+  if err != nil {
+    t.Fatalf("OnGroupMembersRemoved: %v", err)
+  }
+  if affected != nil {
+    t.Errorf("affected = %v, want nil", affected)
+  }
+}
+
 func TestPurgeSharedFolderMountsBySource(t *testing.T) {
   testInitDBForSF(t)
   CreateSharedFolder("test", "", false, "admin")

@@ -67,7 +67,7 @@ make check          # format + lint + test
 
 ### 入口点
 
-- `cmd/picoaide/main.go`：CLI 入口，解析命令（`init`、`serve`、`reset-password`），加载 Home 配置（`~/.picoaide-config.yaml`），初始化数据库和全局配置，启动 Web 服务。`init` 子命令包含完整的首次运行引导流程（设置超管、选择镜像仓库、拉取镜像、安装 systemd 服务）。
+- `cmd/picoaide/main.go`：CLI 入口，解析命令（`init`、`serve`、`reset-password`），初始化数据库和全局配置，启动 Web 服务。`init` 子命令包含完整的首次运行引导流程（设置超管、选择镜像仓库、拉取镜像、安装 systemd 服务）。
 
 ### 包结构与职责
 
@@ -580,7 +580,6 @@ POST /api/admin/skill-install-policy     设置技能安装策略
 ## 本地状态文件
 
 - `picoaide.db`：SQLite 数据库，存储全局配置、白名单、用户账户和容器记录（工作目录下）
-- `~/.picoaide-config.yaml`：存储 `work_dir`、`rule_cache_dir` 和 `picoclaw_adapter_remote_base_url`，使二进制文件可从任意位置运行
 - `logs/picoaide.log`：JSON 格式结构化日志，支持按时间/大小轮转
 - `rules/picoclaw/`：Picoclaw Adapter 缓存目录
 
