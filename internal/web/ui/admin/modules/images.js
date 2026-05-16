@@ -597,7 +597,11 @@ export async function init(ctx) {
     const headerCb = document.getElementById('upgrade-header-cb');
     if (headerCb) {
       headerCb.addEventListener('change', () => {
-        tbody.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = headerCb.checked);
+        tbody.querySelectorAll('input[type=checkbox]').forEach(cb => {
+          cb.checked = headerCb.checked;
+          if (headerCb.checked) upgradeSelectedUsers.add(cb.value);
+          else upgradeSelectedUsers.delete(cb.value);
+        });
         updateUpgradeCount();
       });
     }
