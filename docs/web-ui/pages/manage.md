@@ -20,6 +20,9 @@
 - 文件管理
 - 修改密码
 - 文本编辑器
+- 技能中心
+- Cookie 管理
+- MCP Token
 
 ## 功能详细说明
 
@@ -29,12 +32,11 @@
 
 **API 端点**：
 
-- `GET /api/user/channels` — 读取用户渠道列表及启用状态
-- `POST /api/user/channels` — 更新渠道启用状态
-- `GET /api/user/config/fields` — 获取渠道配置字段定义
-- `POST /api/user/config/fields` — 保存渠道配置字段
+- `GET /api/picoclaw/channels` — 读取用户渠道列表及启用状态
+- `GET /api/picoclaw/config-fields` — 获取渠道配置字段定义
+- `POST /api/picoclaw/config-fields` — 保存渠道配置字段
 
-**获取渠道列表请求**：`GET /api/user/channels`
+**获取渠道列表请求**：`GET /api/picoclaw/channels`
 
 **响应格式**：
 ```json
@@ -51,26 +53,27 @@
 }
 ```
 
-**启用/禁用渠道请求**：`POST /api/user/channels`
-```json
-{
-  "channel": "wechat",
-  "enabled": true
-}
-```
+**获取渠道配置字段请求**：`GET /api/picoclaw/config-fields?section=wechat`
 
-**配置渠道字段请求**：`POST /api/user/config/fields`
+**响应格式**：
 ```json
 {
-  "channel": "wechat",
+  "success": true,
   "fields": {
-    "app_id": "wx123456",
-    "app_secret": "secret"
+    "app_id": { "label": "App ID", "type": "text", "value": "wx123456" },
+    "app_secret": { "label": "App Secret", "type": "password", "value": "" }
   }
 }
 ```
 
-**保存后自动重启容器**：配置保存成功后，调用 `POST /api/admin/container/restart`（单用户）重启该用户的代理容器。
+**保存渠道配置字段请求**：`POST /api/picoclaw/config-fields`
+
+**请求格式**（form）：
+```
+section=wechat&fields[app_id]=wx123456&fields[app_secret]=secret&csrf_token=xxx
+```
+
+**保存后自动重启容器**：配置保存成功后，自动重启该用户的代理容器。
 
 ### 2. 文件管理
 
@@ -216,7 +219,69 @@
 
 保存成功后自动调用容器重启。
 
-### 5. Cookie 同步
+### 5. 技能中心
+
+**功能**：查看已安装的技能列表、安装新技能、卸载已安装的技能
+
+**API 端点**：
+
+- `GET /api/user/skills` — 获取已安装的技能列表
+- `POST /api/user/skills/install` — 安装技能
+- `POST /api/user/skills/uninstall` — 卸载技能
+
+**获取技能列表**：`GET /api/user/skills`
+
+**响应格式**：
+```json
+{
+  "success": true,
+  "skills": [
+    { "name": "code-review", "version": "1.0.0", "description": "代码审查" }
+  ]
+}
+```
+
+**安装技能**：`POST /api/user/skills/install`
+
+**请求格式**（form）：
+```
+skill_name=code-review&csrf_token=xxx
+```
+
+**卸载技能**：`POST /api/user/skills/uninstall`
+
+**请求格式**（form）：
+```
+skill_name=code-review&csrf_token=xxx
+```
+
+### 6. Cookie 管理
+
+**功能**：查看已授权的 Cookie 域名列表、取消域名授权
+
+**API 端点**：
+
+- `GET /api/user/cookies` — 查看已授权的 Cookie 域名列表
+- `POST /api/user/cookies/delete` — 取消 Cookie 域名授权
+
+**获取 Cookie 域名列表**：`GET /api/user/cookies`
+
+**响应格式**：
+```json
+{
+  "success": true,
+  "domains": [".example.com", ".another.com"]
+}
+```
+
+**取消授权**：`POST /api/user/cookies/delete`
+
+**请求格式**（form）：
+```
+domain=.example.com&csrf_token=xxx
+```
+
+### 7. Cookie 同步
 
 **功能**：将浏览器 Cookie 同步到用户的 `.security.yml` 文件，使代理容器中的浏览器自动化功能可使用已登录的会话
 
@@ -236,7 +301,7 @@
 }
 ```
 
-### 6. MCP Token
+### 8. MCP Token
 
 **功能**：获取当前用户的 MCP Token，用于浏览器扩展/桌面代理的认证
 

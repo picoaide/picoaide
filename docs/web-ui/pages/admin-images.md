@@ -26,15 +26,19 @@
   "success": true,
   "images": [
     {
-      "id": "sha256:abc...",
-      "repository": "ghcr.io/picoaide/picoclaw",
-      "tag": "v1.0.0",
+      "id": "abc123def456",
+      "full_id": "sha256:abc...",
+      "repo_tags": ["ghcr.io/picoaide/picoclaw:v1.0.0"],
       "size": 1234567890,
-      "created_at": "2024-01-01T00:00:00Z",
+      "size_str": "1.15 GB",
+      "created": 1704067200,
+      "created_str": "2024-01-01 00:00",
       "user_count": 5,
       "users": ["user1", "user2", "user3"]
     }
-  ]
+  ],
+  "pulling": false,
+  "pull_status": {}
 }
 ```
 
@@ -44,11 +48,9 @@
 
 **API 端点**：`POST /api/admin/images/pull`
 
-**请求格式**：
-```json
-{
-  "image": "ghcr.io/picoaide/picoclaw:v1.0.0"
-}
+**请求格式**（form）：
+```
+tag=v1.0.0&csrf_token=xxx
 ```
 
 **响应**：SSE（Server-Sent Events）流式进度更新
@@ -115,11 +117,9 @@ data: {"status": "error", "message": "镜像拉取失败"}
 
 **API 端点**：`POST /api/admin/images/delete`
 
-**请求格式**：
-```json
-{
-  "id": "sha256:abc..."
-}
+**请求格式**（form）：
+```
+image=ghcr.io/picoaide/picoclaw:v1.0.0&csrf_token=xxx
 ```
 
 **响应格式（成功）**：
@@ -146,20 +146,16 @@ data: {"status": "error", "message": "镜像拉取失败"}
 
 **API 端点**：`POST /api/admin/images/migrate`
 
-**请求格式**：
-```json
-{
-  "from_image": "sha256:abc...",
-  "to_image": "sha256:def...",
-  "usernames": ["user1", "user2"]
-}
+**请求格式**（form）：
+```
+image=ghcr.io/picoaide/picoclaw:v1.0.0&target=ghcr.io/picoaide/picoclaw:v2.0.0&users=user1,user2&csrf_token=xxx
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| from_image | string | 源镜像 ID 或名称 |
-| to_image | string | 目标镜像 ID 或名称 |
-| usernames | array | 要迁移的用户列表 |
+| image | string | 旧镜像名称（带 tag） |
+| target | string | 新镜像名称（带 tag） |
+| users | string | 逗号分隔的目标用户名列表，留空则迁移所有使用旧镜像的用户 |
 
 **响应格式**：
 ```json
