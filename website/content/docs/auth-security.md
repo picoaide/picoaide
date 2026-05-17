@@ -132,10 +132,10 @@ PicoAide 支持两种组同步模式：
 
 | 字段 | 说明 | 示例 |
 |------|------|------|
-| `oidc.provider_url` | OIDC Provider URL | `https://keycloak.example.com/auth/realms/myrealm` |
+| `oidc.issuer_url` | Issuer URL | `https://keycloak.example.com/auth/realms/myrealm` |
 | `oidc.client_id` | 客户端 ID | `picoaide` |
 | `oidc.client_secret` | 客户端密钥 | |
-| `oidc.redirect_url` | 回调地址 | `https://picoaide.example.com/api/login/oidc/callback` |
+| `oidc.redirect_url` | 回调地址 | `https://picoaide.example.com/api/login/callback` |
 
 ### 登录流程
 

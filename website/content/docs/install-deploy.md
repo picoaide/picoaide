@@ -182,7 +182,7 @@ PicoAide 使用结构化 JSON 日志，默认写入 `logs/picoaide.log`。日志
 ```yaml
 # 日志配置
 web.log_level: info       # debug / info / warn / error
-web.log_retention: 7d     # 日志保留周期
+web.log_retention: 6m     # 日志保留周期
 ```
 
 ## 升级流程

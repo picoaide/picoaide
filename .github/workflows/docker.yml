@@ -52,6 +52,14 @@ jobs:
 
           if [ "$SHORT_BRANCH" = "dev" ]; then
             IMAGE_REPO="picoaide/picoaide-dev"
+            # dev 分支只构建最新版本，不做全量重建
+            FULL_REBUILD=false
+            VERSIONS_JSON=$(printf '%s\n' "$VERSION" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+            echo "image_repo=$IMAGE_REPO" >> $GITHUB_OUTPUT
+            echo "full_rebuild=false" >> $GITHUB_OUTPUT
+            echo "versions_json=$VERSIONS_JSON" >> $GITHUB_OUTPUT
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
           list_image_tags() {
@@ -147,21 +155,12 @@ jobs:
         id: tags
         run: |
           VERSION="${{ matrix.version }}"
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           IMAGE_REPO="${{ needs.prepare.outputs.image_repo }}"
 
-          if [ "${{ needs.prepare.outputs.full_rebuild }}" = "true" ]; then
-            TAGS="ghcr.io/${IMAGE_REPO}:${VERSION},hkccr.ccs.tencentyun.com/${IMAGE_REPO}:${VERSION}"
+          if [ "${{ github.ref_name }}" = "main" ] || [ "${{ github.ref_name }}" = "master" ]; then
+            TAGS="ghcr.io/${IMAGE_REPO}:${VERSION},ghcr.io/${IMAGE_REPO}:latest,hkccr.ccs.tencentyun.com/${IMAGE_REPO}:${VERSION},hkccr.ccs.tencentyun.com/${IMAGE_REPO}:latest"
           else
-            if [ "${{ github.ref_name }}" = "main" ] || [ "${{ github.ref_name }}" = "master" ]; then
-              IMAGE="picoaide/picoaide"
-              TAG="${VERSION}"
-            else
-              IMAGE="picoaide/picoaide-dev"
-              TAG="dev-${SHORT_SHA}"
-            fi
-
-            TAGS="ghcr.io/${IMAGE}:${TAG},ghcr.io/${IMAGE}:dev,hkccr.ccs.tencentyun.com/${IMAGE}:${TAG},hkccr.ccs.tencentyun.com/${IMAGE}:dev"
+            TAGS="ghcr.io/${IMAGE_REPO}:${VERSION},ghcr.io/${IMAGE_REPO}:dev,hkccr.ccs.tencentyun.com/${IMAGE_REPO}:${VERSION},hkccr.ccs.tencentyun.com/${IMAGE_REPO}:dev"
           fi
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "Building: ${TAGS}"
@@ -181,10 +180,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Buildx multi-arch 推送会产生 untagged sha256 manifest，GHCR 不会自动清理
-      # 这里在每次构建后删除当前包名下所有 untagged 版本
-      - name: Clean up untagged manifests
-        uses: actions/delete-package-versions@v5
-        with:
-          package-name: ${{ needs.prepare.outputs.image_repo }}
-          delete-only-untagged-versions: true
+

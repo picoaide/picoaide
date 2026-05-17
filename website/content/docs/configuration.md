@@ -48,10 +48,10 @@ PicoAide 的配置主要存储在 SQLite 数据库中，通过展平键值对存
 |------|------|--------|------|
 | `web.listen` | string | `:80` | 服务监听地址 |
 | `web.auth_mode` | string | `local` | 认证模式：`local`、`ldap`、`oidc` |
-| `web.ldap_enabled` | bool | `false` | 兼容旧版本的 LDAP 开关 |
+| `web.ldap_enabled` | bool | `false` | 兼容旧版本：未设置 `web.auth_mode` 时根据此字段推断认证模式（已弃用，建议直接设置 `web.auth_mode`） |
 | `web.container_base_url` | string | `http://100.64.0.1:80` | 容器访问服务端的基础地址 |
 | `web.log_level` | string | `info` | 日志级别：`debug`、`info`、`warn`、`error` |
-| `web.log_retention` | string | `7d` | 日志保留周期 |
+| `web.log_retention` | string | `6m` | 日志保留周期（可选值：`1m`、`3m`、`6m`、`1y`、`3y`、`5y`、`forever`） |
 | `web.tls.enabled` | bool | `false` | 是否启用 TLS |
 | `web.tls.cert_file` | string | | TLS 证书路径 |
 | `web.tls.key_file` | string | | TLS 私钥路径 |
@@ -79,7 +79,7 @@ PicoAide 的配置主要存储在 SQLite 数据库中，通过展平键值对存
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `oidc.provider_url` | string | | OIDC Provider URL |
+| `oidc.issuer_url` | string | | Issuer URL |
 | `oidc.client_id` | string | | 客户端 ID |
 | `oidc.client_secret` | string | | 客户端密钥 |
 | `oidc.redirect_url` | string | | 回调地址 |

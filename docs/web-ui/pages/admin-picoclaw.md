@@ -16,14 +16,13 @@
 
 ### 1. 渠道管理
 
-**功能**：定义哪些渠道允许使用，以及各渠道的启用状态
+**功能**：查看各渠道的基本信息（名称、显示名、描述）。渠道的允许/禁用状态通过全局配置 `POST /api/config` 管理（配置键 `picoclaw.channels.<渠道名>.allowed`）。
 
 **API 端点**：
 
-- `GET /api/admin/channels` — 获取渠道列表
-- `POST /api/admin/channels` — 更新渠道允许状态
+- `GET /api/admin/picoclaw/channels` — 获取渠道列表
 
-**获取渠道列表**：`GET /api/admin/channels`
+**获取渠道列表**：`GET /api/admin/picoclaw/channels`
 
 **响应格式**：
 ```json
@@ -33,106 +32,29 @@
     {
       "name": "wechat",
       "display_name": "微信",
-      "allowed": true,
-      "description": "微信渠道"
+      "icon": "wechat",
+      "description": "微信渠道",
+      "allowed": true
     },
     {
       "name": "dingtalk",
       "display_name": "钉钉",
-      "allowed": true,
-      "description": "钉钉渠道"
+      "icon": "dingtalk",
+      "description": "钉钉渠道",
+      "allowed": true
     },
     {
       "name": "slack",
       "display_name": "Slack",
-      "allowed": false,
-      "description": "Slack 渠道"
+      "icon": "slack",
+      "description": "Slack 渠道",
+      "allowed": false
     }
   ]
 }
 ```
 
-**更新渠道状态**：`POST /api/admin/channels`
-```json
-{
-  "channel": "slack",
-  "allowed": true
-}
-```
-
-### 2. 用户 Picoclaw 配置列表
-
-**功能**：查看所有用户的 Picoclaw 配置概览
-
-**API 端点**：`GET /api/admin/picoclaw/users`
-
-**响应格式**：
-```json
-{
-  "success": true,
-  "users": [
-    {
-      "username": "user1",
-      "config_version": 3,
-      "channels": ["wechat", "dingtalk"],
-      "container_status": "running",
-      "last_config_applied": "2024-01-01T00:00:00Z"
-    }
-  ]
-}
-```
-
-### 3. 查看/编辑用户配置
-
-**功能**：查看或编辑指定用户的 Picoclaw 配置
-
-**API 端点**：
-
-- `GET /api/admin/picoclaw/user` — 获取指定用户配置
-- `POST /api/admin/picoclaw/user` — 保存指定用户配置
-
-**获取用户配置**：`GET /api/admin/picoclaw/user?username=user1`
-
-**响应格式**：
-```json
-{
-  "success": true,
-  "username": "user1",
-  "config": {
-    "channels": {
-      "wechat": {
-        "enabled": true,
-        "config": {
-          "app_id": "wx123456"
-        }
-      }
-    },
-    "skills": ["code-review"],
-    "picoclaw": {
-      "model": "gpt-4"
-    }
-  },
-  "security": {
-    "cors_origins": ["https://example.com"]
-  }
-}
-```
-
-**保存用户配置**：`POST /api/admin/picoclaw/user`
-```json
-{
-  "username": "user1",
-  "config": {
-    "channels": {
-      "wechat": {
-        "enabled": true
-      }
-    }
-  }
-}
-```
-
-### 4. 配置下发
+### 2. 配置下发
 
 **功能**：将全局配置和应用设置下发到指定用户的容器配置文件
 
@@ -159,6 +81,8 @@
 }
 ```
 
+**配置下发**仅下发全局配置，不涉及逐个用户的配置查看和编辑。各用户的渠道启用状态由用户自行在 `/manage` 页面管理。
+
 **配置合并规则**：
 
 1. 读取用户的当前配置
@@ -174,10 +98,11 @@
 
 **API 端点**：
 
-- `GET /api/admin/picoclaw/adapter/info` — 获取 Adapter 信息
-- `POST /api/admin/picoclaw/adapter/refresh` — 刷新 Adapter
+- `GET /api/admin/migration-rules` — 查看迁移规则信息
+- `POST /api/admin/migration-rules/refresh` — 刷新迁移规则（远程拉取）
+- `POST /api/admin/migration-rules/upload` — 上传 Adapter ZIP
 
-**获取 Adapter 信息**：`GET /api/admin/picoclaw/adapter/info`
+**获取迁移规则信息**：`GET /api/admin/migration-rules`
 
 **响应格式**：
 ```json
@@ -190,7 +115,7 @@
 }
 ```
 
-**刷新 Adapter**：`POST /api/admin/picoclaw/adapter/refresh`
+**刷新迁移规则**：`POST /api/admin/migration-rules/refresh`
 
 支持从远程 URL 拉取（通过配置 `picoclaw_adapter_remote_base_url` 设置）或上传 ZIP 包。
 
@@ -198,11 +123,8 @@
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/admin/channels` | GET | 渠道列表 |
-| `/api/admin/channels` | POST | 更新渠道允许状态 |
-| `/api/admin/picoclaw/users` | GET | 用户配置列表 |
-| `/api/admin/picoclaw/user` | GET | 获取用户配置 |
-| `/api/admin/picoclaw/user` | POST | 保存用户配置 |
+| `/api/admin/picoclaw/channels` | GET | 渠道列表 |
 | `/api/admin/config/apply` | POST | 下发配置到用户 |
-| `/api/admin/picoclaw/adapter/info` | GET | Adapter 信息 |
-| `/api/admin/picoclaw/adapter/refresh` | POST | 刷新 Adapter |
+| `/api/admin/migration-rules` | GET | 迁移规则信息 |
+| `/api/admin/migration-rules/refresh` | POST | 刷新迁移规则 |
+| `/api/admin/migration-rules/upload` | POST | 上传 Adapter ZIP |

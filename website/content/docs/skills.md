@@ -2,7 +2,7 @@
 title: "技能系统"
 description: "PicoAide 技能仓库、上传安装、按用户和按组部署说明"
 weight: 3
-draft: true
+draft: false
 ---
 
 技能是部署到用户 PicoClaw 工作区的目录。PicoAide 不限定技能必须使用某种语言；实际部署动作是把技能目录复制到用户的：
@@ -27,8 +27,8 @@ users/<username>/.picoclaw/workspace/skills/<skill-name>
 PicoAide 支持三种来源：
 
 1. 上传 zip 到 `/api/admin/skills/upload`
-2. 添加 Git 仓库到 `/api/admin/skills/repos/add`
-3. 从已拉取仓库安装指定技能到 `/api/admin/skills/install`
+2. 添加 Git 仓库到 `/api/admin/skills/sources/git`
+3. 从注册中心安装到 `/api/admin/skills/registry/install`
 
 上传 zip 时需要传：
 
@@ -100,17 +100,22 @@ skill_name=<skill>
 
 | 接口 | 说明 |
 | --- | --- |
-| `GET /api/admin/skills` | 列出已安装技能和仓库 |
-| `POST /api/admin/skills/deploy` | 部署技能 |
-| `GET /api/admin/skills/download` | 下载技能 zip |
+| `GET /api/admin/skills` | 列出已安装技能 |
+| `POST /api/admin/skills/deploy` | 部署技能到用户或组 |
 | `POST /api/admin/skills/remove` | 删除已安装技能 |
 | `POST /api/admin/skills/upload` | 上传技能 zip |
-| `POST /api/admin/skills/install` | 从仓库安装技能 |
-| `GET /api/admin/skills/repos/list` | 列仓库和仓库内技能 |
-| `POST /api/admin/skills/repos/add` | 添加并 clone 仓库 |
-| `POST /api/admin/skills/repos/save` | 保存仓库配置 |
-| `POST /api/admin/skills/repos/pull` | 拉取更新并同步技能 |
-| `POST /api/admin/skills/repos/remove` | 删除仓库配置和克隆目录 |
+| `POST /api/admin/skills/user/bind` | 绑定技能到单个用户 |
+| `POST /api/admin/skills/user/unbind` | 解绑用户技能 |
+| `GET /api/admin/skills/user/sources` | 用户技能来源列表 |
+| `GET /api/admin/skills/sources` | 技能仓库来源列表 |
+| `POST /api/admin/skills/sources/git` | 添加 Git 技能仓库 |
+| `POST /api/admin/skills/sources/remove` | 移除技能仓库 |
+| `POST /api/admin/skills/sources/pull` | 拉取技能仓库更新 |
+| `POST /api/admin/skills/sources/refresh` | 刷新技能仓库 |
+| `GET /api/admin/skills/registry/list` | 技能注册中心列表 |
+| `POST /api/admin/skills/registry/install` | 从注册中心安装技能 |
+| `GET /api/admin/skills/defaults` | 默认技能列表 |
+| `POST /api/admin/skills/defaults/toggle` | 切换技能默认安装 |
 
 ## 推荐流程
 

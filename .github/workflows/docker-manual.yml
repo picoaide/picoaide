@@ -7,22 +7,14 @@ on:
         description: '要编译的 PicoClaw 版本，例如 v0.2.6'
         required: true
         type: string
-      image_repo:
-        description: '镜像仓库名称'
+      environment:
+        description: '构建环境'
         required: false
-        default: 'picoaide/picoaide'
+        default: 'prod'
         type: choice
         options:
-          - picoaide/picoaide
-          - picoaide/picoaide-dev
-      tags_mode:
-        description: '标签策略'
-        required: false
-        default: 'version'
-        type: choice
-        options:
-          - version
-          - version-and-dev
+          - prod
+          - dev
 
 jobs:
   build:
@@ -68,14 +60,16 @@ jobs:
         id: tags
         run: |
           VERSION="${{ inputs.picoclaw_version }}"
-          IMAGE_REPO="${{ inputs.image_repo }}"
 
-          if [ "${{ inputs.tags_mode }}" = "version-and-dev" ]; then
+          if [ "${{ inputs.environment }}" = "dev" ]; then
+            IMAGE_REPO="picoaide/picoaide-dev"
             TAGS="ghcr.io/${IMAGE_REPO}:${VERSION},ghcr.io/${IMAGE_REPO}:dev,hkccr.ccs.tencentyun.com/${IMAGE_REPO}:${VERSION},hkccr.ccs.tencentyun.com/${IMAGE_REPO}:dev"
           else
+            IMAGE_REPO="picoaide/picoaide"
             TAGS="ghcr.io/${IMAGE_REPO}:${VERSION},hkccr.ccs.tencentyun.com/${IMAGE_REPO}:${VERSION}"
           fi
 
+          echo "image_repo=${IMAGE_REPO}" >> $GITHUB_OUTPUT
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "Building: ${TAGS}"
 

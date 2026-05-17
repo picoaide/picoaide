@@ -56,7 +56,9 @@ Authorization: Bearer <token>
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
+| `GET` | `/api/version` | 无 | 获取服务端版本号 |
 | `GET` | `/api/health` | 无 | 健康检查，返回版本 |
+| `GET` | `/api/login/mode` | 无 | 获取当前认证模式 |
 | `POST` | `/api/login` | 无 | 登录 |
 | `POST` | `/api/logout` | 登录 | 登出 |
 | `GET` | `/api/user/info` | 登录 | 当前用户、角色和认证模式 |
@@ -79,6 +81,12 @@ Authorization: Bearer <token>
 | `GET` | `/api/picoclaw/channels` | 普通用户 | 列出可用渠道 |
 | `GET` | `/api/picoclaw/config-fields` | 普通用户 | 读取渠道配置字段 |
 | `POST` | `/api/picoclaw/config-fields` | 普通用户 + CSRF | 保存渠道配置并重启容器 |
+| `GET` | `/api/user/skills` | 普通用户 | 查看已安装技能 |
+| `POST` | `/api/user/skills/install` | 普通用户 + CSRF | 安装技能 |
+| `POST` | `/api/user/skills/uninstall` | 普通用户 + CSRF | 卸载技能 |
+| `GET` | `/api/user/cookies` | 普通用户 | 查看已授权 Cookie 域名 |
+| `POST` | `/api/user/cookies/delete` | 普通用户 + CSRF | 取消 Cookie 域名授权 |
+| `GET` | `/api/shared-folders` | 普通用户 | 查看可见的团队空间文件夹 |
 | `POST` | `/api/cookies` | 普通用户 + CSRF | 同步当前站点 Cookie |
 
 文件接口限定在用户工作区：
@@ -104,6 +112,8 @@ users/<username>/.picoclaw/workspace/
 | `GET` | `/api/mcp/token` | 普通用户 | 获取 MCP token |
 | `GET` | `/api/mcp/sse/:service` | MCP token | 建立 SSE 连接 |
 | `POST` | `/api/mcp/sse/:service` | MCP token | 发送 JSON-RPC |
+| `GET` | `/api/mcp/cookies` | MCP token | 读取 Cookie（容器内技能使用） |
+| `POST` | `/api/mcp/cookies` | MCP token | 写入 Cookie |
 | `GET` | `/api/browser/ws` | MCP token | 浏览器执行端 WebSocket |
 | `GET` | `/api/computer/ws` | MCP token | 桌面执行端 WebSocket |
 
@@ -142,6 +152,7 @@ MCP JSON-RPC 支持：
 | --- | --- | --- |
 | `GET` | `/api/admin/users` | 用户和容器列表 |
 | `POST` | `/api/admin/users/create` | 创建本地用户 |
+| `POST` | `/api/admin/users/batch-create` | 批量导入（表单字段 usernames，逗号或换行分隔） |
 | `POST` | `/api/admin/users/delete` | 删除用户 |
 | `GET` | `/api/admin/superadmins` | 超管列表 |
 | `POST` | `/api/admin/superadmins/create` | 创建超管并返回随机密码 |
@@ -173,6 +184,7 @@ MCP JSON-RPC 支持：
 | `GET` | `/api/admin/images/local-tags` | 本地标签 |
 | `GET` | `/api/admin/images/upgrade-candidates` | 可升级用户和组 |
 | `GET` | `/api/admin/images/users` | 镜像关联用户 |
+| `GET` | `/api/admin/images/pull-status` | 镜像拉取状态查询 |
 
 ### 认证和白名单
 
@@ -180,6 +192,7 @@ MCP JSON-RPC 支持：
 | --- | --- | --- |
 | `POST` | `/api/admin/auth/test-ldap` | 测试 LDAP 连接和组查询 |
 | `GET` | `/api/admin/auth/ldap-users` | 从 LDAP 拉取用户列表 |
+| `GET` | `/api/admin/auth/providers` | 已注册的认证源列表 |
 | `POST` | `/api/admin/auth/sync-groups` | 手动同步 LDAP 组 |
 | `GET` | `/api/admin/whitelist` | 获取白名单 |
 | `POST` | `/api/admin/whitelist` | 覆盖更新白名单 |
@@ -197,16 +210,47 @@ MCP JSON-RPC 支持：
 | `POST` | `/api/admin/groups/skills/bind` | 绑定并立即部署技能 |
 | `POST` | `/api/admin/groups/skills/unbind` | 解绑技能 |
 | `GET` | `/api/admin/skills` | 技能列表 |
-| `POST` | `/api/admin/skills/deploy` | 部署技能 |
-| `GET` | `/api/admin/skills/download` | 下载技能 |
+| `POST` | `/api/admin/skills/deploy` | 部署技能到用户或组 |
 | `POST` | `/api/admin/skills/remove` | 删除技能 |
 | `POST` | `/api/admin/skills/upload` | 上传技能 zip |
-| `POST` | `/api/admin/skills/install` | 从仓库安装技能 |
-| `GET` | `/api/admin/skills/repos/list` | 技能仓库列表 |
-| `POST` | `/api/admin/skills/repos/add` | 添加并 clone 仓库 |
-| `POST` | `/api/admin/skills/repos/save` | 保存仓库配置 |
-| `POST` | `/api/admin/skills/repos/pull` | 拉取仓库更新 |
-| `POST` | `/api/admin/skills/repos/remove` | 删除仓库 |
+| `POST` | `/api/admin/skills/user/bind` | 绑定技能到单个用户 |
+| `POST` | `/api/admin/skills/user/unbind` | 解绑用户技能 |
+| `GET` | `/api/admin/skills/user/sources` | 用户技能来源列表 |
+| `GET` | `/api/admin/skills/sources` | 技能仓库来源列表 |
+| `POST` | `/api/admin/skills/sources/git` | 添加 Git 技能仓库 |
+| `POST` | `/api/admin/skills/sources/remove` | 移除技能仓库 |
+| `POST` | `/api/admin/skills/sources/pull` | 拉取技能仓库更新 |
+| `POST` | `/api/admin/skills/sources/refresh` | 刷新技能仓库 |
+| `GET` | `/api/admin/skills/registry/list` | 技能注册中心列表 |
+| `POST` | `/api/admin/skills/registry/install` | 从注册中心安装技能 |
+| `GET` | `/api/admin/skills/defaults` | 默认技能列表 |
+| `POST` | `/api/admin/skills/defaults/toggle` | 切换技能默认安装 |
+
+### 团队空间
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/admin/shared-folders` | 共享文件夹列表 |
+| `POST` | `/api/admin/shared-folders/create` | 创建共享文件夹 |
+| `POST` | `/api/admin/shared-folders/update` | 更新共享文件夹 |
+| `POST` | `/api/admin/shared-folders/delete` | 删除共享文件夹 |
+| `POST` | `/api/admin/shared-folders/groups/set` | 设置文件夹的组可见范围 |
+| `POST` | `/api/admin/shared-folders/test` | 测试文件夹挂载 |
+| `POST` | `/api/admin/shared-folders/mount` | 手动挂载文件夹 |
+
+### TLS 证书管理
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/admin/tls/status` | TLS 证书状态 |
+| `POST` | `/api/admin/tls/upload` | 上传 TLS 证书 |
+
+### 其他
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/admin/skill-install-policy` | 技能安装策略 |
+| `POST` | `/api/admin/skill-install-policy` | 设置技能安装策略 |
 
 ## 响应格式
 

@@ -134,26 +134,20 @@ group_name=组名&username=user1&csrf_token=xxx
 
 #### 绑定技能到组
 
-**API 端点**：`POST /api/admin/groups/skills/add`
+**API 端点**：`POST /api/admin/groups/skills/bind`
 
-**请求格式**：
-```json
-{
-  "group_id": 1,
-  "skills": ["code-review", "deploy"]
-}
+**请求格式**（form）：
+```
+group_name=组名&skill_name=技能名&csrf_token=xxx
 ```
 
 #### 解绑技能
 
-**API 端点**：`POST /api/admin/groups/skills/remove`
+**API 端点**：`POST /api/admin/groups/skills/unbind`
 
-**请求格式**：
-```json
-{
-  "group_id": 1,
-  "skills": ["deploy"]
-}
+**请求格式**（form）：
+```
+group_name=组名&skill_name=技能名&csrf_token=xxx
 ```
 
 **继承规则**：子组自动继承父组的所有技能。如果子组自身也绑定了技能，则合并生效。解绑只影响当前组，不影响子组继承。
@@ -162,7 +156,9 @@ group_name=组名&username=user1&csrf_token=xxx
 
 当认证模式为 `ldap` 且 `ldap.group_search_mode` 启用时，支持 LDAP 组同步。
 
-**API 端点**：`POST /api/admin/groups/ldap/sync`
+LDAP 组同步通过认证源相关端点完成，详情见认证管理页面文档。
+
+**API 端点**：`POST /api/admin/auth/sync-groups`
 
 **请求格式**：空
 
@@ -170,28 +166,11 @@ group_name=组名&username=user1&csrf_token=xxx
 ```json
 {
   "success": true,
-  "message": "同步完成",
-  "groups_created": 3,
-  "groups_updated": 2,
-  "groups_deleted": 1
+  "message": "同步完成"
 }
 ```
 
-**测试 LDAP 组查询连接**：
-
-**API 端点**：`POST /api/admin/groups/ldap/test`
-
-**请求格式**：
-```json
-{
-  "host": "ldap.example.com:389",
-  "bind_dn": "cn=admin,dc=example,dc=com",
-  "bind_password": "secret",
-  "group_base_dn": "ou=groups,dc=example,dc=com",
-  "group_filter": "(objectClass=groupOfNames)",
-  "group_member_attribute": "member"
-}
-```
+LDAP 连接测试通过 `POST /api/admin/auth/test-ldap` 端点进行，该端点为 LDAP 的整体连接验证（包括用户查询和组查询），不单独提供组测试端点。
 
 ## 涉及的 API 端点
 
@@ -205,5 +184,5 @@ group_name=组名&username=user1&csrf_token=xxx
 | `/api/admin/groups/members/remove` | POST | 移除组成员（仅 local） |
 | `/api/admin/groups/skills/bind` | POST | 绑定技能到组 |
 | `/api/admin/groups/skills/unbind` | POST | 解绑组技能 |
-| `/api/admin/groups/ldap/sync` | POST | 同步 LDAP 组 |
-| `/api/admin/groups/ldap/test` | POST | 测试 LDAP 组查询 |
+| `/api/admin/auth/sync-groups` | POST | 同步 LDAP 组 |
+| `/api/admin/auth/test-ldap` | POST | 测试 LDAP 连接（含组查询） |

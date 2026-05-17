@@ -44,27 +44,23 @@
 
 **API 端点**：`POST /api/admin/skills/deploy`
 
-**请求格式**：
-```json
-{
-  "skill_name": "code-review",
-  "target_type": "user",
-  "targets": ["user1", "user2"]
-}
+**请求格式**（form）：
+```
+skill_name=code-review&username=user1&csrf_token=xxx
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | skill_name | string | 技能名称 |
-| target_type | string | 部署目标类型：`user` 或 `group` |
-| targets | array | 目标用户名或组名的列表 |
+| username | string | 目标用户名（可选，与 group_name 二选一） |
+| group_name | string | 目标组名（可选，与 username 二选一） |
 
 **响应格式**：
 ```json
 {
   "success": true,
   "message": "部署成功",
-  "deployed": ["user1", "user2"],
+  "deployed": ["user1"],
   "failed": []
 }
 ```
@@ -120,76 +116,133 @@
 }
 ```
 
-### 6. 技能仓库管理
+### 6. 技能仓库管理（技能来源）
 
-技能可以从 Git 仓库安装，支持 SSH 和 HTTPS 两种认证方式。
+技能可以从 Git 仓库安装。技能来源（sources）管理相关端点如下：
 
-#### 仓库列表
+#### 来源列表
 
-**API 端点**：`GET /api/admin/skills/repos/list`
+**API 端点**：`GET /api/admin/skills/sources`
 
 **响应格式**：
 ```json
 {
   "success": true,
-  "repos": [
+  "sources": [
     {
       "name": "official-skills",
       "url": "https://github.com/picoaide/skills.git",
-      "branch": "main",
+      "ref": "main",
+      "ref_type": "branch",
       "last_pulled": "2024-01-01T00:00:00Z"
     }
   ]
 }
 ```
 
-#### 添加仓库
+#### 添加 Git 来源
 
-**API 端点**：`POST /api/admin/skills/repos/add`
+**API 端点**：`POST /api/admin/skills/sources/git`
 
-**请求格式**：
-```json
-{
-  "name": "my-skills",
-  "url": "git@github.com:user/skills.git",
-  "branch": "main",
-  "auth_type": "ssh",
-  "ssh_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
-  "ssh_key_passphrase": ""
-}
+**请求格式**（form）：
+```
+name=official-skills&url=https://github.com/picoaide/skills.git&ref_type=branch&ref=main&csrf_token=xxx
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| name | string | 是 | 仓库名称 |
+| name | string | 是 | 来源名称 |
 | url | string | 是 | Git 仓库 URL |
-| branch | string | 否 | 分支名，默认 `main` |
-| auth_type | string | 否 | `ssh` 或 `https` |
-| ssh_key | string | 否 | SSH 私钥内容 |
-| ssh_key_passphrase | string | 否 | SSH 私钥密码 |
-| https_username | string | 否 | HTTPS 用户名 |
-| https_token | string | 否 | HTTPS 访问令牌 |
+| ref_type | string | 否 | `branch` 或 `tag`，默认 `branch` |
+| ref | string | 否 | 分支名或标签名，默认 `main` |
 
-#### 拉取仓库更新
+#### 拉取来源更新
 
-**API 端点**：`POST /api/admin/skills/repos/pull`
+**API 端点**：`POST /api/admin/skills/sources/pull`
 
-**请求格式**：
+**请求格式**（form）：
+```
+name=official-skills&csrf_token=xxx
+```
+
+#### 刷新来源
+
+**API 端点**：`POST /api/admin/skills/sources/refresh`
+
+**请求格式**（form）：
+```
+name=official-skills&csrf_token=xxx
+```
+
+#### 删除来源
+
+**API 端点**：`POST /api/admin/skills/sources/remove`
+
+**请求格式**（form）：
+```
+name=official-skills&csrf_token=xxx
+```
+
+### 7. 技能绑定到单个用户
+
+#### 绑定技能
+
+**API 端点**：`POST /api/admin/skills/user/bind`
+
+**请求格式**（form）：
+```
+skill_name=code-review&username=user1&csrf_token=xxx
+```
+
+#### 解绑技能
+
+**API 端点**：`POST /api/admin/skills/user/unbind`
+
+**请求格式**（form）：
+```
+skill_name=code-review&username=user1&csrf_token=xxx
+```
+
+### 8. 技能注册中心
+
+**注册中心列表**：`GET /api/admin/skills/registry/list?source=official-skills`
+
+**响应格式**：
 ```json
 {
-  "name": "my-skills"
+  "success": true,
+  "list": [
+    { "slug": "code-review", "name": "Code Review", "description": "代码审查技能", "version": "1.0.0" }
+  ]
 }
 ```
 
-#### 删除仓库
+**从注册中心安装**：`POST /api/admin/skills/registry/install`
 
-**API 端点**：`POST /api/admin/skills/repos/remove`
+**请求格式**（form）：
+```
+source=official-skills&slug=code-review&csrf_token=xxx
+```
 
-**请求格式**：
+### 9. 默认技能
+
+**获取默认技能列表**：`GET /api/admin/skills/defaults`
+
+**响应格式**：
 ```json
 {
-  "name": "my-skills"
+  "success": true,
+  "skills": [
+    { "name": "code-review", "default": true }
+  ]
 }
+```
+
+**切换默认安装状态**：`POST /api/admin/skills/defaults/toggle`
+
+**请求格式**（form）：
+```
+skill_name=code-review&csrf_token=xxx
 ```
 
 ## 涉及的 API 端点
@@ -198,10 +251,18 @@
 |------|------|------|
 | `/api/admin/skills` | GET | 技能列表 |
 | `/api/admin/skills/deploy` | POST | 部署技能到用户/组 |
+| `/api/admin/skills/remove` | POST | 删除技能 |
 | `/api/admin/skills/upload` | POST | 上传技能 ZIP |
 | `/api/admin/skills/download` | GET | 下载技能 ZIP |
-| `/api/admin/skills/remove` | POST | 删除技能 |
-| `/api/admin/skills/repos/list` | GET | 技能仓库列表 |
-| `/api/admin/skills/repos/add` | POST | 添加技能仓库 |
-| `/api/admin/skills/repos/pull` | POST | 拉取仓库更新 |
-| `/api/admin/skills/repos/remove` | POST | 删除技能仓库 |
+| `/api/admin/skills/user/bind` | POST | 绑定技能到单个用户 |
+| `/api/admin/skills/user/unbind` | POST | 解绑用户技能 |
+| `/api/admin/skills/user/sources` | GET | 用户技能来源列表 |
+| `/api/admin/skills/sources` | GET | 技能仓库来源列表 |
+| `/api/admin/skills/sources/git` | POST | 添加 Git 技能仓库 |
+| `/api/admin/skills/sources/remove` | POST | 移除技能仓库 |
+| `/api/admin/skills/sources/pull` | POST | 拉取技能仓库更新 |
+| `/api/admin/skills/sources/refresh` | POST | 刷新技能仓库 |
+| `/api/admin/skills/registry/list` | GET | 技能注册中心列表 |
+| `/api/admin/skills/registry/install` | POST | 从注册中心安装技能 |
+| `/api/admin/skills/defaults` | GET | 默认技能列表 |
+| `/api/admin/skills/defaults/toggle` | POST | 切换技能默认安装 |
