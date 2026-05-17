@@ -180,10 +180,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Buildx multi-arch 推送会产生 untagged sha256 manifest，GHCR 不会自动清理
-      # 这里在每次构建后删除当前包名下所有 untagged 版本
-      - name: Clean up untagged manifests
-        uses: actions/delete-package-versions@v5
-        with:
-          package-name: ${{ needs.prepare.outputs.image_repo }}
-          delete-only-untagged-versions: true
+
