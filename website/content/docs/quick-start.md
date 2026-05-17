@@ -127,7 +127,7 @@ systemctl restart picoaide
 journalctl -u picoaide -f
 ```
 
-服务默认以 `picoaide serve -listen :80` 启动，工作目录为 `/data/picoaide`。
+服务默认以 `picoaide serve` 启动，监听地址由数据库配置决定（默认 `:80`），工作目录为 `/data/picoaide`。
 
 ## 验证安装
 
@@ -142,11 +142,8 @@ journalctl -u picoaide -f
 
 ```bash
 picoaide init                    # 全自动初始化
-picoaide serve                   # 启动服务（默认 :80）
-picoaide serve -listen :443      # 启用 TLS
-picoaide serve -listen :443      # 启用 TLS
+picoaide serve                   # 启动服务（默认 :80，监听地址由后台配置）
 picoaide reset-password <user>   # 重置本地用户密码
-```
 
 ## 下一步
 

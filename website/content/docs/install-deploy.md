@@ -147,7 +147,7 @@ After=network.target docker.service
 
 [Service]
 Type=simple
-ExecStart=/usr/sbin/picoaide serve -listen :80
+ExecStart=/usr/sbin/picoaide serve
 WorkingDirectory=/data/picoaide
 Restart=always
 RestartSec=5
