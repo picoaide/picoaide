@@ -53,42 +53,58 @@ GOOS=linux GOARCH=amd64 go build \
 
 ## 初始化
 
-运行初始化命令后，程序会创建数据目录、写入数据库默认值、生成会话密钥，并准备 systemd 服务：
+`picoaide init` 是全自动静默初始化，无需交互。它会运行环境检查、创建数据目录、初始化数据库和 systemd 服务：
 
 ```bash
 sudo picoaide init
 ```
 
-初始化向导依次进行四步配置：
+### 环境检查（自动执行）
 
-### 第一步：数据目录
+初始化依次检查以下项目，任一不满足则退出并提示：
 
-默认值是 `/data/picoaide`。该目录会保存：
+| 检查项 | 要求 | 说明 |
+|--------|------|------|
+| systemd | 已安装并可用 | 用于安装和管理 picoaide 服务 |
+| Docker Engine | 24+，守护进程运行中 | 容器管理依赖 Docker SDK |
+| 端口 80 | 未被占用 | 默认监听地址 `:80` |
+| 数据目录 `/data/picoaide` | 不存在或为空 | 防止覆盖已有数据 |
 
-- `picoaide.db` — SQLite 数据库，存储用户、容器、配置和组信息
-- `users/` — 每个用户的工作目录，包含 `config.json`、`.security.yml` 和 `workspace/`
-- `archive/` — 删除用户时的归档目录
+### 自动完成的操作
 
-### 第二步：超管账户
+环境检查通过后，初始化依次执行：
 
-设置本地超级管理员用户名和密码。超管账户不依赖外部认证源，即使 LDAP 不可用也能登录管理后台。请妥善保管密码，忘记密码后可通过 `picoaide reset-password <username>` 重置。
+1. **复制二进制** — 将自身复制到 `/usr/sbin/picoaide`（如不在此路径）
+2. **创建目录结构** — `users/`、`archive/`、`rules/`
+3. **初始化数据库** — 创建 `picoaide.db`、写入默认配置、生成会话密钥
+4. **创建超管账户** — 用户名为 `admin`，**自动生成 16 位随机密码**
+5. **保存密码文件** — 密码写入 `/data/picoaide/secret`（权限 0600，仅 root 可读）
+6. **设置默认配置** — 本地认证（`local`）、监听 `:80`、镜像源为腾讯云
+7. **安装 systemd 服务** — 注册 `picoaide.service`，开机自启
 
-### 第三步：监听地址
+### 初始化完成后
 
-默认是 `:80`。如果启用 TLS 并将监听地址设为 `:443`，服务端会自动额外启动 `:80` 入口用于 HTTP 跳转到 HTTPS。
+```bash
+# 查看超管密码
+cat /data/picoaide/secret
 
-### 第四步：镜像仓库
+# 启动服务
+systemctl start picoaide
 
-选择 PicoClaw 容器的镜像来源：
+# 查看状态
+systemctl status picoaide
+```
 
-- `github` — 从 `ghcr.io/picoaide/picoaide:<tag>` 拉取
-- `tencent` — 从 `hkccr.ccs.tencentyun.com/picoaide/picoaide:<tag>` 拉取
+> **首次登录后，`/data/picoaide/secret` 文件会被自动删除**，请及时记录密码。忘记密码后可通过 `picoaide reset-password admin` 重置。
 
-初始化完成后，系统会自动拉取选定仓库的最新镜像。
+### 默认配置
 
-### 初始化后默认配置
-
-初始化时默认使用本地认证模式（`web.auth_mode = local`）。如果需要 LDAP 或 OIDC 认证，初始化完成后通过管理后台或 API 切换。
+| 项目 | 默认值 | 说明 |
+|------|--------|------|
+| 认证模式 | `local` | 本地账户认证，可在后台切换 LDAP/OIDC |
+| 监听地址 | `:80` | 支持通过配置改为 `:443`（需 TLS） |
+| 镜像源 | 腾讯云（`tencent`） | 国内部署速度快，可在配置中切换 |
+| 工作目录 | `/data/picoaide` | 数据库、用户目录、日志均在此目录下 |
 
 ## 服务管理
 
@@ -125,9 +141,9 @@ journalctl -u picoaide -f
 ## 常用 CLI 命令
 
 ```bash
-picoaide init                    # 初始化
-picoaide init -user zhangsan     # 为已有用户准备容器目录
-picoaide serve -listen :80       # 启动服务
+picoaide init                    # 全自动初始化
+picoaide serve                   # 启动服务（默认 :80）
+picoaide serve -listen :443      # 启用 TLS
 picoaide serve -listen :443      # 启用 TLS
 picoaide reset-password <user>   # 重置本地用户密码
 ```

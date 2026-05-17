@@ -237,17 +237,17 @@ wget https://github.com/picoaide/picoaide/releases/latest/download/picoaide-linu
 chmod +x picoaide-linux-amd64
 mv picoaide-linux-amd64 /usr/sbin/picoaide
 
-# 初始化（交互式向导）
+# 全自动初始化
 ./picoaide init
 ```
 
-初始化向导将引导完成：
-1. 检测 Docker 环境
-2. 配置监听地址
-3. 创建超级管理员
-4. 选择镜像源（GitHub / 腾讯云）
-5. 拉取最新镜像
-6. 安装 systemd 服务
+初始化自动完成以下操作：
+1. 检测 Docker 和 systemd 可用性
+2. 创建数据目录 `/data/picoaide`
+3. 初始化 SQLite 数据库和默认配置
+4. 创建超管 `admin`（随机密码，写入 `/data/picoaide/secret`）
+5. 安装 systemd 服务
+6. 打印完成信息
 
 ### 启动
 

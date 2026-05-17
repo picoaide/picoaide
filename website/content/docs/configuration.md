@@ -191,9 +191,8 @@ rules/picoclaw/
 
 | 命令 | 说明 |
 |------|------|
-| `picoaide init` | 初始化向导 |
-| `picoaide init -user <username>` | 为已有用户准备容器目录 |
-| `picoaide serve -listen :80` | 启动 HTTP 服务 |
+| `picoaide init` | 全自动初始化 |
+| `picoaide serve` | 启动 HTTP 服务（默认 :80） |
 | `picoaide serve -listen :443` | 启动 HTTPS 服务（需配置 TLS） |
 | `picoaide reset-password <username>` | 重置本地用户密码 |
 

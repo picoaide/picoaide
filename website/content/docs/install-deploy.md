@@ -106,22 +106,25 @@ echo '/dev/sdb1 /data ext4 defaults 0 0' | sudo tee -a /etc/fstab
 sudo mkdir -p /data/picoaide
 ```
 
-### 超管账户
+### 超管密码
 
-初始化时创建的超管是系统的"逃生账户"，建议：
+`picoaide init` 会自动创建超管账户 `admin`，并生成 **16 位随机密码**，写入 `/data/picoaide/secret`（权限 0600）。
 
-- 使用强密码（至少 16 位，含大小写字母、数字和特殊字符）
-- 记录密码到安全密码管理器
-- 创建完成后立即登录验证
+建议：
+
+- 初始化后立即查看密码：`cat /data/picoaide/secret`
+- 将密码记录到安全密码管理器
+- `secret` 文件在超管首次登录后台后自动删除
+- 忘记密码后可通过 `picoaide reset-password admin` 重置
 
 ### 镜像仓库
 
-选择镜像仓库的考虑因素：
+初始化默认使用腾讯云镜像源（`tencent`），适合中国大陆部署。如需切换：
 
-- **github**：适合海外部署或可访问 GitHub Container Registry 的环境。使用默认官方镜像，更新及时
-- **tencent**：适合中国大陆部署，从腾讯云容器镜像服务拉取，速度更快
+- **github**：适合海外部署或可访问 GitHub Container Registry 的环境
+- 初始化完成后，通过管理后台「镜像管理」页面或 API 修改 `image.registry` 配置
 
-初始化完成后，系统会立即拉取所选仓库的最新镜像。如果网络环境需要代理，请确保 Docker 已配置代理：
+如果网络环境需要代理，请确保 Docker 已配置代理：
 
 ```bash
 # /etc/systemd/system/docker.service.d/proxy.conf
