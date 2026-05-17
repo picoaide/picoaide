@@ -67,7 +67,7 @@ sudo picoaide init
 |--------|------|------|
 | systemd | 已安装并可用 | 用于安装和管理 picoaide 服务 |
 | Docker Engine | 24+，守护进程运行中 | 容器管理依赖 Docker SDK |
-| 端口 80 | 未被占用 | 默认监听地址 `:80` |
+| 端口 80 | 未被占用 | 服务固定监听 `:80` |
 | 数据目录 `/data/picoaide` | 不存在或为空 | 防止覆盖已有数据 |
 
 ### 自动完成的操作
@@ -79,7 +79,7 @@ sudo picoaide init
 3. **初始化数据库** — 创建 `picoaide.db`、写入默认配置、生成会话密钥
 4. **创建超管账户** — 用户名为 `admin`，**自动生成 16 位随机密码**
 5. **保存密码文件** — 密码写入 `/data/picoaide/secret`（权限 0600，仅 root 可读）
-6. **设置默认配置** — 本地认证（`local`）、监听 `:80`、镜像源为腾讯云
+6. **设置默认配置** — 本地认证（`local`）、镜像源为腾讯云
 7. **安装 systemd 服务** — 注册 `picoaide.service`，开机自启
 
 ### 初始化完成后
@@ -102,7 +102,7 @@ systemctl status picoaide
 | 项目 | 默认值 | 说明 |
 |------|--------|------|
 | 认证模式 | `local` | 本地账户认证，可在后台切换 LDAP/OIDC |
-| 监听地址 | `:80` | 支持通过配置改为 `:443`（需 TLS） |
+| 服务端口 | `:80`（TLS 启用时同时监听 `:443`） | 固定端口，不支持修改 |
 | 镜像源 | 腾讯云（`tencent`） | 国内部署速度快，可在配置中切换 |
 | 工作目录 | `/data/picoaide` | 数据库、用户目录、日志均在此目录下 |
 
@@ -127,7 +127,7 @@ systemctl restart picoaide
 journalctl -u picoaide -f
 ```
 
-服务默认以 `picoaide serve` 启动，监听地址由数据库配置决定（默认 `:80`），工作目录为 `/data/picoaide`。
+服务默认以 `picoaide serve` 启动，固定监听 `:80`（TLS 启用时同时监听 `:443`），工作目录为 `/data/picoaide`。
 
 ## 验证安装
 
@@ -142,7 +142,7 @@ journalctl -u picoaide -f
 
 ```bash
 picoaide init                    # 全自动初始化
-picoaide serve                   # 启动服务（默认 :80，监听地址由后台配置）
+picoaide serve                   # 启动服务（固定 :80，TLS 启用时同时监听 :443）
 picoaide reset-password <user>   # 重置本地用户密码
 
 ## 下一步

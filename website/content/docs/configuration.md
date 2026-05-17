@@ -46,17 +46,9 @@ PicoAide 的配置主要存储在 SQLite 数据库中，通过展平键值对存
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `web.listen` | string | `:80` | 服务监听地址 |
-| `web.auth_mode` | string | `local` | 认证模式：`local`、`ldap`、`oidc` |
-| `web.ldap_enabled` | bool | `false` | 兼容旧版本：未设置 `web.auth_mode` 时根据此字段推断认证模式（已弃用，建议直接设置 `web.auth_mode`） |
-| `web.container_base_url` | string | `http://100.64.0.1:80` | 容器访问服务端的基础地址 |
-| `web.log_level` | string | `info` | 日志级别：`debug`、`info`、`warn`、`error` |
-| `web.log_retention` | string | `6m` | 日志保留周期（可选值：`1m`、`3m`、`6m`、`1y`、`3y`、`5y`、`forever`） |
-| `web.tls.enabled` | bool | `false` | 是否启用 TLS |
-| `web.tls.cert_file` | string | | TLS 证书路径 |
-| `web.tls.key_file` | string | | TLS 私钥路径 |
+| `web.listen` | string | `:80` | 服务监听地址（当前固定为 `:80`，配置项为预留） |
 
-当 TLS 启用且监听地址是 `:443` 时，服务端会额外启动 `:80` 入口处理 HTTP 到 HTTPS 的重定向。
+当 TLS 启用时，服务端在 `:443` 提供 HTTPS 服务，并额外启动 `:80` 入口用于 Docker 内网兼容和外部 HTTP 重定向。
 
 ### LDAP 配置
 
@@ -192,7 +184,7 @@ rules/picoclaw/
 | 命令 | 说明 |
 |------|------|
 | `picoaide init` | 全自动初始化 |
-| `picoaide serve` | 启动服务（监听地址由后台配置，默认 :80） |
+| `picoaide serve` | 启动服务（固定 :80，TLS 启用时同时监听 :443） |
 | `picoaide reset-password <username>` | 重置本地用户密码 |
 
 ## 环境变量

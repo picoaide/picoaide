@@ -252,7 +252,7 @@ mv picoaide-linux-amd64 /usr/sbin/picoaide
 ### 启动
 
 ```bash
-# 手动启动（监听地址由后台配置决定）
+# 手动启动
 ./picoaide serve
 
 # 或通过 systemd
