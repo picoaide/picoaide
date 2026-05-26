@@ -49,16 +49,18 @@ jobs:
     needs: [test]
     permissions:
       contents: read
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - goos: linux
             goarch: amd64
             suffix: linux-amd64
+            runner: ubuntu-latest
           - goos: linux
             goarch: arm64
             suffix: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
 
@@ -74,15 +76,8 @@ jobs:
           CGO_ENABLED=0 go build -o internal/rootfs/bundle/picoagent ./cmd/picoagent/
 
       - name: Build Alpine rootfs (${{ matrix.suffix }})
-        env:
-          GOARCH: ${{ matrix.goarch }}
         run: |
-          case "$GOARCH" in
-            amd64) ALPINE_ARCH="x86_64" ;;
-            arm64) ALPINE_ARCH="aarch64" ;;
-          esac
-          ALPINE_URL="https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/${ALPINE_ARCH}/alpine-minirootfs-3.21.0-${ALPINE_ARCH}.tar.gz"
-          curl -fsSL "$ALPINE_URL" -o internal/rootfs/bundle/alpine-rootfs.tar.gz
+          bash scripts/download-tools.sh "$(pwd)/internal/rootfs/bundle"
 
       - name: Build picoaide (${{ matrix.suffix }})
         env:
