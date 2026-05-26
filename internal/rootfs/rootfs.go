@@ -85,12 +85,13 @@ func extractAlpine(rootfsDir string) error {
         return err
       }
     case tar.TypeSymlink:
-      resolved := filepath.Clean(filepath.Join(filepath.Dir(target), header.Linkname))
+      linkTarget := header.Linkname
+      resolved := filepath.Clean(filepath.Join(filepath.Dir(target), linkTarget))
       if !strings.HasPrefix(resolved, rootfsDir+string(os.PathSeparator)) {
         continue
       }
       os.MkdirAll(filepath.Dir(target), 0755)
-      os.Symlink(header.Linkname, target)
+      os.Symlink(linkTarget, target)
     }
   }
   return nil

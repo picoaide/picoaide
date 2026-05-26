@@ -143,8 +143,7 @@ func InitUser(cfg *config.GlobalConfig, username string) error {
   }
 
   // 初始化 workspace（用户目录本身就是 workspace）
-  workspace := ud
-  if err := InitializeUser("", workspace); err != nil {
+  if err := InitializeUser("", cfg.UsersRoot, username); err != nil {
     return fmt.Errorf("初始化 workspace 失败: %w", err)
   }
 
@@ -239,12 +238,10 @@ func SyncCookies(cfg *config.GlobalConfig, username, domain, cookieStr string) e
 
 // InitializeUser 复制 user-template 到用户的 workspace 目录
 // templateDir: <WorkDir>/user-template/
-// workspace:   <WorkDir>/users/<username>/
-func InitializeUser(templateDir, workspace string) error {
-  workspace = filepath.Clean(workspace)
-  if !filepath.IsAbs(workspace) {
-    return fmt.Errorf("工作目录必须是绝对路径")
-  }
+// usersRoot:   <WorkDir>/users/
+// username:    经过 ValidateUsername 校验的用户名
+func InitializeUser(templateDir, usersRoot, username string) error {
+  workspace := filepath.Join(usersRoot, username)
 
   if err := os.MkdirAll(workspace, 0755); err != nil {
     return fmt.Errorf("创建工作目录失败: %w", err)

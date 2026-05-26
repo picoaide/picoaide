@@ -335,7 +335,12 @@ func (s *Server) handleAdminSharedFoldersTest(c *gin.Context) {
   }
 
   // 2. 检查用户目录中是否存在共享文件夹的符号链接
-  userSharePath := filepath.Clean(filepath.Join(user.UserDir(s.loadConfig(), testUsername), "share", sf.Name))
+  userDir := user.UserDir(s.loadConfig(), testUsername)
+  userSharePath := filepath.Join(userDir, "share", sf.Name)
+  if !strings.HasPrefix(filepath.Clean(userSharePath), filepath.Clean(userDir)+string(os.PathSeparator)) {
+    writeError(c, http.StatusForbidden, "共享文件夹路径不合法")
+    return
+  }
   if _, err := os.Stat(userSharePath); err == nil {
     mounted = true
     msg = "用户 " + testUsername + " 已挂载"

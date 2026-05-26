@@ -47,6 +47,7 @@ type Server struct {
   syncMu           sync.Mutex
   agentIntegration *AgentIntegration
   tlsSrv           *http.Server // TLS 服务器，用于优雅关闭
+  extSrv           *http.Server // HTTP 服务器（:80），用于热加载时更新 handler
 }
 
 // loadConfig 返回当前配置指针（原子读取）
@@ -461,7 +462,9 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
     admin.GET("/mcp/servers/tools", s.handleAdminMCPServerTools)
     admin.POST("/model/test", s.handleAdminModelTest)
     admin.GET("/tls/status", s.handleAdminTLSStatus)
-    admin.POST("/tls/upload", s.handleAdminTLSUpload)
+    admin.POST("/tls/verify", s.handleAdminTLSVerify)
+    admin.POST("/tls/save", s.handleAdminTLSSave)
+    admin.POST("/tls/toggle", s.handleAdminTLSToggle)
     admin.POST("/tls/clear", s.handleAdminTLSClear)
   }
   // 普通用户 - 团队空间
@@ -513,6 +516,28 @@ func redirectToHTTPSHandler() http.Handler {
   })
 }
 
+// tlsAwareHandler 根据当前配置动态判断是否需要 301 跳转 HTTPS
+func (s *Server) tlsAwareHandler(combined http.Handler) http.Handler {
+  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    if isSandboxRequest(r) {
+      combined.ServeHTTP(w, r)
+      return
+    }
+    cfg := s.loadConfig()
+    if cfg.Web.TLS.Enabled {
+      u := url.URL{
+        Scheme:   "https",
+        Host:     r.Host,
+        Path:     r.URL.Path,
+        RawQuery: r.URL.RawQuery,
+      }
+      http.Redirect(w, r, u.String(), http.StatusMovedPermanently)
+      return
+    }
+    combined.ServeHTTP(w, r)
+  })
+}
+
 // sandboxAwareHandler 根据请求来源 IP 分发到 internalHandler（沙箱内网）或 externalHandler（外部）
 func sandboxAwareHandler(internal, external http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -556,7 +581,10 @@ func (s *Server) buildTLSServer() (*http.Server, error) {
   return &http.Server{
     Addr:      ":443",
     Handler:   s.buildExternalHandler(),
-    TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
+    TLSConfig: &tls.Config{
+      Certificates: []tls.Certificate{cert},
+      MinVersion:   tls.VersionTLS12,
+    },
   }, nil
 }
 
@@ -687,43 +715,23 @@ func Serve() error {
   sigCh := make(chan os.Signal, 1)
   signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-  // 外部监听 :80（当 TLS 启用时做 301 跳转）
-  tlsSrv, err := s.buildTLSServer()
-  if err != nil {
-    slog.Warn("TLS 服务器创建失败，回退到 HTTP", "error", err)
-  }
+  // 外部监听 :80（动态判断是否需要 301 跳转 HTTPS）
+  extHandler := s.tlsAwareHandler(combinedHandler)
 
-  var extHandler http.Handler
-  if tlsSrv != nil {
-    extHandler = redirectToHTTPSHandler()
-  } else {
-    extHandler = combinedHandler
-  }
-
-  extSrv := &http.Server{
+  s.extSrv = &http.Server{
     Addr:    ":80",
     Handler: extHandler,
   }
   go func() {
-    if tlsSrv != nil {
-      slog.Info("外部 HTTP 已启动（301 跳转至 HTTPS）", "addr", ":80")
-    } else {
-      slog.Info("外部 HTTP 已启动", "addr", ":80")
-    }
-    if err := extSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+    slog.Info("外部 HTTP 已启动", "addr", ":80")
+    if err := s.extSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
       slog.Error("外部 HTTP 服务失败", "error", err)
     }
   }()
 
-  // TLS 服务器（仅当证书配置后启用）
-  if tlsSrv != nil {
-    s.tlsSrv = tlsSrv
-    go func() {
-      slog.Info("外部 HTTPS 已启动", "addr", ":443")
-      if err := tlsSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-        slog.Error("外部 HTTPS 服务失败", "error", err)
-      }
-    }()
+  // TLS 服务器（根据当前配置启动）
+  if err := s.reloadTLS(); err != nil {
+    slog.Warn("TLS 服务器创建失败，回退到 HTTP", "error", err)
   }
 
   // Unix socket 监听（供沙箱内 picoagent 本地通信）
@@ -747,11 +755,11 @@ func Serve() error {
   if unixLis != nil {
     unixLis.Close()
   }
-  return s.gracefulShutdown(extSrv, sockPath)
+  return s.gracefulShutdown(sockPath)
 }
 
 // gracefulShutdown 优雅关闭 HTTP 服务器及相关资源
-func (s *Server) gracefulShutdown(srv *http.Server, sockPath string) error {
+func (s *Server) gracefulShutdown(sockPath string) error {
   // 停止定时同步
   if s.syncCancel != nil {
     s.syncCancel()
@@ -772,8 +780,10 @@ func (s *Server) gracefulShutdown(srv *http.Server, sockPath string) error {
 
   shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
   defer cancel()
-  if err := srv.Shutdown(shutdownCtx); err != nil {
-    slog.Error("外部 HTTP 服务器关闭失败", "error", err)
+  if s.extSrv != nil {
+    if err := s.extSrv.Shutdown(shutdownCtx); err != nil {
+      slog.Error("外部 HTTP 服务器关闭失败", "error", err)
+    }
   }
   if s.tlsSrv != nil {
     if err := s.tlsSrv.Shutdown(shutdownCtx); err != nil {

@@ -466,7 +466,7 @@ func (s *Server) handleChatHistory(c *gin.Context) {
   }
 
   workspace := filepath.Join(config.WorkDir(), "users", username)
-  user.InitializeUser(filepath.Join(config.WorkDir(), "user-template"), workspace)
+  user.InitializeUser(filepath.Join(config.WorkDir(), "user-template"), filepath.Join(config.WorkDir(), "users"), username)
 
   // 读取最新会话的 live.jsonl
   var messages []chatMessage

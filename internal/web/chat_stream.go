@@ -208,7 +208,7 @@ func (s *Server) handleChatSend(c *gin.Context) {
     return
   }
 
-  user.InitializeUser("", filepath.Join(config.WorkDir(), "users", username))
+  user.InitializeUser("", filepath.Join(config.WorkDir(), "users"), username)
 
   input := agent.Message{Role: agent.RoleUser, Content: message}
   inputJSON, _ := json.Marshal(input)

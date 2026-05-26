@@ -223,6 +223,7 @@ func (s *Server) handleAdminModelTest(c *gin.Context) {
     req.Header.Set(k, v)
   }
 
+  req.URL = parsedURL
   resp, err := http.DefaultClient.Do(req)
   if err != nil {
     writeError(c, http.StatusBadRequest, fmt.Sprintf("连接失败: %s", err.Error()))

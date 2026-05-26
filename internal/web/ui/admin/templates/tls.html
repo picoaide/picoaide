@@ -11,26 +11,60 @@
 <div class="card" id="tls-status-card">
   <div class="card-header">当前状态</div>
   <div class="grid-2" id="tls-status-fields">
-    <div class="field"><label>状态</label><span id="tls-enabled-label" class="text-muted">检查中...</span></div>
+    <div class="field"><label>HTTPS</label><span id="tls-enabled-label" class="text-muted">检查中...</span></div>
     <div class="field"><label>证书域名</label><span id="tls-subject" class="text-muted">-</span></div>
+    <div class="field"><label>SANs</label><span id="tls-sans" class="text-muted" style="word-break:break-all">-</span></div>
+    <div class="field"><label>域名匹配</label><span id="tls-host-match" class="text-muted">-</span></div>
     <div class="field"><label>颁发者</label><span id="tls-issuer" class="text-muted">-</span></div>
     <div class="field"><label>有效期至</label><span id="tls-not-after" class="text-muted">-</span></div>
   </div>
 </div>
 
+<div class="card" id="tls-toggle-card">
+  <div class="card-header">HTTPS 开关</div>
+  <div class="field toggle-switch-field">
+    <label class="toggle-switch">
+      <input type="checkbox" id="tls-toggle-input">
+      <span class="toggle-switch-control"></span>
+      <span class="toggle-switch-label" id="tls-toggle-status">加载中...</span>
+    </label>
+  </div>
+</div>
+
 <div class="card" id="tls-upload-card">
   <div class="card-header">上传证书</div>
-  <p class="text-sm text-muted">上传 PEM 格式的证书文件和私钥文件。证书和私钥将直接存入数据库配置表，不会写入文件系统。</p>
+  <p class="text-sm text-muted">选择 PEM 格式的证书文件和私钥文件，验证通过后保存。</p>
+
   <div class="field">
-    <label>证书 (PEM)</label>
-    <textarea id="cert-pem-input" rows="6" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="font-family:monospace;font-size:13px"></textarea>
+    <label>证书文件 (cert.pem)</label>
+    <input type="file" id="cert-file-input" accept=".pem,.crt,.cert,.cer">
   </div>
   <div class="field">
-    <label>私钥 (PEM)</label>
-    <textarea id="key-pem-input" rows="6" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" style="font-family:monospace;font-size:13px"></textarea>
+    <label>私钥文件 (key.pem)</label>
+    <input type="file" id="key-file-input" accept=".pem,.key">
   </div>
+
   <div class="btn-group mt-2" style="justify-content:flex-end">
-    <button class="btn btn-ghost" id="tls-clear-btn" style="color:var(--red)">清除证书</button>
-    <button class="btn btn-primary" id="tls-upload-btn">上传并启用</button>
+    <button class="btn btn-ghost" id="tls-verify-btn" disabled>验证证书</button>
   </div>
+
+  <div id="tls-verify-result" class="mt-2" style="display:none">
+    <div class="card" style="border:1px solid var(--border);background:var(--bg-alt)">
+      <div class="grid-2">
+        <div class="field"><label>证书域名</label><span id="verify-subject" class="text-muted">-</span></div>
+        <div class="field"><label>SANs</label><span id="verify-sans" class="text-muted" style="word-break:break-all">-</span></div>
+        <div class="field"><label>域名匹配</label><span id="verify-host-match" class="text-muted">-</span></div>
+        <div class="field"><label>颁发者</label><span id="verify-issuer" class="text-muted">-</span></div>
+        <div class="field"><label>有效期至</label><span id="verify-not-after" class="text-muted">-</span></div>
+        <div class="field"><label>状态</label><span id="verify-status" class="text-muted">-</span></div>
+      </div>
+    </div>
+    <div class="btn-group mt-1" style="justify-content:flex-end">
+      <button class="btn btn-primary" id="tls-save-btn">保存证书并启用</button>
+    </div>
+  </div>
+</div>
+
+<div class="btn-group" style="justify-content:flex-end;margin-top:8px">
+  <button class="btn btn-ghost" id="tls-clear-btn" style="color:var(--red)">清除证书</button>
 </div>

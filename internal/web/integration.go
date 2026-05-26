@@ -148,8 +148,7 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
     }
   }
 
-  workspace := filepath.Join(config.WorkDir(), "users", username)
-  if err := user.InitializeUser(filepath.Join(config.WorkDir(), "user-template"), workspace); err != nil {
+  if err := user.InitializeUser(filepath.Join(config.WorkDir(), "user-template"), filepath.Join(config.WorkDir(), "users"), username); err != nil {
     slog.Error("初始化用户工作目录失败", "username", username, "error", err)
     return
   }
