@@ -1,16 +1,12 @@
 package user
 
 import (
-  "encoding/json"
   "fmt"
-  "log/slog"
   "os"
   "path/filepath"
   "regexp"
   "sort"
   "time"
-
-  "gopkg.in/yaml.v3"
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
@@ -103,20 +99,20 @@ func EnsureUsersRoot(cfg *config.GlobalConfig) error {
 
 // GetUserList 获取所有用户列表（从数据库读取）
 func GetUserList(cfg *config.GlobalConfig) ([]string, error) {
-  containers, err := auth.GetAllContainers()
+  localUsers, err := auth.GetAllLocalUsers()
   if err != nil {
     return nil, err
   }
   var users []string
-  for _, c := range containers {
-    users = append(users, c.Username)
+  for _, u := range localUsers {
+    users = append(users, u.Username)
   }
   sort.Strings(users)
   return users, nil
 }
 
-// InitUser 初始化单个用户：创建目录、分配 IP、写入数据库
-func InitUser(cfg *config.GlobalConfig, username string, imageTag string) error {
+// InitUser 初始化单个用户：创建目录、workspace、生成 MCP token
+func InitUser(cfg *config.GlobalConfig, username string) error {
   if err := ValidateUsername(username); err != nil {
     return err
   }
@@ -134,37 +130,35 @@ func InitUser(cfg *config.GlobalConfig, username string, imageTag string) error 
     }
   }
 
-  // 检查是否已有 DB 记录
-  rec, _ := auth.GetContainerByUsername(username)
-  if rec == nil {
-    ip, err := auth.AllocateNextIP()
-    if err != nil {
-      return fmt.Errorf("分配 IP 失败 %s: %w", username, err)
-    }
+  // 将旧 .picoagent/workspace 目录内容迁移到用户根目录
+  oldWs := filepath.Join(ud, ".picoagent", "workspace")
+  if info, err := os.Stat(oldWs); err == nil && info.IsDir() {
+    util.CopyDir(oldWs, ud)
+    os.RemoveAll(filepath.Join(ud, ".picoagent"))
+  }
+  oldPicoclaw := filepath.Join(ud, ".picoclaw", "workspace")
+  if info, err := os.Stat(oldPicoclaw); err == nil && info.IsDir() {
+    util.CopyDir(oldPicoclaw, ud)
+    os.RemoveAll(filepath.Join(ud, ".picoclaw"))
+  }
 
-    imageRef := ""
-    if imageTag != "" {
-      imageRef = cfg.Image.Name + ":" + imageTag
-    }
-    rec = &auth.ContainerRecord{
-      Username: username,
-      Image:    imageRef,
-      Status:   "stopped",
-      IP:       ip,
-    }
-    if err := auth.UpsertContainer(rec); err != nil {
-      return fmt.Errorf("写入数据库失败 %s: %w", username, err)
-    }
-    // 生成 MCP token
+  // 初始化 workspace（用户目录本身就是 workspace）
+  workspace := ud
+  if err := InitializeUser("", workspace); err != nil {
+    return fmt.Errorf("初始化 workspace 失败: %w", err)
+  }
+
+  // 确保 MCP token 存在（不覆盖已有 token）
+  if existingToken, _ := auth.GetMCPToken(username); existingToken == "" {
     if _, err := auth.GenerateMCPToken(username); err != nil {
       fmt.Printf("  [警告] %s: 生成 MCP token 失败: %v\n", username, err)
     }
   }
 
   if existing {
-    fmt.Printf("  [更新] %s (IP: %s)\n", username, rec.IP)
+    fmt.Printf("  [更新] %s\n", username)
   } else {
-    fmt.Printf("  [初始化] %s 完成 (IP: %s)\n", username, rec.IP)
+    fmt.Printf("  [初始化] %s 完成\n", username)
   }
   return nil
 }
@@ -228,275 +222,66 @@ func RemoveAllUserData(cfg *config.GlobalConfig) error {
 // Cookie 与安全配置
 // ============================================================
 
-// SyncCookies 将域名对应的 Cookie 字符串写入用户的 .security.yml
-// 格式：cookies: { domain.com: "name1=val1; name2=val2" }
+// SyncCookies 将域名对应的 Cookie 字符串写入数据库（供 MCP API 使用）
 func SyncCookies(cfg *config.GlobalConfig, username, domain, cookieStr string) error {
   if err := ValidateUsername(username); err != nil {
     return err
   }
-  picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
-  if err := os.MkdirAll(picoclawDir, 0755); err != nil {
-    return fmt.Errorf("创建目录失败: %w", err)
-  }
-
-  securityPath := filepath.Join(picoclawDir, ".security.yml")
-
-  secMap := make(map[string]interface{})
-  if data, err := os.ReadFile(securityPath); err == nil {
-    if err := yaml.Unmarshal(data, &secMap); err != nil {
-      return fmt.Errorf(".security.yml 格式错误，拒绝覆盖: %w", err)
-    }
-  }
-
-  cookiesMap, _ := secMap["cookies"].(map[string]interface{})
-  if cookiesMap == nil {
-    cookiesMap = make(map[string]interface{})
-  }
-
-  cookiesMap[domain] = cookieStr
-  secMap["cookies"] = cookiesMap
-
-  data, err := yaml.Marshal(secMap)
-  if err != nil {
-    return fmt.Errorf("序列化失败: %w", err)
-  }
-
-  if err := os.WriteFile(securityPath, data, 0600); err != nil {
-    return err
-  }
-
-  // 同步到数据库（MCP API 使用）
   if err := auth.SetCookie(username, domain, cookieStr); err != nil {
-    slog.Warn("同步 Cookie 到数据库失败", "username", username, "domain", domain, "error", err)
+    return fmt.Errorf("同步 Cookie 到数据库失败: %w", err)
   }
-
   return nil
-}
-
-// ApplySecurityToYAML 将全局安全配置合并到用户的 .security.yml
-func ApplySecurityToYAML(cfg *config.GlobalConfig, picoclawDir string) error {
-  securityPath := filepath.Join(picoclawDir, ".security.yml")
-
-  existing := make(map[string]interface{})
-  if data, err := os.ReadFile(securityPath); err == nil {
-    if err := yaml.Unmarshal(data, &existing); err != nil {
-      return fmt.Errorf(".security.yml 格式错误，拒绝覆盖: %w", err)
-    }
-  }
-
-  var globalSec map[string]interface{}
-  if m, ok := cfg.GetSecurityConfig().(map[string]interface{}); ok {
-    globalSec = util.DeepCopyMap(m)
-  } else {
-    globalSec = make(map[string]interface{})
-  }
-
-  merged := util.MergeMap(existing, globalSec)
-
-  data, err := yaml.Marshal(merged)
-  if err != nil {
-    return fmt.Errorf("序列化 .security.yml 失败: %w", err)
-  }
-
-  return os.WriteFile(securityPath, data, 0600)
 }
 
 // ============================================================
-// 钉钉配置
+// 用户初始化（从模板创建 workspace）
 // ============================================================
 
-// GetDingTalkConfig 获取用户的钉钉配置（clientID 和 clientSecret）
-func GetDingTalkConfig(cfg *config.GlobalConfig, username string) (clientID, clientSecret string) {
-  if err := ValidateUsername(username); err != nil {
-    return "", ""
-  }
-  if values, err := GetPicoClawConfigFields(cfg, username, 0, "dingtalk"); err == nil && len(values) > 0 {
-    for _, value := range values {
-      switch value.Field.Key {
-      case "client_id":
-        if v, ok := value.Value.(string); ok {
-          clientID = v
-        }
-      case "client_secret":
-        if v, ok := value.Value.(string); ok {
-          clientSecret = v
-        }
-      }
-    }
-    if clientID != "" || clientSecret != "" {
-      return
-    }
-  }
-  picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
+// InitializeUser 复制 user-template 到用户的 workspace 目录
+// templateDir: <WorkDir>/user-template/
+// workspace:   <WorkDir>/users/<username>/
+func InitializeUser(templateDir, workspace string) error {
+  workspace = filepath.Clean(workspace)
 
-  configPath := filepath.Join(picoclawDir, "config.json")
-  if data, err := os.ReadFile(configPath); err == nil {
-    var m map[string]interface{}
-    if json.Unmarshal(data, &m) == nil {
-      if v, ok := getDingTalkField(m, "client_id"); ok {
-        clientID = v
+  if err := os.MkdirAll(workspace, 0755); err != nil {
+    return fmt.Errorf("创建工作目录失败: %w", err)
+  }
+
+  if templateDir != "" {
+    cleanTemplate := filepath.Clean(templateDir)
+    if info, err := os.Stat(cleanTemplate); err == nil && info.IsDir() {
+      if err := util.CopyDir(cleanTemplate, workspace); err != nil {
+        return fmt.Errorf("复制用户模板失败: %w", err)
       }
     }
   }
 
-  securityPath := filepath.Join(picoclawDir, ".security.yml")
-  if data, err := os.ReadFile(securityPath); err == nil {
-    var m map[string]interface{}
-    if yaml.Unmarshal(data, &m) == nil {
-      if v, ok := getDingTalkField(m, "client_secret"); ok {
-        clientSecret = v
-      }
+  for _, dir := range []string{"memory", "skills", "sessions"} {
+    if err := os.MkdirAll(filepath.Join(workspace, dir), 0755); err != nil {
+      return fmt.Errorf("创建 %s 目录失败: %w", dir, err)
     }
   }
 
-  return
-}
-
-// SaveDingTalkConfig 保存用户的钉钉配置
-func SaveDingTalkConfig(cfg *config.GlobalConfig, username, clientID, clientSecret string) error {
-  if err := ValidateUsername(username); err != nil {
-    return err
-  }
-  if err := SavePicoClawConfigFields(cfg, username, 0, map[string]interface{}{
-    "enabled":       true,
-    "client_id":     clientID,
-    "client_secret": clientSecret,
-  }); err == nil {
-    return nil
-  }
-  picoclawDir := filepath.Join(UserDir(cfg, username), ".picoclaw")
-  os.MkdirAll(picoclawDir, 0755)
-
-  // config.json — 不存在则创建空结构
-  configPath := filepath.Join(picoclawDir, "config.json")
-  configData, err := os.ReadFile(configPath)
-  if err != nil {
-    configData = []byte("{}")
-  }
-  var configMap map[string]interface{}
-  if err := json.Unmarshal(configData, &configMap); err != nil {
-    configMap = make(map[string]interface{})
-  }
-  if err := ensureSupportedConfigFileVersion(configMap); err != nil {
-    return err
-  }
-  setDingTalkField(configMap, "client_id", clientID)
-
-  configJSON, err := json.MarshalIndent(configMap, "", "  ")
-  if err != nil {
-    return fmt.Errorf("序列化 config.json 失败: %w", err)
-  }
-  if err := os.WriteFile(configPath, configJSON, 0644); err != nil {
-    return fmt.Errorf("写入 config.json 失败: %w", err)
+  writeDefault := func(path, content string) {
+    cleanPath := filepath.Clean(path)
+    if _, err := os.Stat(cleanPath); err != nil {
+      os.WriteFile(cleanPath, []byte(content), 0644)
+    }
   }
 
-  // .security.yml — 不存在则创建空结构
-  securityPath := filepath.Join(picoclawDir, ".security.yml")
-  securityData, err := os.ReadFile(securityPath)
-  if err != nil {
-    securityData = []byte("{}")
-  }
-  var secMap map[string]interface{}
-  if err := yaml.Unmarshal(securityData, &secMap); err != nil {
-    secMap = make(map[string]interface{})
-  }
-  setDingTalkFieldInBase(secMap, dingTalkBaseKey(configMap), "client_secret", clientSecret)
+  writeDefault(filepath.Join(workspace, "AGENT.md"),
+    "---\nname: pico\ndescription: 默认通用助手\n---\n\n你是 PicoAgent，本工作区的默认助手。\n")
 
-  securityYAML, err := yaml.Marshal(secMap)
-  if err != nil {
-    return fmt.Errorf("序列化 .security.yml 失败: %w", err)
-  }
-  if err := os.WriteFile(securityPath, securityYAML, 0600); err != nil {
-    return fmt.Errorf("写入 .security.yml 失败: %w", err)
-  }
+  writeDefault(filepath.Join(workspace, "SOUL.md"),
+    "# 人格设定\n\n在这里描述 AI 助手的角色定位、语气风格和行为准则。\n")
+
+  writeDefault(filepath.Join(workspace, "USER.md"),
+    "# 用户信息\n\n在这里描述你的背景、偏好和常用工作流程，帮助 AI 更好地为你服务。\n")
+
+  writeDefault(filepath.Join(workspace, "memory", "MEMORY.md"),
+    "# 长期记忆\n\nAI 会在这里记录需要长期保留的重要信息。\n")
 
   return nil
 }
 
-func ensureSupportedConfigFileVersion(configMap map[string]interface{}) error {
-  version := configVersionFromMap(configMap)
-  if version > PicoAideSupportedPicoClawConfigVersion {
-    return fmt.Errorf("config.json 使用配置版本 %d，但当前 PicoAide 只支持到 %d，请先适配迁移规则", version, PicoAideSupportedPicoClawConfigVersion)
-  }
-  return nil
-}
 
-func configVersionFromMap(configMap map[string]interface{}) int {
-  switch v := configMap["version"].(type) {
-  case int:
-    return v
-  case int64:
-    return int(v)
-  case float64:
-    return int(v)
-  case json.Number:
-    n, _ := v.Int64()
-    return int(n)
-  default:
-    return 3
-  }
-}
-
-func getDingTalkField(root map[string]interface{}, field string) (string, bool) {
-  for _, baseKey := range []string{"channel_list", "channels"} {
-    channels, ok := root[baseKey].(map[string]interface{})
-    if !ok {
-      continue
-    }
-    dingtalk, ok := channels["dingtalk"].(map[string]interface{})
-    if !ok {
-      continue
-    }
-    if settings, ok := dingtalk["settings"].(map[string]interface{}); ok {
-      if v, ok := settings[field].(string); ok {
-        return v, true
-      }
-    }
-    if v, ok := dingtalk[field].(string); ok {
-      return v, true
-    }
-  }
-  return "", false
-}
-
-func setDingTalkField(root map[string]interface{}, field string, value string) {
-  setDingTalkFieldInBase(root, dingTalkBaseKey(root), field, value)
-}
-
-func setDingTalkFieldInBase(root map[string]interface{}, baseKey string, field string, value string) {
-  channels, _ := root[baseKey].(map[string]interface{})
-  if channels == nil {
-    channels = make(map[string]interface{})
-    root[baseKey] = channels
-  }
-  dingtalk, _ := channels["dingtalk"].(map[string]interface{})
-  if dingtalk == nil {
-    dingtalk = make(map[string]interface{})
-    channels["dingtalk"] = dingtalk
-  }
-  dingtalk["enabled"] = true
-  if baseKey == "channel_list" {
-    dingtalk["type"] = "dingtalk"
-    settings, _ := dingtalk["settings"].(map[string]interface{})
-    if settings == nil {
-      settings = make(map[string]interface{})
-      dingtalk["settings"] = settings
-    }
-    settings[field] = value
-    return
-  }
-  dingtalk[field] = value
-}
-
-func dingTalkBaseKey(root map[string]interface{}) string {
-  if _, ok := root["channel_list"].(map[string]interface{}); ok {
-    return "channel_list"
-  }
-  if _, ok := root["channels"].(map[string]interface{}); ok {
-    return "channels"
-  }
-  if configVersionFromMap(root) >= 3 {
-    return "channel_list"
-  }
-  return "channels"
-}

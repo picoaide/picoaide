@@ -2,6 +2,10 @@ name: Server CI
 
 on:
   push:
+    branches:
+      - main
+      - master
+      - dev
     paths:
       - 'cmd/**'
       - 'internal/**'
@@ -10,8 +14,6 @@ on:
       - '.golangci.yml'
       - 'Makefile'
       - 'config.yaml'
-      - 'rules/**'
-      - 'docker/**'
       - 'scripts/**'
   workflow_dispatch:
 
@@ -26,6 +28,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+
+      - name: Prepare embed bundle
+        run: |
+          mkdir -p internal/rootfs/bundle
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o internal/rootfs/bundle/picoagent ./cmd/picoagent/
+          bash scripts/download-tools.sh "$(pwd)/internal/rootfs/bundle"
 
       - name: Format check
         run: bash format.sh --check
@@ -46,10 +54,12 @@ jobs:
           - goos: linux
             goarch: amd64
             suffix: linux-amd64
+            runner: ubuntu-latest
           - goos: linux
             goarch: arm64
             suffix: linux-arm64
-    runs-on: ubuntu-latest
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
 
@@ -57,16 +67,20 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Prepare embed bundle
+        run: |
+          mkdir -p internal/rootfs/bundle
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} go build -o internal/rootfs/bundle/picoagent ./cmd/picoagent/
+          bash scripts/download-tools.sh "$(pwd)/internal/rootfs/bundle"
+
       - name: Build picoaide (${{ matrix.suffix }})
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          ext=""
-          [ "${GOOS}" = "windows" ] && ext=".exe"
           version="${GITHUB_REF_NAME#v}"
           [ -z "$version" ] && version="dev"
-          go build -ldflags "-X github.com/picoaide/picoaide/internal/config.Version=${version}" -o picoaide-${{ matrix.suffix }}${ext} ./cmd/picoaide/
+          go build -ldflags "-X github.com/picoaide/picoaide/internal/config.Version=${version}" -o picoaide-${{ matrix.suffix }} ./cmd/picoaide/
 
       - uses: actions/upload-artifact@v7
         with:

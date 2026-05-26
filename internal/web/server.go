@@ -12,19 +12,22 @@ import (
   "log/slog"
   "net"
   "net/http"
+  "net/url"
   "os"
   "os/signal"
+  "path/filepath"
   "strconv"
   "strings"
   "sync"
+  "sync/atomic"
   "syscall"
   "time"
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/config"
-  dockerpkg "github.com/picoaide/picoaide/internal/docker"
   "github.com/picoaide/picoaide/internal/logger"
+  "github.com/picoaide/picoaide/internal/sandbox"
   "github.com/picoaide/picoaide/internal/skill"
   "github.com/picoaide/picoaide/internal/user"
 )
@@ -35,13 +38,20 @@ import (
 
 // Server 是 Web 管理面板服务器
 type Server struct {
-  cfg             *config.GlobalConfig
-  secret          string
-  csrfKey         string
-  dockerAvailable bool
-  loginLimiter    *rateLimiter
-  syncCancel      context.CancelFunc
-  syncMu          sync.Mutex
+  cfg              atomic.Pointer[config.GlobalConfig]
+  configMu         sync.Mutex // 保护 Skills 等共享指针字段的写操作
+  secret           string
+  csrfKey          string
+  loginLimiter     *rateLimiter
+  syncCancel       context.CancelFunc
+  syncMu           sync.Mutex
+  agentIntegration *AgentIntegration
+  tlsSrv           *http.Server // TLS 服务器，用于优雅关闭
+}
+
+// loadConfig 返回当前配置指针（原子读取）
+func (s *Server) loadConfig() *config.GlobalConfig {
+  return s.cfg.Load()
 }
 
 const sessionSecretSettingKey = "internal.session_secret"
@@ -88,11 +98,11 @@ func ensureSessionSecret() (string, error) {
 
 // syncAuto 自动同步用户目录和组（与手动同步相同的逻辑，含清理过期账号）
 func (s *Server) syncAuto() {
-  if !authsource.HasDirectoryProvider(s.cfg) {
+  if !authsource.HasDirectoryProvider(s.loadConfig()) {
     return
   }
 
-  authMode := s.cfg.AuthMode()
+  authMode := s.loadConfig().AuthMode()
 
   // 同步用户目录（与手动同步相同的逻辑，含清理过期账号）
   result, err := s.syncUsersFromDirectory(true)
@@ -103,9 +113,9 @@ func (s *Server) syncAuto() {
   }
 
   // 同步组
-  groupResult, err := authsource.SyncGroups(authMode, s.cfg, func(username string) error {
-    if rec, _ := auth.GetContainerByUsername(username); rec == nil {
-      return s.initExternalUser(username)
+  groupResult, err := authsource.SyncGroups(authMode, s.loadConfig(), func(username string) error {
+    if !auth.UserExists(username) {
+      return s.initializeUser(username)
     }
     return nil
   })
@@ -127,14 +137,14 @@ func (s *Server) restartSyncTimer() {
     s.syncCancel = nil
   }
 
-  interval := s.cfg.SyncIntervalDuration()
-  if interval > 0 && s.cfg.UnifiedAuthEnabled() && authsource.HasDirectoryProvider(s.cfg) {
+  interval := s.loadConfig().SyncIntervalDuration()
+  if interval > 0 && s.loadConfig().UnifiedAuthEnabled() && authsource.HasDirectoryProvider(s.loadConfig()) {
     ctx, cancel := context.WithCancel(context.Background())
     s.syncCancel = cancel
     go func() {
       ticker := time.NewTicker(interval)
       defer ticker.Stop()
-      slog.Info("定时同步已启动", "interval", interval, "auth_mode", s.cfg.AuthMode())
+      slog.Info("定时同步已启动", "interval", interval, "auth_mode", s.loadConfig().AuthMode())
       // 启动时立即执行首次同步
       s.syncAuto()
       for {
@@ -214,20 +224,19 @@ func (s *Server) sessionUserAllowed(username string) bool {
   if auth.IsSuperadmin(username) {
     return true
   }
-  if !s.cfg.UnifiedAuthEnabled() {
+  if !s.loadConfig().UnifiedAuthEnabled() {
     return auth.UserExists(username)
   }
-  if s.cfg.AuthMode() == "local" {
+  if s.loadConfig().AuthMode() == "local" {
     return false
   }
   if auth.UserExists(username) && !auth.IsExternalUser(username) {
     return false
   }
-  if !user.AllowedByWhitelist(s.cfg, s.cfg.AuthMode(), username) {
+  if !user.AllowedByWhitelist(s.loadConfig(), s.loadConfig().AuthMode(), username) {
     return false
   }
-  rec, _ := auth.GetContainerByUsername(username)
-  return rec != nil
+  return auth.UserExists(username)
 }
 
 // getSessionUser 从请求的 cookie 中提取已登录的用户名
@@ -291,8 +300,7 @@ func (s *Server) secureHeaders() gin.HandlerFunc {
     c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 
     if (c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") &&
-      !strings.HasSuffix(c.Request.URL.Path, "/files/upload") &&
-      !strings.HasSuffix(c.Request.URL.Path, "/migration-rules/upload") {
+      !strings.HasSuffix(c.Request.URL.Path, "/files/upload") {
       c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
     }
 
@@ -319,114 +327,50 @@ func (s *Server) allowedExtensionOrigin(origin string) bool {
   return false
 }
 
-// ensureImageAvailable 检查本地是否有 picoclaw 镜像，无则自动拉取最新版本
-func (s *Server) ensureImageAvailable() {
-  for {
-    ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-    images, err := dockerpkg.ListLocalImages(ctx, s.cfg.Image.Name)
-    cancel()
-    if err == nil && len(images) > 0 {
-      slog.Info("本地已有镜像，跳过自动拉取", "count", len(images))
-      return
-    }
-
-    // 从 GitHub 获取最新标签列表
-    ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
-    tags, err := dockerpkg.ListRegistryTagsForConfig(ctx2, s.cfg.Image.RepoName(), "github")
-    cancel2()
-    if err != nil || len(tags) == 0 {
-      slog.Error("获取远程标签失败，30 秒后重试", "error", err)
-      time.Sleep(30 * time.Second)
-      continue
-    }
-
-    sortTagsForDisplay(tags)
-    latestTag := tags[0]
-    // 按当前配置的仓库地址拉取（默认腾讯云，可改 GitHub）
-    pullRef := s.cfg.Image.PullRef(latestTag)
-    unifiedRef := s.cfg.Image.UnifiedRef(latestTag)
-    startImagePull(latestTag)
-    slog.Info("正在拉取镜像", "tag", pullRef)
-
-    pullCtx := context.Background()
-    reader, err := dockerpkg.ImagePull(pullCtx, pullRef)
-    if err != nil {
-      slog.Error("镜像拉取失败", "error", err)
-      failImagePull(err.Error())
-      time.Sleep(30 * time.Second)
-      continue
-    }
-    buf := make([]byte, 4096)
-    for {
-      n, readErr := reader.Read(buf)
-      if n > 0 {
-        updateImagePull(string(buf[:n]))
-      }
-      if readErr != nil {
-        break
-      }
-    }
-    reader.Close()
-
-    // 腾讯云模式：拉取后 retag 为统一名称
-    if s.cfg.Image.IsTencent() && pullRef != unifiedRef {
-      slog.Info("重命名镜像", "from", pullRef, "to", unifiedRef)
-      if err := dockerpkg.RetagImage(pullCtx, pullRef, unifiedRef); err != nil {
-        slog.Error("重命名失败", "error", err)
-      }
-    }
-
-    ctx3, cancel3 := context.WithTimeout(context.Background(), 10*time.Second)
-    images, err = dockerpkg.ListLocalImages(ctx3, s.cfg.Image.Name)
-    cancel3()
-    if err == nil && len(images) > 0 {
-      finishImagePull()
-      slog.Info("镜像拉取完成", "tag", unifiedRef)
-      return
-    }
-    slog.Error("镜像拉取后未检测到本地镜像，30 秒后重试")
-    failImagePull("拉取后未检测到本地镜像")
-    time.Sleep(30 * time.Second)
-  }
-}
-
-// imageRequiredMiddleware 拦截无本地镜像时的超管写操作
-func (s *Server) imageRequiredMiddleware() gin.HandlerFunc {
-  return func(c *gin.Context) {
-    if c.Request.Method != "POST" {
-      c.Next()
-      return
-    }
-    // 兼容 /api/admin/images 和 /api/v1/admin/images 等任意前缀
-    path := c.Request.URL.Path
-    if strings.HasSuffix(path, "/admin/images") || strings.Contains(path, "/admin/images/") {
-      c.Next()
-      return
-    }
-    if !s.dockerAvailable {
-      c.Next()
-      return
-    }
-    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-    images, err := dockerpkg.ListLocalImages(ctx, s.cfg.Image.Name)
-    cancel()
-    if err == nil && len(images) > 0 {
-      c.Next()
-      return
-    }
-    if getImagePullStatus().Running {
-      c.Next()
-      return
-    }
-    writeError(c, http.StatusPreconditionFailed, "本地无可用镜像，请先到镜像管理拉取镜像")
-    c.Abort()
-  }
-}
-
-// registerAPIRoutes 将所有 API 路由注册到指定的路由组（用于 /api 和 /api/v1 双路径注册）
-func (s *Server) registerAPIRoutes(g *gin.RouterGroup) {
+// registerInternalAPIRoutes 注册沙箱内部 API 路由（sandbox → host 通信所需的最小集）
+func (s *Server) registerInternalAPIRoutes(g *gin.RouterGroup) {
   // 健康检查（无需认证）
   g.GET("/health", s.handleHealth)
+
+  // PicoAgent 沙箱配置 API（token 认证，无需 session）
+  g.GET("/picoagent/me", s.handlePicoAgentConfig)
+  // 文件管理
+  g.GET("/files", s.handleFiles)
+  g.POST("/files/upload", s.handleFileUpload)
+  g.GET("/files/download", s.handleFileDownload)
+  g.POST("/files/delete", s.handleFileDelete)
+  g.POST("/files/mkdir", s.handleFileMkdir)
+  g.GET("/files/edit", s.handleFileEditGet)
+  g.POST("/files/edit", s.handleFileEditSave)
+  // Cookie 同步（写入数据库）
+  g.POST("/cookies", s.handleCookies)
+  // 用户 Cookie 授权管理
+  g.GET("/user/cookies", s.handleUserCookies)
+  g.POST("/user/cookies/delete", s.handleUserCookiesDelete)
+  // 定时任务
+  g.GET("/cron", s.handleCronList)
+  g.POST("/cron/create", s.handleCronCreate)
+  g.POST("/cron/update", s.handleCronUpdate)
+  g.POST("/cron/delete", s.handleCronDelete)
+  g.POST("/cron/toggle", s.handleCronToggle)
+  // MCP token
+  g.GET("/mcp/token", s.handleMCPToken)
+  // MCP SSE 服务
+  g.GET("/mcp/sse/:service", s.handleMCPSSEServiceGet)
+  g.POST("/mcp/sse/:service", s.handleMCPSSEServicePost)
+  // MCP Cookie API
+  g.GET("/mcp/cookies", s.handleMCPCookiesGet)
+  g.POST("/mcp/cookies", s.handleMCPCookiesPost)
+  // Browser Extension WebSocket
+  g.GET("/browser/ws", s.handleBrowserWS)
+  // Computer 桌面代理 WebSocket
+  g.GET("/computer/ws", s.handleComputerWS)
+}
+
+// registerExternalAPIRoutes 注册全部外部 API 路由（继承内部路由 + 外部特有路由）
+func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
+  // 先注册内部沙箱路由
+  s.registerInternalAPIRoutes(g)
 
   // 认证
   login := g.Group("/login")
@@ -440,45 +384,21 @@ func (s *Server) registerAPIRoutes(g *gin.RouterGroup) {
   g.GET("/user/info", s.handleUserInfo)
   g.GET("/user/init-status", s.handleUserInitStatus)
   g.POST("/user/password", s.handleChangePassword)
-  // 钉钉配置
-  g.GET("/dingtalk", s.handleDingTalkGet)
-  g.POST("/dingtalk", s.handleDingTalkSave)
-  // 配置管理（超管）
+  // 对话
+  g.GET("/user/chat/history", s.handleChatHistory)
+  g.POST("/user/chat/send", s.handleChatSend)
+  g.GET("/user/chat/stream", s.handleChatStream)
+  g.POST("/user/chat/stop", s.handleChatStop)
   g.GET("/config", s.handleConfigGet)
   g.POST("/config", s.handleConfigSave)
-  g.GET("/picoclaw/channels", s.handlePicoClawChannelsGet)
-  g.GET("/picoclaw/config-fields", s.handlePicoClawConfigFieldsGet)
-  g.POST("/picoclaw/config-fields", s.handlePicoClawConfigFieldsSave)
-  // 文件管理
-  g.GET("/files", s.handleFiles)
-  g.POST("/files/upload", s.handleFileUpload)
-  g.GET("/files/download", s.handleFileDownload)
-  g.POST("/files/delete", s.handleFileDelete)
-  g.POST("/files/mkdir", s.handleFileMkdir)
-  g.GET("/files/edit", s.handleFileEditGet)
-  g.POST("/files/edit", s.handleFileEditSave)
-  // Cookie 同步（写入用户 .security.yml）
-  g.POST("/cookies", s.handleCookies)
-  // 用户 Cookie 授权管理（查看已授权域名、取消授权）
-  g.GET("/user/cookies", s.handleUserCookies)
-  g.POST("/user/cookies/delete", s.handleUserCookiesDelete)
   // CSRF token
   g.GET("/csrf", s.handleCSRF)
-  // MCP token（Extension 获取认证 token）
-  g.GET("/mcp/token", s.handleMCPToken)
-  // MCP SSE 服务（参数化路由，支持 browser、computer 等服务）
-  g.GET("/mcp/sse/:service", s.handleMCPSSEServiceGet)
-  g.POST("/mcp/sse/:service", s.handleMCPSSEServicePost)
-  // MCP Cookie API（MCP token 认证，供容器内技能读写 cookie）
-  g.GET("/mcp/cookies", s.handleMCPCookiesGet)
-  g.POST("/mcp/cookies", s.handleMCPCookiesPost)
-  // Browser Extension WebSocket
-  g.GET("/browser/ws", s.handleBrowserWS)
-  // Computer 桌面代理 WebSocket
-  g.GET("/computer/ws", s.handleComputerWS)
-  // 超管 API 路由组（含镜像拦截中间件）
+  // 渠道配置
+  g.GET("/channels", s.handleUserChannelsGet)
+  g.GET("/channels/config-fields", s.handleChannelConfigFieldsGet)
+  g.POST("/channels/config-fields", s.handleChannelConfigFieldsSave)
+  // 超管 API 路由组
   admin := g.Group("/admin")
-  admin.Use(s.imageRequiredMiddleware())
   {
     admin.GET("/users", s.handleAdminUsers)
     admin.POST("/users/create", s.handleAdminUserCreate)
@@ -488,11 +408,7 @@ func (s *Server) registerAPIRoutes(g *gin.RouterGroup) {
     admin.POST("/superadmins/create", s.handleAdminSuperadminCreate)
     admin.POST("/superadmins/delete", s.handleAdminSuperadminDelete)
     admin.POST("/superadmins/reset", s.handleAdminSuperadminReset)
-    admin.POST("/container/start", s.handleAdminContainerStart)
-    admin.POST("/container/stop", s.handleAdminContainerStop)
-    admin.POST("/container/restart", s.handleAdminContainerRestart)
-    admin.POST("/container/debug", s.handleAdminContainerDebug)
-    admin.GET("/container/logs", s.handleAdminContainerLogs)
+    admin.POST("/password", s.handleAdminChangePassword)
     admin.GET("/whitelist", s.handleAdminWhitelistGet)
     admin.POST("/whitelist", s.handleAdminWhitelistPost)
     admin.POST("/auth/test-ldap", s.handleAdminAuthTestLDAP)
@@ -523,17 +439,6 @@ func (s *Server) registerAPIRoutes(g *gin.RouterGroup) {
     admin.POST("/skills/registry/install", s.handleAdminSkillsRegistryInstall)
     admin.GET("/skills/defaults", s.handleAdminSkillsDefaults)
     admin.POST("/skills/defaults/toggle", s.handleAdminSkillsDefaultsToggle)
-    // 镜像管理
-    admin.GET("/images", s.handleAdminImages)
-    admin.POST("/images/pull", s.handleAdminImagePull)
-    admin.POST("/images/delete", s.handleAdminImageDelete)
-    admin.POST("/images/migrate", s.handleAdminImageMigrate)
-    admin.POST("/images/upgrade", s.handleAdminImageUpgrade)
-    admin.GET("/images/registry", s.handleAdminImageRegistry)
-    admin.GET("/images/local-tags", s.handleAdminLocalTags)
-    admin.GET("/images/upgrade-candidates", s.handleAdminImageUpgradeCandidates)
-    admin.GET("/images/users", s.handleAdminImageUsers)
-    admin.GET("/images/pull-status", s.handleAdminImagePullStatus)
     admin.GET("/shared-folders", s.handleAdminSharedFolders)
     admin.POST("/shared-folders/create", s.handleAdminSharedFoldersCreate)
     admin.POST("/shared-folders/update", s.handleAdminSharedFoldersUpdate)
@@ -541,17 +446,23 @@ func (s *Server) registerAPIRoutes(g *gin.RouterGroup) {
     admin.POST("/shared-folders/groups/set", s.handleAdminSharedFoldersSetGroups)
     admin.POST("/shared-folders/test", s.handleAdminSharedFoldersTest)
     admin.POST("/shared-folders/mount", s.handleAdminSharedFoldersMount)
-    admin.POST("/config/apply", s.handleAdminConfigApply)
-    admin.GET("/migration-rules", s.handleAdminMigrationRulesGet)
-    admin.POST("/migration-rules/refresh", s.handleAdminMigrationRulesRefresh)
-    admin.POST("/migration-rules/upload", s.handleAdminMigrationRulesUpload)
-    admin.GET("/picoclaw/channels", s.handlePicoClawAdminChannelsGet)
-    // TLS 证书管理
-    admin.GET("/tls/status", s.handleAdminTLSStatus)
-    admin.POST("/tls/upload", s.handleAdminTLSUpload)
+    admin.GET("/channels", s.handleAdminChannelsGet)
     admin.GET("/task/status", s.handleAdminTaskStatus)
     admin.GET("/skill-install-policy", s.handleAdminSkillInstallPolicyGet)
     admin.POST("/skill-install-policy", s.handleAdminSkillInstallPolicySet)
+    admin.GET("/mcp/servers", s.handleAdminMCPServersList)
+    admin.POST("/mcp/servers/create", s.handleAdminMCPServerCreate)
+    admin.POST("/mcp/servers/update/:id", s.handleAdminMCPServerUpdate)
+    admin.POST("/mcp/servers/delete/:id", s.handleAdminMCPServerDelete)
+    admin.GET("/mcp/servers/grants", s.handleAdminMCPServerGrantsList)
+    admin.POST("/mcp/servers/grants/add", s.handleAdminMCPServerGrantAdd)
+    admin.POST("/mcp/servers/grants/remove/:id", s.handleAdminMCPServerGrantRemove)
+    admin.POST("/mcp/servers/reload", s.handleAdminMCPServersReload)
+    admin.GET("/mcp/servers/tools", s.handleAdminMCPServerTools)
+    admin.POST("/model/test", s.handleAdminModelTest)
+    admin.GET("/tls/status", s.handleAdminTLSStatus)
+    admin.POST("/tls/upload", s.handleAdminTLSUpload)
+    admin.POST("/tls/clear", s.handleAdminTLSClear)
   }
   // 普通用户 - 团队空间
   g.GET("/shared-folders", s.handleSharedFolders)
@@ -564,9 +475,89 @@ func (s *Server) registerAPIRoutes(g *gin.RouterGroup) {
 // RegisterRoutes 将所有 API 路由注册到 Gin 引擎
 func (s *Server) RegisterRoutes(r *gin.Engine) {
   s.registerUIRoutes(r)
-  s.registerAPIRoutes(r.Group("/api"))
-  s.registerAPIRoutes(r.Group("/api/v1"))
+  s.registerExternalAPIRoutes(r.Group("/api"))
+  s.registerExternalAPIRoutes(r.Group("/api/v1"))
   r.GET("/api/version", s.handleVersion)
+}
+
+// buildInternalHandler 创建仅包含沙箱内部 API 路由的 Gin engine
+func (s *Server) buildInternalHandler() http.Handler {
+  r := gin.New()
+  r.Use(gin.Recovery())
+  r.Use(s.secureHeaders())
+  s.registerInternalAPIRoutes(r.Group("/api"))
+  s.registerInternalAPIRoutes(r.Group("/api/v1"))
+  r.GET("/api/version", s.handleVersion)
+  return logger.AccessMiddleware(r)
+}
+
+// buildExternalHandler 创建包含全部路由（UI + 全部 API）的 Gin engine
+func (s *Server) buildExternalHandler() http.Handler {
+  r := gin.New()
+  r.Use(gin.Recovery())
+  r.Use(s.secureHeaders())
+  s.RegisterRoutes(r)
+  return logger.AccessMiddleware(r)
+}
+
+// redirectToHTTPSHandler 返回一个将 HTTP 请求 301 重定向到 HTTPS 的 handler
+func redirectToHTTPSHandler() http.Handler {
+  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    u := url.URL{
+      Scheme:   "https",
+      Host:     r.Host,
+      Path:     r.URL.Path,
+      RawQuery: r.URL.RawQuery,
+    }
+    http.Redirect(w, r, u.String(), http.StatusMovedPermanently)
+  })
+}
+
+// sandboxAwareHandler 根据请求来源 IP 分发到 internalHandler（沙箱内网）或 externalHandler（外部）
+func sandboxAwareHandler(internal, external http.Handler) http.Handler {
+  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    if isSandboxRequest(r) {
+      internal.ServeHTTP(w, r)
+    } else {
+      external.ServeHTTP(w, r)
+    }
+  })
+}
+
+// sandboxCIDR 是沙箱内网网段
+var sandboxCIDR = func() *net.IPNet {
+  _, cidr, _ := net.ParseCIDR("100.64.0.0/16")
+  return cidr
+}()
+
+// isSandboxRequest 判断请求是否来自沙箱内网
+func isSandboxRequest(r *http.Request) bool {
+  host, _, err := net.SplitHostPort(r.RemoteAddr)
+  if err != nil {
+    return false
+  }
+  ip := net.ParseIP(host)
+  if ip == nil {
+    return false
+  }
+  return sandboxCIDR.Contains(ip)
+}
+
+// buildTLSServer 根据配置创建 HTTPS 服务器。TLS 不可用时返回 nil, nil。
+func (s *Server) buildTLSServer() (*http.Server, error) {
+  cfg := s.loadConfig()
+  if !cfg.Web.TLS.Enabled || cfg.Web.TLS.CertPEM == "" || cfg.Web.TLS.KeyPEM == "" {
+    return nil, nil
+  }
+  cert, err := tls.X509KeyPair([]byte(cfg.Web.TLS.CertPEM), []byte(cfg.Web.TLS.KeyPEM))
+  if err != nil {
+    return nil, fmt.Errorf("加载 TLS 证书失败: %w", err)
+  }
+  return &http.Server{
+    Addr:      ":443",
+    Handler:   s.buildExternalHandler(),
+    TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
+  }, nil
 }
 
 // setSessionCookie 设置 session cookie
@@ -579,38 +570,10 @@ func (s *Server) setSessionCookie(c *gin.Context, value string, maxAge int) {
     SameSite: http.SameSiteLaxMode,
     MaxAge:   maxAge,
   }
-  if s.cfg.Web.TLS.Enabled || c.GetHeader("X-Forwarded-Proto") == "https" {
+  if c.Request.TLS != nil {
     cookie.Secure = true
   }
   http.SetCookie(c.Writer, cookie)
-}
-
-func isDockerNetworkRequest(r *http.Request) bool {
-  host, _, err := net.SplitHostPort(r.RemoteAddr)
-  if err != nil {
-    host = r.RemoteAddr
-  }
-  ip := net.ParseIP(host)
-  if ip == nil {
-    return false
-  }
-  _, subnet, err := net.ParseCIDR(dockerpkg.NetworkSubnet)
-  if err != nil {
-    return false
-  }
-  return subnet.Contains(ip)
-}
-
-func httpsRedirectTarget(r *http.Request) string {
-  host := r.Host
-  if h, p, err := net.SplitHostPort(r.Host); err == nil && p == "80" {
-    host = h
-  }
-  target := "https://" + host + r.URL.Path
-  if r.URL.RawQuery != "" {
-    target += "?" + r.URL.RawQuery
-  }
-  return target
 }
 
 // Serve 初始化并启动 Web 管理面板服务器（DB → 配置 → 日志 → 服务）
@@ -641,16 +604,31 @@ func Serve() error {
     return fmt.Errorf("加载配置失败: %w", err)
   }
 
+  // 确保沙箱网桥存在（内网 listener 依赖 100.64.0.1 地址）
+  sandbox.EnsureBridge()
+
   retention := cfg.Web.LogRetention
   if retention == "" {
     retention = "6m"
   }
-  logger.Init(wd, retention, false, cfg.Web.LogLevel)
+  logger.Init(wd, retention, false, cfg.Web.LogLevel, cfg.Web.DebugMode)
   defer logger.Close()
 
   // 确保 users/ 和 archive/ 目录存在
   if err := user.EnsureUsersRoot(cfg); err != nil {
     slog.Warn("创建用户目录失败", "error", err)
+  }
+
+  // 自动创建超管（首次运行时）
+  admins, err := auth.GetSuperadmins()
+  if err != nil || len(admins) == 0 {
+    password := auth.GenerateRandomPassword(16)
+    if err := auth.CreateUser("admin", password, "superadmin"); err != nil {
+      slog.Warn("自动创建超管失败", "error", err)
+    } else {
+      slog.Info("自动创建超管账户", "username", "admin")
+      fmt.Fprintf(os.Stderr, "\n⚠ 超管账户已自动创建\n  用户名: admin\n  密码: %s\n  请立即登录并修改密码\n\n", password)
+    }
   }
 
   secret, err := ensureSessionSecret()
@@ -659,34 +637,12 @@ func Serve() error {
   }
   csrfKey := secret + "-csrf"
 
-  // 初始化 Docker 客户端
-  dockerOK := false
-  if err := dockerpkg.InitClient(); err != nil {
-    slog.Warn("Docker 不可用，容器操作将被禁用", "error", err)
-  } else {
-    ctx, cancel := contextWithTimeout(5)
-    defer cancel()
-    if err := dockerpkg.EnsureNetwork(ctx); err != nil {
-      slog.Warn("网络初始化失败", "error", err)
-    }
-    dockerOK = true
-  }
-
   s := &Server{
-    cfg:             cfg,
-    secret:          secret,
-    csrfKey:         csrfKey,
-    dockerAvailable: dockerOK,
-    loginLimiter:    newLoginRateLimiter(),
+    secret:       secret,
+    csrfKey:      csrfKey,
+    loginLimiter: newLoginRateLimiter(),
   }
-
-  // 后台自动拉取镜像（无本地镜像时）
-  if dockerOK {
-    go s.ensureImageAvailable()
-  }
-
-  // 后台自动刷新 Picoclaw 适配器（hash 检测 + 重试 + 24h 定时）
-  go user.AutoRefreshPicoClawMigrationRules(config.RuleCacheDir(), config.PicoClawAdapterRemoteBaseURLs())
+  s.cfg.Store(cfg)
 
   // 定时同步（实时响应配置变更）
   s.restartSyncTimer()
@@ -695,99 +651,138 @@ func Serve() error {
   initialSkills, _ := skill.ListAllSkills()
   slog.Info("技能目录扫描完成", "count", len(initialSkills))
 
-  gin.SetMode(gin.ReleaseMode)
-  r := gin.New()
-  r.Use(gin.Recovery())
-  r.Use(s.secureHeaders())
-  s.RegisterRoutes(r)
-  appHandler := logger.AccessMiddleware(r)
+  // 初始化 PicoAgent 集成层
+  if ai, err := s.initAgentIntegration(); err != nil {
+    slog.Warn("PicoAgent 集成初始化失败", "error", err)
+  } else {
+    s.agentIntegration = ai
+    // 启动 IM 网关
+    if err := ai.imGateway.Start(context.Background()); err != nil {
+      slog.Warn("IM 网关启动失败", "error", err)
+    } else {
+      slog.Info("IM 网关已启动")
+    }
+    // 启动 Cron 调度器
+    ai.cron.Start(context.Background())
+  }
+
+  // 加载第三方 MCP 服务器
+  if err := LoadMCPServers(context.Background()); err != nil {
+    slog.Warn("MCP 服务器加载失败", "error", err)
+  } else {
+    slog.Info("MCP 服务器已加载")
+  }
+
+  if cfg.Web.DebugMode {
+    gin.SetMode(gin.DebugMode)
+  } else {
+    gin.SetMode(gin.ReleaseMode)
+  }
+
+  internalHandler := s.buildInternalHandler()
+  externalHandler := s.buildExternalHandler()
+  combinedHandler := sandboxAwareHandler(internalHandler, externalHandler)
 
   // 信号通道：监听 SIGTERM 和 SIGINT
   sigCh := make(chan os.Signal, 1)
   signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-  var redirectServer *http.Server
-
-  if cfg.Web.TLS.Enabled && cfg.Web.TLS.CertPEM != "" && cfg.Web.TLS.KeyPEM != "" {
-    cert, err := tls.X509KeyPair([]byte(cfg.Web.TLS.CertPEM), []byte(cfg.Web.TLS.KeyPEM))
-    if err != nil {
-      return fmt.Errorf("解析 TLS 证书失败: %w", err)
-    }
-    tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
-
-    redirectMux := http.NewServeMux()
-    redirectMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-      if isDockerNetworkRequest(r) {
-        appHandler.ServeHTTP(w, r)
-        return
-      }
-      http.Redirect(w, r, httpsRedirectTarget(r), http.StatusMovedPermanently)
-    })
-    redirectServer = &http.Server{Addr: ":80", Handler: redirectMux}
-    go func() {
-      slog.Info("HTTP 入口已启动", "listen", ":80", "internal", dockerpkg.NetworkSubnet, "external", "redirect-to-https")
-      if err := redirectServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-        slog.Error("HTTP 入口服务错误", "error", err)
-      }
-    }()
-
-    srv := &http.Server{
-      Addr:      ":443",
-      Handler:   appHandler,
-      TLSConfig: tlsCfg,
-    }
-    go func() {
-      slog.Info("管理面板启动", "url", "https://:443")
-      if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-        slog.Error("服务启动失败", "error", err)
-      }
-    }()
-
-    <-sigCh
-    slog.Info("收到终止信号，开始优雅关闭...")
-    return gracefulShutdown(srv, redirectServer, dockerOK, s.syncCancel)
+  // 外部监听 :80（当 TLS 启用时做 301 跳转）
+  tlsSrv, err := s.buildTLSServer()
+  if err != nil {
+    slog.Warn("TLS 服务器创建失败，回退到 HTTP", "error", err)
   }
 
-  srv := &http.Server{
+  var extHandler http.Handler
+  if tlsSrv != nil {
+    extHandler = redirectToHTTPSHandler()
+  } else {
+    extHandler = combinedHandler
+  }
+
+  extSrv := &http.Server{
     Addr:    ":80",
-    Handler: appHandler,
+    Handler: extHandler,
   }
   go func() {
-    slog.Info("管理面板启动", "url", "http://:80")
-    if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-      slog.Error("服务启动失败", "error", err)
+    if tlsSrv != nil {
+      slog.Info("外部 HTTP 已启动（301 跳转至 HTTPS）", "addr", ":80")
+    } else {
+      slog.Info("外部 HTTP 已启动", "addr", ":80")
+    }
+    if err := extSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+      slog.Error("外部 HTTP 服务失败", "error", err)
     }
   }()
 
+  // TLS 服务器（仅当证书配置后启用）
+  if tlsSrv != nil {
+    s.tlsSrv = tlsSrv
+    go func() {
+      slog.Info("外部 HTTPS 已启动", "addr", ":443")
+      if err := tlsSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+        slog.Error("外部 HTTPS 服务失败", "error", err)
+      }
+    }()
+  }
+
+  // Unix socket 监听（供沙箱内 picoagent 本地通信）
+  sockPath := filepath.Join(config.WorkDir(), "picoaide.sock")
+  os.Remove(sockPath)
+  unixLis, err := net.Listen("unix", sockPath)
+  if err != nil {
+    slog.Warn("Unix socket 监听失败", "error", err)
+  } else {
+    os.Chmod(sockPath, 0700)
+    go func() {
+      slog.Info("Unix socket 已启动", "path", sockPath)
+      if err := http.Serve(unixLis, internalHandler); err != nil && err != http.ErrServerClosed {
+        slog.Error("Unix socket 服务失败", "error", err)
+      }
+    }()
+  }
+
   <-sigCh
   slog.Info("收到终止信号，开始优雅关闭...")
-  return gracefulShutdown(srv, redirectServer, dockerOK, s.syncCancel)
+  if unixLis != nil {
+    unixLis.Close()
+  }
+  return s.gracefulShutdown(extSrv, sockPath)
 }
 
 // gracefulShutdown 优雅关闭 HTTP 服务器及相关资源
-func gracefulShutdown(srv, redirectSrv *http.Server, dockerOK bool, syncCancel context.CancelFunc) error {
-  if syncCancel != nil {
-    syncCancel()
+func (s *Server) gracefulShutdown(srv *http.Server, sockPath string) error {
+  // 停止定时同步
+  if s.syncCancel != nil {
+    s.syncCancel()
   }
 
-  if redirectSrv != nil {
-    shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    redirectSrv.Shutdown(shutdownCtx)
+  // 停止速率限制器 goroutine
+  if s.loginLimiter != nil {
+    s.loginLimiter.Stop()
+  }
+
+  // 停止 IM 网关和 Cron 调度器
+  if s.agentIntegration != nil {
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    s.agentIntegration.imGateway.Stop(shutdownCtx)
+    s.agentIntegration.cron.Stop()
     cancel()
   }
 
   shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
   defer cancel()
   if err := srv.Shutdown(shutdownCtx); err != nil {
-    slog.Error("服务器关闭失败", "error", err)
-    return err
+    slog.Error("外部 HTTP 服务器关闭失败", "error", err)
   }
-
-  if dockerOK {
-    dockerpkg.CloseClient()
+  if s.tlsSrv != nil {
+    if err := s.tlsSrv.Shutdown(shutdownCtx); err != nil {
+      slog.Error("HTTPS 服务器关闭失败", "error", err)
+    }
   }
 
   slog.Info("服务器已优雅关闭")
+  os.Remove(sockPath)
   return nil
 }
 

@@ -189,6 +189,66 @@ func SafeRelPath(baseDir, relPath string) (string, error) {
   return evalPath, nil
 }
 
+// DeepGet 从嵌套 map 中按点号路径取值（如 "a.b.c"）
+func DeepGet(cfg map[string]interface{}, dottedPath string) (interface{}, bool) {
+  if dottedPath == "" {
+    return nil, false
+  }
+  parts := strings.Split(dottedPath, ".")
+  var current interface{} = cfg
+  for _, part := range parts {
+    node, ok := current.(map[string]interface{})
+    if !ok {
+      return nil, false
+    }
+    next, ok := node[part]
+    if !ok {
+      return nil, false
+    }
+    current = next
+  }
+  return current, true
+}
+
+// SetByPath 按点号路径设置嵌套 map 的值（路径不存在时自动创建节点）
+func SetByPath(cfg map[string]interface{}, dottedPath string, value interface{}) {
+  if dottedPath == "" {
+    return
+  }
+  parts := strings.Split(dottedPath, ".")
+  current := cfg
+  for i := 0; i < len(parts)-1; i++ {
+    next, ok := current[parts[i]].(map[string]interface{})
+    if !ok {
+      next = make(map[string]interface{})
+      current[parts[i]] = next
+    }
+    current = next
+  }
+  current[parts[len(parts)-1]] = value
+}
+
+// DeleteByPath 按点号路径删除嵌套 map 中的键
+func DeleteByPath(cfg map[string]interface{}, dottedPath string) {
+  if dottedPath == "" {
+    return
+  }
+  parts := strings.Split(dottedPath, ".")
+  if len(parts) == 1 {
+    delete(cfg, parts[0])
+    return
+  }
+  current := cfg
+  for i := 0; i < len(parts)-1; i++ {
+    next, ok := current[parts[i]].(map[string]interface{})
+    if !ok {
+      return
+    }
+    current = next
+  }
+  delete(current, parts[len(parts)-1])
+}
+
 func IsTextFile(filename string) bool {
   ext := strings.ToLower(filepath.Ext(filename))
   textExts := map[string]bool{

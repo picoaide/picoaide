@@ -116,9 +116,10 @@ export async function init(ctx) {
         (function(entry) {
           var tr = document.createElement('tr');
           tr.style.cursor = 'pointer';
-          tr.innerHTML = '<td>' + (entry.is_dir ? '📁 ' : '📄 ') + esc(entry.name) + '</td><td>' + (entry.tag ? '<span class="file-tag" title="' + esc(tagTooltips[entry.tag] || '') + '">' + esc(entry.tag) + '</span>' : '') + '</td><td>' + (entry.is_dir ? '' : (entry.size_str || '')) + '</td><td class="actions-cell"><div class="btn-group">' + (!entry.is_dir ? '<button class="btn btn-sm btn-outline dl-btn">下载</button>' : '') + '<button class="btn btn-sm btn-danger del-btn">删除</button></div></td>';
+          tr.innerHTML = '<td>' + (entry.is_dir ? '📁 ' : '📄 ') + esc(entry.name) + '</td><td>' + (entry.tag ? '<span class="file-tag" title="' + esc(tagTooltips[entry.tag] || '') + '">' + esc(entry.tag) + '</span>' : '') + '</td><td>' + (entry.is_dir ? '' : (entry.size_str || '')) + '</td><td class="actions-cell"><div class="btn-group">' + (!entry.is_dir && !entry.readonly ? '<button class="btn btn-sm btn-outline dl-btn">下载</button>' : '') + (!entry.readonly ? '<button class="btn btn-sm btn-danger del-btn">删除</button>' : '') + '</div></td>';
 
           tr.querySelector('td:first-child').addEventListener('click', function() {
+            if (entry.readonly) return;
             if (entry.is_dir) loadFiles(entry.rel_path);
             else openEditor(entry.rel_path);
           });
@@ -130,7 +131,8 @@ export async function init(ctx) {
             window.open(base + '/api/files/download?path=' + encodeURIComponent(entry.rel_path), '_blank');
           });
 
-          tr.querySelector('.del-btn').addEventListener('click', async function(e) {
+          var delBtn = tr.querySelector('.del-btn');
+          if (delBtn) delBtn.addEventListener('click', async function(e) {
             e.stopPropagation();
             if (!await ctx.confirmModal('删除 ' + esc(entry.name) + '？')) return;
             try {

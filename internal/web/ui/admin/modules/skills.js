@@ -174,12 +174,16 @@ export async function init(ctx) {
     var urlInput = $('#wizard-url');
     var refInput = $('#wizard-ref');
     var refType = $('#wizard-ref-type');
+    var authFields = $('#wizard-auth-fields');
+    var authUser = $('#wizard-auth-user');
+    var authPass = $('#wizard-auth-pass');
 
     function reset() {
       step1.classList.remove('hidden'); step2.classList.add('hidden'); step3.classList.add('hidden');
       footer.classList.remove('hidden'); nextBtn.textContent = '下一步'; nextBtn.classList.remove('hidden');
       cancelBtn.textContent = '取消'; cancelBtn.classList.remove('hidden');
       errEl.classList.add('hidden'); $('#wizard-log').textContent = ''; $('#wizard-status').textContent = '准备中';
+      authFields.classList.add('hidden'); authUser.value = ''; authPass.value = '';
     }
 
     reset(); modal.style.display = 'flex';
@@ -190,6 +194,8 @@ export async function init(ctx) {
     nextBtn.onclick = async function() {
       if (nextBtn.textContent === '完成' || nextBtn.textContent === '关闭') { closeM(); return; }
       var name = nameInput.value.trim(); var url = urlInput.value.trim();
+      var user = authUser.value.trim();
+      var pass = authPass.value;
       if (!name) { errEl.textContent = '请输入源名称'; errEl.classList.remove('hidden'); return; }
       if (!url) { errEl.textContent = '请输入仓库 URL'; errEl.classList.remove('hidden'); return; }
       errEl.classList.add('hidden');
@@ -201,7 +207,9 @@ export async function init(ctx) {
       logEl.textContent += '📦 克隆 ' + url + ' ...\n'; statusEl.textContent = '正在克隆仓库...';
       try {
         var csrf = await getCSRF();
-        var res = await Api.post('/api/admin/skills/sources/git', { name: name, url: url, ref: refInput.value.trim(), ref_type: refType.value, csrf_token: csrf });
+        var postData = { name: name, url: url, ref: refInput.value.trim(), ref_type: refType.value, csrf_token: csrf };
+        if (user || pass) { postData.username = user; postData.password = pass; }
+        var res = await Api.post('/api/admin/skills/sources/git', postData);
         if (res.success) {
           logEl.textContent += '✅ ' + (res.message || '') + '\n'; statusEl.textContent = '✅ 添加成功';
           step2.classList.add('hidden'); step3.classList.remove('hidden');
@@ -215,6 +223,11 @@ export async function init(ctx) {
           step2.classList.add('hidden'); step1.classList.remove('hidden');
           nextBtn.disabled = false; nextBtn.textContent = '重试';
           errEl.textContent = res.error || '添加失败'; errEl.classList.remove('hidden');
+          if (res.needs_auth) {
+            authFields.classList.remove('hidden');
+            if (!authUser.value) authUser.focus();
+            else authPass.focus();
+          }
         }
       } catch(e) {
         logEl.textContent += '❌ ' + e.message + '\n'; statusEl.textContent = '❌ 连接失败';
@@ -404,9 +417,6 @@ export async function init(ctx) {
       btn.addEventListener('click', function() { toggleDefault(btn.dataset.star); });
     });
 
-    tbody.querySelectorAll('[data-dl]').forEach(function(btn) {
-      btn.addEventListener('click', function() { window.open(window.location.origin + '/api/admin/skills/download?name=' + encodeURIComponent(btn.dataset.dl), '_blank'); });
-    });
     tbody.querySelectorAll('[data-rm]').forEach(function(btn) {
       btn.addEventListener('click', async function() {
         if (!await confirmModal('确定删除技能 ' + btn.dataset.rm + '？将从所有用户和组移除，不可撤销。')) return;

@@ -7,7 +7,7 @@ export async function init(ctx) {
 
   async function loadChannels() {
     try {
-      var data = await Api.get('/api/picoclaw/channels');
+      var data = await Api.get('/api/channels');
       if (!data.success) {
         showMsg('#channel-msg', data.error || '加载失败', false);
         return;
@@ -60,27 +60,34 @@ export async function init(ctx) {
     if (!channelListLoaded) { return loadChannels(); }
     if (!currentChannel) return;
     try {
-      var data = await Api.get('/api/picoclaw/config-fields?section=' + encodeURIComponent(currentChannel));
+      var data = await Api.get('/api/channels/config-fields?section=' + encodeURIComponent(currentChannel));
       if (!data.success) {
         showMsg('#channel-msg', data.error || '加载失败', false);
         return;
       }
       var ch = currentChannels.find(function(item) { return item.key === currentChannel; }) || {};
       $('#channel-title').textContent = ch.label || currentChannel || '渠道配置';
-      $('#channel-subtitle').textContent = (ch.enabled ? '当前渠道已启用' : (ch.configured ? '当前渠道已配置但未启用' : '当前渠道尚未配置')) + '，保存后会重启容器';
-      renderChannelFields(data.fields || []);
+      $('#channel-subtitle').textContent = (ch.enabled ? '当前渠道已启用' : (ch.configured ? '当前渠道已配置但未启用' : '当前渠道尚未配置')) + '，保存后生效';
+      renderChannelFields(data.fields || [], data.enabled);
     } catch (e) {
       showMsg('#channel-msg', e.message, false);
     }
   }
 
-  function renderChannelFields(fields) {
+  function renderChannelFields(fields, enabled) {
     var box = $('#channel-fields');
     if (!fields.length) {
       box.innerHTML = '<p class="text-muted">当前渠道没有可配置字段。</p>';
       return;
     }
-    box.innerHTML = fields.map(function(item) {
+    box.innerHTML =
+      '<div class="field"><label>启用该渠道</label>' +
+      '<label class="toggle-switch toggle-switch-field">' +
+        '<input type="checkbox" data-channel-field="enabled" data-field-type="boolean"' + (enabled ? ' checked' : '') + '>' +
+        '<span class="toggle-switch-control" aria-hidden="true"></span>' +
+        '<span class="toggle-switch-label">' + (enabled ? '已启用' : '未启用') + '</span>' +
+      '</label></div>' +
+      fields.map(function(item) {
       var field = item.field || {};
       var value = item.value === undefined || item.value === null ? '' : item.value;
       var fieldType = String(field.type || 'text').toLowerCase();
@@ -119,7 +126,7 @@ export async function init(ctx) {
       $('#channel-fields').querySelectorAll('[data-channel-field]').forEach(function(input) {
         values[input.dataset.channelField] = readFieldInputValue(input);
       });
-      var res = await Api.post('/api/picoclaw/config-fields', {
+      var res = await Api.post('/api/channels/config-fields', {
         section: currentChannel,
         values: JSON.stringify(values),
       });

@@ -314,7 +314,7 @@ func GetAccessibleSharedFolders(username string) ([]SharedFolder, error) {
   return accessible, nil
 }
 
-// GetSharedFolderMountsForUser 获取用户应挂载的共享文件夹列表（供 Docker 容器创建使用）
+// GetSharedFolderMountsForUser 获取用户应挂载的共享文件夹列表
 // workDir 为工作目录绝对路径
 func GetSharedFolderMountsForUser(workDir, username string) ([]ShareMount, error) {
   folders, err := GetAccessibleSharedFolders(username)
@@ -325,7 +325,7 @@ func GetSharedFolderMountsForUser(workDir, username string) ([]ShareMount, error
   for _, sf := range folders {
     mounts = append(mounts, ShareMount{
       Source: filepath.Join(workDir, "shared", sf.Name),
-      Target: "/root/.picoclaw/workspace/share/" + sf.Name,
+      Target: "/root/share/" + sf.Name,
     })
   }
   return mounts, nil

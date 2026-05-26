@@ -1,5 +1,5 @@
 hero:
-  kicker: 企业级 AI PaaS 工作平台
+  kicker: 企业级 AI 工作平台
   title: 让每位员工拥有自己的 AI 操作助手
   description: AI 的力量应当被释放，但数据的边界必须被守护。PicoAide 让 AI 进入企业，而不是让数据离开企业。
   actions:
@@ -15,62 +15,63 @@ hero:
       external: true
 badges:
   - 私有化部署
-  - 权限继承
-  - 容器隔离
-  - MCP 中继
+  - 原生沙箱隔离
+  - Provider 注册表认证
+  - MCP 工具聚合
 metrics:
   - label: 认证
     value: Local / LDAP / OIDC
-  - label: MCP 通道
-    value: Browser / Computer
+  - label: MCP 服务
+    value: Browser / Computer / Agent + 第三方
   - label: 配置策略
-    value: 分层合并 + 迁移
+    value: KV 展平存储
   - label: 部署模式
-    value: 按用户 / 按组
+    value: 按用户 / 按组 / 默认
 signals:
   title: PicoAide Control Plane
-  summary: 统一管理用户、技能、容器和连接通道
+  summary: 统一管理用户、技能、沙箱和 MCP 工具
   status: 服务在线
   boundary:
     label: 系统边界
-    value: 内网部署 / 独立容器 / 组织权限继承
+    value: 内网部署 / 原生容器 / 组织权限继承
     description: AI 只在授权上下文中工作，数据保持在企业边界内。
   flow:
     title: 执行路径
     steps:
-      - AI 容器
-      - MCP SSE
-      - 服务端中继
+      - AI 沙箱 (picoagent)
+      - MCP SSE 端点
+      - ServiceHub 中继
       - 浏览器 / 桌面执行端
   today:
     title: 今日状态
     items:
-      - 用户容器按组分发技能
+      - 用户技能按组分发，支持 Git 仓库和注册中心
       - 浏览器授权连接可随时开启或断开
       - 桌面白名单限制文件访问范围
+      - 定时任务由 Cron 调度器自动执行
 stats:
   items:
-    - number: 34
-      label: MCP 工具 · 2 通道
-    - number: 400+
-      label: 单机容器节点
+    - number: 40
+      label: MCP 工具 · 3 服务
+    - number: 200+
+      label: 并发沙箱节点
     - number: 审计追溯
       label: 配置变更全程记录
-    - number: 3 代兼容
-      label: 配置版本平滑迁移
+    - number: 零依赖
+      label: 原生 Linux 内核能力，不依赖 Docker
 features:
   kicker: 能力总览
   title: 围绕企业内网协作的核心能力
-  summary: PicoAide 把认证、容器、浏览器、桌面、文件和技能统一到一个控制平面里，减少碎片化工具栈。
+  summary: PicoAide 把认证、沙箱、浏览器、桌面、文件和技能统一到一个控制平面里，减少碎片化工具栈。
   items:
-    - title: 容器化隔离
-      description: 每位用户拥有独立 PicoClaw 容器，基于 picoaide-net 网络隔离，容器之间默认不可直连。
-    - title: 认证继承
-      description: 支持本地认证与 LDAP 认证。浏览器和桌面插件复用用户身份，不需要为 AI 重新设计权限体系。
-    - title: MCP 中继
-      description: SSE 与 WebSocket 组成双层中继，浏览器和桌面都通过标准 MCP 工具暴露能力。
+    - title: 原生容器隔离
+      description: 每位用户拥有独立沙箱容器，基于 overlayfs + network namespace 隔离，iptables DROP 禁止容器间通信，不依赖 Docker。
+    - title: 认证可插拔
+      description: 使用 Provider 注册表模式，支持 Local / LDAP / OIDC。init() 自动注册，新增认证源无需修改核心代码。
+    - title: MCP 三层中继
+      description: SSE 与 WebSocket 组成双层中继，browser/computer 通过代理执行，agent 服务端直接处理。同时支持第三方 MCP 服务器代理。
     - title: 技能分发
-      description: 技能仓库支持 Git 导入、按组部署、按用户部署和上传安装，适合企业内部分层治理。
+      description: 技能仓库支持 Git 导入、注册中心安装和按组部署。支持默认技能设置和用户自主安装策略。
 docs:
   kicker: 文档入口
   title: 按角色分层组织
@@ -81,21 +82,21 @@ docs:
       href: /docs/quick-start/
       kicker: Start here
     - title: 架构设计
-      description: 设计哲学、五大设计决策和组件关系。
+      description: 设计哲学、五大设计决策和组件关系详解。
       href: /docs/architecture/
       kicker: System design
     - title: 管理后台操作指南
-      description: 用户、容器、镜像、技能和用户组的完整管理流程。
+      description: 用户、组、技能、认证、MCP 服务的完整管理流程。
       href: /docs/admin-guide/
       kicker: Admin
-    - title: 用户指南
-      description: Web 面板、浏览器扩展、桌面客户端和 MCP 集成。
+    - title: Web 面板操作指南
+      description: 对话、文件、频道、定时任务和技能中心使用指南。
       href: /docs/web-panel/
       kicker: User
 release:
   kicker: 开源发布
   title: 适合企业内部署的 AI 工作底座
-  summary: Go 服务端、Docker 容器隔离、SQLite 配置存储和 Hugo 官网组成一个轻量但完整的企业级项目。
+  summary: Go 服务端、原生 Linux 沙箱隔离、SQLite 配置存储和 Hugo 官网组成一个轻量但完整的企业级项目。
   primary:
     label: 查看发布说明
     href: /blog/release-v1.0.0/

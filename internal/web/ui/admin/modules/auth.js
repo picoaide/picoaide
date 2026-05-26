@@ -15,7 +15,7 @@ export async function init(ctx) {
     var current = currentAuthMode();
     if (mode !== current) {
       this.blur(); // 关闭下拉选项避免遮盖模态框
-      if (!await confirmModal('切换认证方式会清空当前普通用户、容器记录、用户目录和归档目录。确定切换到 ' + authModeLabel(mode) + '？')) {
+      if (!await confirmModal('切换认证方式会清空当前普通用户、用户目录和归档目录。确定切换到 ' + authModeLabel(mode) + '？')) {
         this.value = current;
         updateProviderVisibility(current);
         renderProviderConfig(ctx, current);

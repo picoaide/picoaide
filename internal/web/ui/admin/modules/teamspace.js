@@ -300,7 +300,7 @@ export async function init(ctx) {
         description: desc, is_public: isPublic ? '1' : '0',
       });
       if (!r1.success) { showMsg('#sf-modal-msg', r1.error, false); return; }
-      // 仅当组选择有变化时才调用 groups/set，避免不必要重启容器
+      // 仅当组选择有变化时才调用 groups/set
       var oldIDs = (f.groups || []).map(function(g) { return String(g.id); }).sort().join(',');
       if (groupIDs !== oldIDs) {
         var r2 = await Api.post('/api/admin/shared-folders/groups/set', {
@@ -341,7 +341,7 @@ export async function init(ctx) {
 
   async function handleDelete() {
     try {
-      await showModal({ title: '确认删除', body: '<p style="margin:0">确定删除此共享文件夹？<br>文件将归档到 archive/，已挂载用户的容器将重启。</p>', footer: [
+      await showModal({ title: '确认删除', body: '<p style="margin:0">确定删除此共享文件夹？<br>文件将归档到 archive/。</p>', footer: [
         { label: '取消', value: 'cancel' }, { label: '删除', value: 'delete', danger: true }
       ]});
     } catch(e) { return; }
@@ -369,7 +369,7 @@ export async function init(ctx) {
   }
 
   async function handleMountAll() {
-    try { await showModal({ title: '确认挂载', body: '<p style="margin:0">将为所有成员重建容器并挂载共享目录，确定？</p>', footer: [
+    try { await showModal({ title: '确认挂载', body: '<p style="margin:0">将为所有成员挂载共享目录，确定？</p>', footer: [
       { label: '取消', value: 'cancel' }, { label: '确认挂载', value: 'mount', primary: true }
     ]}); } catch(e) { return; }
     var data = await Api.post('/api/admin/shared-folders/mount', { folder_id: String(currentId) });

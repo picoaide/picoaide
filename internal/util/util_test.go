@@ -436,6 +436,86 @@ func TestSafeRelPath_SymlinkInBase(t *testing.T) {
   }
 }
 
+func TestDeepGet(t *testing.T) {
+  cfg := map[string]interface{}{
+    "a": map[string]interface{}{
+      "b": map[string]interface{}{
+        "c": "value",
+      },
+    },
+    "x": "direct",
+  }
+
+  val, ok := DeepGet(cfg, "a.b.c")
+  if !ok || val != "value" {
+    t.Errorf("DeepGet(a.b.c) = %v, %v; want value, true", val, ok)
+  }
+
+  val, ok = DeepGet(cfg, "x")
+  if !ok || val != "direct" {
+    t.Errorf("DeepGet(x) = %v, %v; want direct, true", val, ok)
+  }
+
+  _, ok = DeepGet(cfg, "nonexistent")
+  if ok {
+    t.Error("DeepGet(nonexistent) should return false")
+  }
+
+  _, ok = DeepGet(cfg, "")
+  if ok {
+    t.Error("DeepGet('') should return false")
+  }
+}
+
+func TestSetByPath(t *testing.T) {
+  cfg := make(map[string]interface{})
+
+  SetByPath(cfg, "a.b.c", "value")
+  if cfg["a"].(map[string]interface{})["b"].(map[string]interface{})["c"] != "value" {
+    t.Error("SetByPath(a.b.c) did not set correctly")
+  }
+
+  SetByPath(cfg, "x", "direct")
+  if cfg["x"] != "direct" {
+    t.Error("SetByPath(x) did not set correctly")
+  }
+
+  SetByPath(cfg, "", "nothing")
+  // should not panic, should not change anything
+}
+
+func TestDeleteByPath(t *testing.T) {
+  cfg := map[string]interface{}{
+    "a": map[string]interface{}{
+      "b": map[string]interface{}{
+        "c": "value",
+        "d": "keep",
+      },
+    },
+    "x": "direct",
+  }
+
+  DeleteByPath(cfg, "a.b.c")
+  _, ok := DeepGet(cfg, "a.b.c")
+  if ok {
+    t.Error("DeleteByPath(a.b.c) did not delete")
+  }
+  // d should still exist
+  val, ok := DeepGet(cfg, "a.b.d")
+  if !ok || val != "keep" {
+    t.Error("DeleteByPath should keep sibling keys")
+  }
+
+  DeleteByPath(cfg, "x")
+  _, ok = cfg["x"]
+  if ok {
+    t.Error("DeleteByPath(x) did not delete top-level key")
+  }
+
+  DeleteByPath(cfg, "nonexistent.key")
+  // should not panic
+}
+
 func TestDeepCopySlice(t *testing.T) {
   original := []interface{}{1, "hello", map[string]interface{}{"k": "v"}}
   copied := DeepCopySlice(original)

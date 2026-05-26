@@ -589,7 +589,7 @@ func TestGetSharedFolderMountsForUser_WithFolders(t *testing.T) {
   }
   expected := ShareMount{
     Source: "/work/shared/shared1",
-    Target: "/root/.picoclaw/workspace/share/shared1",
+    Target: "/root/share/shared1",
   }
   if mounts[0].Source != expected.Source || mounts[0].Target != expected.Target {
     t.Errorf("mount = %+v, want %+v", mounts[0], expected)

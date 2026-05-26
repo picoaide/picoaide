@@ -83,9 +83,9 @@ func (s *Server) handleAdminAuthLDAPUsers(c *gin.Context) {
 
   var users []string
   source := strings.ToLower(strings.TrimSpace(c.Query("source")))
-  if source == "directory" || source == "remote" || !s.cfg.UnifiedAuthEnabled() {
+  if source == "directory" || source == "remote" || !s.loadConfig().UnifiedAuthEnabled() {
     var err error
-    users, err = authsource.FetchUsers(s.cfg)
+    users, err = authsource.FetchUsers(s.loadConfig())
     if err != nil {
       writeError(c, http.StatusInternalServerError, err.Error())
       return
@@ -140,25 +140,24 @@ func (s *Server) handleAdminAuthSyncUsers(c *gin.Context) {
     writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  if !authsource.HasDirectoryProvider(s.cfg) {
+  if !authsource.HasDirectoryProvider(s.loadConfig()) {
     writeError(c, http.StatusBadRequest, "当前认证方式不支持目录同步")
     return
   }
 
-  authMode := s.cfg.AuthMode()
+  authMode := s.loadConfig().AuthMode()
   result, err := s.syncUsersFromDirectory(true)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "同步账号失败: "+err.Error())
     return
   }
 
-  message := fmt.Sprintf("同步完成，%s %d 个账号，允许 %d 个，写入本地用户 %d 个，新初始化 %d 个，补齐镜像 %d 个，移除本地普通登录凭据 %d 个",
+  message := fmt.Sprintf("同步完成，%s %d 个账号，允许 %d 个，写入本地用户 %d 个，新初始化 %d 个，移除本地普通登录凭据 %d 个",
     authMode,
     result.ProviderUserCount,
     result.AllowedUserCount,
     result.LocalUserSynced,
     result.InitializedCount,
-    result.ImageUpdatedCount,
     result.DeletedLocalAuth,
   )
   if result.ArchivedStaleUsers > 0 {
@@ -168,7 +167,7 @@ func (s *Server) handleAdminAuthSyncUsers(c *gin.Context) {
     message += fmt.Sprintf("，跳过非法用户名 %d 个", result.InvalidUsernameCount)
   }
 
-  logger.Audit("directory.users_sync", "operator", s.getSessionUser(c), "auth_mode", authMode, "initialized", result.InitializedCount, "image_updated", result.ImageUpdatedCount, "deleted_local_auth", result.DeletedLocalAuth, "cleanup", true)
+  logger.Audit("directory.users_sync", "operator", s.getSessionUser(c), "auth_mode", authMode, "initialized", result.InitializedCount, "deleted_local_auth", result.DeletedLocalAuth, "cleanup", true)
   writeJSON(c, http.StatusOK, struct {
     Success bool              `json:"success"`
     Message string            `json:"message"`

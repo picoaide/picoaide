@@ -6,9 +6,9 @@ var pollTimer = null;
 var failureCount = 0;
 
 function statusText(data) {
-  if (!data.image_ready) return '正在绑定用户镜像';
+  if (!data.image_ready) return '正在初始化';
   if (!data.has_config) return '正在生成用户配置';
-  if (data.status !== 'running') return '正在启动用户容器';
+  if (data.status !== 'running') return '正在启动工作空间';
   return '正在完成最后检查';
 }
 
@@ -27,7 +27,7 @@ async function pollStatus() {
       return;
     }
     initTitle.textContent = statusText(data);
-    initDetail.textContent = '当前容器状态：' + (data.status || '未初始化');
+    initDetail.textContent = '当前状态：' + (data.status || '未初始化');
   } catch (err) {
     failureCount++;
     if (failureCount >= 3) {

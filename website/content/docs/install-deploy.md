@@ -1,6 +1,6 @@
 ---
 title: "安装与部署"
-description: "PicoAide 生产环境安装、配置、升级和迁移指南"
+description: "PicoAide 生产环境安装、目录规划、升级和迁移指南"
 weight: 3
 draft: false
 ---
@@ -18,20 +18,6 @@ PicoAide 服务端目前支持 Linux x86_64 平台。推荐使用以下发行版
 - CentOS Stream 9 / RHEL 9+
 - Rocky Linux 9+
 
-### Docker 要求
-
-服务端通过 Docker Engine SDK 管理容器，要求：
-
-- Docker Engine 24.0 或更新版本
-- Docker 守护进程正常运行
-- 当前用户有权限访问 Docker socket（通过 root 运行）
-
-验证 Docker 可用性：
-
-```bash
-docker info
-```
-
 ### 磁盘规划
 
 生产环境建议使用独立的持久化磁盘存储数据：
@@ -40,17 +26,17 @@ docker info
 |------|------|---------|
 | `/data/picoaide/picoaide.db` | SQLite 数据库 | 随用户数增长，1GB 足够 1000 用户 |
 | `/data/picoaide/users/` | 每个用户的工作区 | 平均每用户 50-200MB，按需规划 |
-| `/data/picoaide/archive/` | 删除用户时的归档 | 与 users/ 相当 |
-| `/var/lib/docker/` | Docker 镜像和容器 | 镜像约 2-5GB，按更新频率规划 |
+| `/data/picoaide/archive/` | 删除用户时的归档 | 与 `users/` 相当 |
+| `/data/picoaide/skill/` | 已安装的技能 | 按技能数量和大小规划 |
 
 ### 网络规划
 
 | 端口 | 用途 | 说明 |
 |------|------|------|
-| `:80` | HTTP 服务 | 固定端口 |
+| `:80` | HTTP 服务 | 固定端口，Web 管理 + API |
 | `:443` | HTTPS 服务 | TLS 启用时自动监听 |
 
-容器网络 `picoaide-net` 使用 `100.64.0.0/16` 地址段。确保该网段不与公司内网冲突。
+容器桥接网络 `picoaide-br` 使用 `100.64.0.0/16` 地址段。这是 CGNAT 保留地址，通常不会与公司内网冲突。
 
 ## 安装方式详解
 
@@ -61,7 +47,7 @@ docker info
 curl -L -o picoaide \
   https://github.com/picoaide/picoaide/releases/latest/download/picoaide-linux-amd64
 
-# 验证下载完整性（可选）
+# 可选：验证下载完整性
 curl -L -o picoaide.sha256 \
   https://github.com/picoaide/picoaide/releases/latest/download/picoaide-linux-amd64.sha256
 sha256sum -c picoaide.sha256
@@ -77,18 +63,14 @@ sudo mv picoaide /usr/sbin/picoaide
 git clone https://github.com/picoaide/picoaide.git
 cd picoaide
 
-# 开发构建
-go build -o picoaide ./cmd/picoaide/
+# 全量编译（picoagent + Alpine rootfs + picoaide）
+sudo make build
 
-# 生产构建（推荐，含版本信息）
-GOOS=linux GOARCH=amd64 go build \
-  -ldflags "-X github.com/picoaide/picoaide/internal/config.Version=v1.0.0" \
-  -o picoaide ./cmd/picoaide/
+# 或指定版本的生产构建
+GOOS=linux GOARCH=amd64 make build
 
 sudo mv picoaide /usr/sbin/picoaide
 ```
-
-`ldflags` 注入的 Version 会在 `/api/health` 接口和 Web 管理后台中显示，便于版本追踪。
 
 ## 初始化最佳实践
 
@@ -117,33 +99,22 @@ sudo mkdir -p /data/picoaide
 - `secret` 文件在超管首次登录后台后自动删除
 - 忘记密码后可通过 `picoaide reset-password admin` 重置
 
-### 镜像仓库
+如果网络环境需要代理，请确保代理配置正确。PicoAide 的容器网络使用 `picoaide-br` 网桥，容器内通过 iptables SNAT 出站。
 
-初始化默认使用腾讯云镜像源（`tencent`），适合中国大陆部署。如需切换：
+### 存储适配器配置
 
-- **github**：适合海外部署或可访问 GitHub Container Registry 的环境
-- 初始化完成后，通过管理后台「镜像管理」页面或 API 修改 `image.registry` 配置
-
-如果网络环境需要代理，请确保 Docker 已配置代理：
-
-```bash
-# /etc/systemd/system/docker.service.d/proxy.conf
-[Service]
-Environment="HTTP_PROXY=http://proxy:port"
-Environment="HTTPS_PROXY=http://proxy:port"
-Environment="NO_PROXY=localhost,127.0.0.1,docker"
-```
+默认配置为当前的 minimal 配置。如果需要远程技能源，可以在管理后台添加 Git 仓库或注册中心源。
 
 ## 服务管理
 
 ### systemd 服务
 
-初始化时自动生成的 systemd 服务：
+初始化时自动生成的 systemd 服务文件：
 
 ```ini
 [Unit]
 Description=PicoAide Management API Server
-After=network.target docker.service
+After=network.target
 
 [Service]
 Type=simple
@@ -174,7 +145,7 @@ systemctl status picoaide
 # 查看实时日志
 journalctl -u picoaide -f
 
-# 设置开机自启
+# 设置开机自启（初始化时已自动设置）
 systemctl enable picoaide
 ```
 
@@ -182,11 +153,10 @@ systemctl enable picoaide
 
 PicoAide 使用结构化 JSON 日志，默认写入 `logs/picoaide.log`。日志轮转由 lumberjack 管理：
 
-```yaml
-# 日志配置
-web.log_level: info       # debug / info / warn / error
-web.log_retention: 6m     # 日志保留周期
-```
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `web.log_level` | 日志级别 | `info`（可选 debug/info/warn/error） |
+| `web.log_retention` | 日志保留周期 | `6m` |
 
 ## 升级流程
 
@@ -212,62 +182,53 @@ systemctl status picoaide
 journalctl -u picoaide -n 50 --no-pager
 ```
 
-### 镜像升级
+### 数据库迁移
 
-在管理后台的"镜像管理"页面可以：
+从旧版本升级时，系统会自动执行数据库迁移。迁移系统位于 `internal/auth/migrations/`，使用基于时间戳的文件注册：
 
-1. 查看远程仓库最新标签
-2. 拉取新版本镜像
-3. 查看可升级用户（运行着旧版本镜像的用户）
-4. 执行升级操作
+```go
+init() {
+  Register(Migration{
+    Timestamp: "20250601093000",
+    Desc:      "添加 xxx 表的新列",
+    Up: func(engine *xorm.Engine) error {
+      // 幂等迁移逻辑
+    },
+  })
+}
+```
 
-升级时系统会自动检查 Picoclaw Adapter 的迁移规则，确保配置结构兼容。如果迁移链不支持直接升级，系统会提示需要先升级到中间版本。
+迁移在 `syncSchema()` 末尾自动执行，迁移文件使用 `ColumnExists` 检查确保幂等。升级时无需手动操作数据库。
 
 ## 数据迁移
-
-### 迁移数据目录
-
-```bash
-# 停止服务
-systemctl stop picoaide
-
-# 复制数据到新位置
-cp -a /data/picoaide /data2/picoaide
-
-# 启动服务
-systemctl start picoaide
-```
 
 ### 迁移到新服务器
 
 ```bash
-# 1. 旧服务器：停止服务并导出
+# 1. 旧服务器：停止服务并打包
 systemctl stop picoaide
 tar czf picoaide-backup.tar.gz \
   -C /data picoaide/picoaide.db \
   -C /data picoaide/users \
-  -C /data picoaide/archive \
-  -C /data picoaide/picoaide.log
+  -C /data picoaide/archive
 
 # 2. 传输到新服务器
 scp picoaide-backup.tar.gz new-server:/tmp/
 
-# 3. 新服务器：解压并恢复
-cd /
-tar xzf /tmp/picoaide-backup.tar.gz
-# 根据实际情况调整路径
+# 3. 新服务器：解压恢复
+sudo mkdir -p /data/picoaide
+sudo tar xzf /tmp/picoaide-backup.tar.gz -C /data
 
-# 4. 安装相同版本 picoaide 二进制
-# 5. 启动服务
-systemctl start picoaide
+# 4. 安装相同版本 picoaide 二进制并启动
+sudo systemctl start picoaide
 ```
 
 ## 多实例注意事项
 
-PicoAide 当前设计为单实例部署。如果需要多节点：
+PicoAide 当前设计为单实例部署，不支持水平扩展：
 
 - 数据库使用本地 SQLite，不支持共享存储
-- 容器管理绑定到本机 Docker
-- 前端负载均衡请确保会话粘性（session affinity）
+- 沙箱管理绑定到本机 Linux 内核（bridge + namespace）
+- Bridge 创建要求节点独占 `100.64.0.0/16` 网段
 
-如果需要高可用，建议定期备份数据库并准备备用服务器。
+如果需要故障转移，建议定期备份数据库并在备用服务器上准备相同的二进制版本。

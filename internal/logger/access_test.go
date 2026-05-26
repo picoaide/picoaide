@@ -3,6 +3,7 @@ package logger
 import (
   "net/http"
   "net/http/httptest"
+  "strings"
   "testing"
 )
 
@@ -144,9 +145,9 @@ func TestStringsIndex(t *testing.T) {
     {"a", "a", 0},
   }
   for _, tt := range tests {
-    got := stringsIndex(tt.s, tt.substr)
+    got := strings.Index(tt.s, tt.substr)
     if got != tt.want {
-      t.Errorf("stringsIndex(%q, %q) = %d, want %d", tt.s, tt.substr, got, tt.want)
+      t.Errorf("strings.Index(%q, %q) = %d, want %d", tt.s, tt.substr, got, tt.want)
     }
   }
 }

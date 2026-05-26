@@ -1,7 +1,6 @@
 package web
 
 import (
-  "context"
   "fmt"
   "net/http"
   "os"
@@ -10,9 +9,7 @@ import (
   "strings"
   "time"
 
-  "github.com/docker/docker/api/types/mount"
   "github.com/gin-gonic/gin"
-  dockerpkg "github.com/picoaide/picoaide/internal/docker"
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/user"
@@ -81,7 +78,7 @@ func (s *Server) handleAdminSharedFoldersCreate(c *gin.Context) {
   }
 
   // 创建主机目录
-  shareDir := filepath.Join(filepath.Dir(s.cfg.UsersRoot), "shared", name)
+  shareDir := filepath.Join(filepath.Dir(s.loadConfig().UsersRoot), "shared", name)
   if err := os.MkdirAll(shareDir, 0755); err != nil {
     writeError(c, http.StatusInternalServerError, "创建共享目录失败: "+err.Error())
     return
@@ -148,7 +145,7 @@ func (s *Server) handleAdminSharedFoldersUpdate(c *gin.Context) {
     return
   }
 
-  // 获取旧记录（用于检测是否需要 mv 目录和重启容器）
+  // 获取旧记录（用于检测是否需要 mv 目录）
   oldSF, err := auth.GetSharedFolder(id)
   if err != nil {
     writeError(c, http.StatusBadRequest, "共享文件夹不存在")
@@ -156,12 +153,11 @@ func (s *Server) handleAdminSharedFoldersUpdate(c *gin.Context) {
   }
 
   needsRename := oldSF.Name != newName
-  needsRestart := needsRename || oldSF.IsPublic != newIsPublic
 
   // 如果改名，先 mv 主机目录
   if needsRename {
-    oldDir := filepath.Join(filepath.Dir(s.cfg.UsersRoot), "shared", oldSF.Name)
-    newDir := filepath.Join(filepath.Dir(s.cfg.UsersRoot), "shared", newName)
+    oldDir := filepath.Join(filepath.Dir(s.loadConfig().UsersRoot), "shared", oldSF.Name)
+    newDir := filepath.Join(filepath.Dir(s.loadConfig().UsersRoot), "shared", newName)
     if _, err := os.Stat(oldDir); err == nil {
       if err := os.Rename(oldDir, newDir); err != nil {
         writeError(c, http.StatusInternalServerError, "重命名共享目录失败: "+err.Error())
@@ -174,17 +170,11 @@ func (s *Server) handleAdminSharedFoldersUpdate(c *gin.Context) {
   if err := auth.UpdateSharedFolder(id, newName, description, newIsPublic); err != nil {
     // 回滚目录改名
     if needsRename {
-      oldDir := filepath.Join(filepath.Dir(s.cfg.UsersRoot), "shared", oldSF.Name)
-      newDir := filepath.Join(filepath.Dir(s.cfg.UsersRoot), "shared", newName)
+      oldDir := filepath.Join(filepath.Dir(s.loadConfig().UsersRoot), "shared", oldSF.Name)
+      newDir := filepath.Join(filepath.Dir(s.loadConfig().UsersRoot), "shared", newName)
       os.Rename(newDir, oldDir)
     }
     writeError(c, http.StatusBadRequest, err.Error())
-    return
-  }
-
-  // 需要重启容器
-  if needsRestart {
-    s.restartSharedFolderContainers(c, id, "更新共享文件夹后重启")
     return
   }
 
@@ -218,37 +208,19 @@ func (s *Server) handleAdminSharedFoldersDelete(c *gin.Context) {
   }
 
   // 归档主机目录
-  shareDir := filepath.Join(filepath.Dir(s.cfg.UsersRoot), "shared", sf.Name)
+  shareDir := filepath.Join(filepath.Dir(s.loadConfig().UsersRoot), "shared", sf.Name)
   if _, err := os.Stat(shareDir); err == nil {
     timestamp := time.Now().Format("20060102_150405")
-    archiveDir := filepath.Join(filepath.Dir(s.cfg.UsersRoot), "archive", fmt.Sprintf("shared_%s_%s", sf.Name, timestamp))
+    archiveDir := filepath.Join(filepath.Dir(s.loadConfig().UsersRoot), "archive", fmt.Sprintf("shared_%s_%s", sf.Name, timestamp))
     if err := os.MkdirAll(filepath.Dir(archiveDir), 0755); err == nil {
       os.Rename(shareDir, archiveDir)
     }
   }
 
-  // 获取关联用户用于后续重启
-  members, _ := auth.GetSharedFolderMembers(id)
-
   // 删除数据库记录
   if err := auth.DeleteSharedFolder(id); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
-  }
-
-  // 重启容器
-  if len(members) > 0 {
-    taskID, err := enqueueTask("mount-shared-folder", members, func(username string) error {
-      return s.recreateUserContainerWithSharedMounts(username)
-    })
-    if err == nil {
-      writeJSON(c, http.StatusOK, map[string]interface{}{
-        "success": true,
-        "message": fmt.Sprintf("共享文件夹已删除，文件已归档，正在重启 %d 个用户容器", len(members)),
-        "task_id": taskID,
-      })
-      return
-    }
   }
 
   writeSuccess(c, "共享文件夹已删除")
@@ -308,34 +280,6 @@ func (s *Server) handleAdminSharedFoldersSetGroups(c *gin.Context) {
   for _, m := range newMembers {
     newSet[m] = true
   }
-  // 需要重启 = 新增的用户 + 失去访问的用户
-  changedUsers := make([]string, 0)
-  for _, m := range newMembers {
-    if !oldSet[m] {
-      changedUsers = append(changedUsers, m)
-    }
-  }
-  for _, m := range oldMembers {
-    if !newSet[m] {
-      changedUsers = append(changedUsers, m)
-    }
-  }
-  changedUsers = uniqueStrings(changedUsers)
-
-  if len(changedUsers) > 0 {
-    taskID, err := enqueueTask("mount-shared-folder", changedUsers, func(username string) error {
-      return s.recreateUserContainerWithSharedMounts(username)
-    })
-    if err == nil {
-      writeJSON(c, http.StatusOK, map[string]interface{}{
-        "success": true,
-        "message": fmt.Sprintf("关联组已更新，正在重启 %d 个用户容器", len(changedUsers)),
-        "task_id": taskID,
-      })
-      return
-    }
-  }
-
   writeSuccess(c, "关联组已更新")
 }
 
@@ -375,7 +319,7 @@ func (s *Server) handleAdminSharedFoldersTest(c *gin.Context) {
   msg := "用户 " + testUsername + " 未挂载"
 
   // 1. 检查主机目录是否存在
-  hostDir := filepath.Join(filepath.Dir(s.cfg.UsersRoot), "shared", sf.Name)
+  hostDir := filepath.Join(filepath.Dir(s.loadConfig().UsersRoot), "shared", sf.Name)
   if _, err := os.Stat(hostDir); os.IsNotExist(err) {
     msg = "主机共享目录不存在"
     auth.RecordMountTest(folderID, testUsername, false)
@@ -385,16 +329,11 @@ func (s *Server) handleAdminSharedFoldersTest(c *gin.Context) {
     return
   }
 
-  // 2. 检查容器是否在运行
-  if s.dockerAvailable {
-    containerPath := "/root/.picoclaw/workspace/share/" + sf.Name
-    ok, err := dockerpkg.TestContainerDir(c.Request.Context(), "picoaide-"+testUsername, containerPath)
-    if err == nil && ok {
-      mounted = true
-      msg = "用户 " + testUsername + " 已挂载"
-    }
-  } else {
-    msg = "Docker 不可用，仅检查了主机目录"
+  // 2. 检查用户目录中是否存在共享文件夹的符号链接
+  userSharePath := filepath.Clean(filepath.Join(user.UserDir(s.loadConfig(), testUsername), "share", sf.Name))
+  if _, err := os.Stat(userSharePath); err == nil {
+    mounted = true
+    msg = "用户 " + testUsername + " 已挂载"
   }
 
   now := time.Now().Format("2006-01-02 15:04:05")
@@ -442,119 +381,10 @@ func (s *Server) handleAdminSharedFoldersMount(c *gin.Context) {
     return
   }
 
-  taskID, err := enqueueTask("mount-shared-folder", members, func(username string) error {
-    return s.recreateUserContainerWithSharedMounts(username)
-  })
-  if err != nil {
-    writeError(c, http.StatusBadRequest, err.Error())
-    return
-  }
-
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success": true,
-    "message": fmt.Sprintf("已提交挂载任务，共 %d 个用户", len(members)),
-    "task_id": taskID,
+    "message": fmt.Sprintf("已处理挂载请求，共 %d 个用户", len(members)),
   })
 }
 
-// ============================================================
-// 内部辅助
-// ============================================================
 
-// recreateUserContainerWithSharedMounts 停止→删除→重建→启动用户容器，附加所有共享挂载
-func (s *Server) recreateUserContainerWithSharedMounts(username string) error {
-  if !s.dockerAvailable {
-    return nil
-  }
-  ctx := context.Background()
-
-  rec, err := auth.GetContainerByUsername(username)
-  if err != nil || rec == nil || rec.ContainerID == "" {
-    return nil // 没有容器记录或记录不完整，跳过
-  }
-
-  // 计算所有共享挂载（确保路径为绝对路径）
-  workDir, _ := filepath.Abs(filepath.Dir(s.cfg.UsersRoot))
-  shareMounts, err := auth.GetSharedFolderMountsForUser(workDir, username)
-  if err != nil {
-    return fmt.Errorf("计算共享挂载失败: %w", err)
-  }
-  var extraMounts []mount.Mount
-  for _, sm := range shareMounts {
-    extraMounts = append(extraMounts, mount.Mount{
-      Type:   mount.TypeBind,
-      Source: sm.Source,
-      Target: sm.Target,
-    })
-  }
-
-  userDir := user.UserDir(s.cfg, username)
-
-  // 停止并删除旧容器
-  dockerpkg.Stop(ctx, rec.ContainerID)
-  dockerpkg.Remove(ctx, rec.ContainerID)
-  // 无论后续是否成功，先清除 DB 中的容器记录避免残留
-  auth.UpdateContainerID(username, "")
-  auth.UpdateContainerStatus(username, "stopped")
-
-  // 重建容器
-  containerID, err := dockerpkg.CreateContainerWithOptions(ctx, username, rec.Image,
-    userDir, rec.IP, rec.CPULimit, rec.MemoryLimit, false, extraMounts, rec.MCPToken)
-  if err != nil {
-    return fmt.Errorf("重建容器失败: %w", err)
-  }
-
-  if err := dockerpkg.Start(ctx, containerID); err != nil {
-    return fmt.Errorf("启动容器失败: %w", err)
-  }
-
-  // 更新容器记录
-  auth.UpsertContainer(&auth.ContainerRecord{
-    Username:    username,
-    ContainerID: containerID,
-    Image:       rec.Image,
-    Status:      "running",
-    IP:          rec.IP,
-    CPULimit:    rec.CPULimit,
-    MemoryLimit: rec.MemoryLimit,
-  })
-
-  return nil
-}
-
-// restartSharedFolderContainers 重启某个共享文件夹的所有关联用户容器（异步）
-func (s *Server) restartSharedFolderContainers(c *gin.Context, folderID int64, reason string) {
-  members, err := auth.GetSharedFolderMembers(folderID)
-  if err != nil || len(members) == 0 {
-    writeSuccess(c, "共享文件夹已更新（无需重启容器）")
-    return
-  }
-  taskID, err := enqueueTask("mount-shared-folder", members, func(username string) error {
-    return s.recreateUserContainerWithSharedMounts(username)
-  })
-  if err != nil {
-    writeJSON(c, http.StatusOK, map[string]interface{}{
-      "success": true,
-      "message": fmt.Sprintf("共享文件夹已更新，但提交重启任务失败: %s", err.Error()),
-    })
-    return
-  }
-  writeJSON(c, http.StatusOK, map[string]interface{}{
-    "success": true,
-    "message": fmt.Sprintf("共享文件夹已更新，正在重启 %d 个用户容器", len(members)),
-    "task_id": taskID,
-  })
-}
-
-// uniqueStrings 字符串去重
-func uniqueStrings(s []string) []string {
-  seen := make(map[string]bool)
-  result := make([]string, 0, len(s))
-  for _, item := range s {
-    if !seen[item] {
-      seen[item] = true
-      result = append(result, item)
-    }
-  }
-  return result
-}

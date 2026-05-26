@@ -375,7 +375,7 @@ func TestDefaultSkills_AppliedToNewUser(t *testing.T) {
   resp := env.postForm(t, "/api/admin/skills/defaults/toggle", "testadmin", url.Values{"skill_name": {"default-skill"}})
   assertStatus(t, resp, 200)
 
-  // 创建新用户（免镜像标签，测试环境无 Docker）
+    // 创建新用户
   form := url.Values{"username": {"newuser"}, "password": {"pass123"}, "image_tag": {"test-tag"}}
   resp = env.postForm(t, "/api/admin/users/create", "testadmin", form)
   assertStatus(t, resp, 200)

@@ -30,7 +30,6 @@
   "oidc.issuer_url": "https://accounts.example.com",
   "oidc.client_id": "my-client",
   "registry.mirror": "ghcr.io/picoaide/picoclaw",
-  "registry.dev_mirror": "hkccr.ccs.tencentyun.com/picoaide/picoclaw",
   "picoclaw": "{...}",
   "security": "{...}",
   "skills": "{...}"

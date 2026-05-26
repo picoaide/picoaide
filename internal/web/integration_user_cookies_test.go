@@ -108,7 +108,7 @@ func TestUserCookies_UserIsolation(t *testing.T) {
   if err := auth.CreateUser("user2", "pass2", "user"); err != nil {
     t.Fatal(err)
   }
-  if err := user.InitUser(env.Cfg, "user2", ""); err != nil {
+  if err := user.InitUser(env.Cfg, "user2"); err != nil {
     t.Fatal(err)
   }
 

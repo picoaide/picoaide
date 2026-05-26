@@ -66,8 +66,7 @@ CSRF token 基于 `HMAC(小时窗口 + 用户名)` 生成，取前 32 位 hex：
 |-----|-------|
 | `web.auth_mode` | `local` |
 | `web.listen` | `:80` |
-| `image.name` | `ghcr.io/picoaide/picoaide` |
-| `image.tag` | `v1.0.0` |
+| `web.debug_mode` | `false` |
 | `picoclaw` | `{"model":"gpt-4","temperature":0.7}` |
 
 ### flattenConfig/buildNested 机制

@@ -1,7 +1,7 @@
 ---
 title: "桌面客户端"
-description: "PicoAide 桌面客户端的安装、连接、权限配置和 Computer MCP 工具详解"
-weight: 10
+description: "PicoAide 桌面客户端的安装、连接、权限组和 Computer MCP 工具详解"
+weight: 11
 draft: false
 ---
 
@@ -34,11 +34,11 @@ python main.py
 
 | 文件 | 说明 |
 |------|------|
-| `core/connection.py` | 连接 PicoAide Server |
-| `core/executor.py` | 执行桌面工具 |
-| `core/permissions.py` | 权限控制 |
-| `core/config.py` | 本地配置 |
-| `ui/main_window.py` | 主窗口 |
+| `core/connection.py` | WebSocket 连接 PicoAide Server |
+| `core/executor.py` | 执行桌面工具（截图、鼠标、键盘、OCR） |
+| `core/permissions.py` | 权限控制（权限组 + 文件白名单） |
+| `core/config.py` | 本地配置管理 |
+| `ui/main_window.py` | 主窗口（PyQt） |
 | `ui/login_window.py` | 登录窗口 |
 
 ## 连接流程
@@ -48,12 +48,12 @@ python main.py
 2. 客户端显示登录窗口
 3. 输入 PicoAide 服务器地址和普通用户账号
 4. 登录成功后自动获取 MCP Token
-5. 客户端通过 WebSocket 连接到 PicoAide Server
-6. 服务端登记该用户的 computer 执行端
+5. 客户端通过 WebSocket 连接到 PicoAide Server 的 /api/computer/ws
+6. 服务端登记该用户的 computer 执行端连接
 7. AI Agent 可以通过 MCP 协议调用桌面工具
 ```
 
-如果客户端关闭或网络断开，AI 调用 computer 工具会得到代理未连接错误。
+如果客户端关闭或网络断开，AI 调用 computer 工具会得到"代理未连接"错误。
 
 ## 权限组
 
@@ -153,5 +153,5 @@ python main.py
 - **最小权限原则**：只开启当前任务需要的权限组
 - **文件先查白名单**：AI 操作文件前调用 `computer_whitelist` 确认路径
 - **随时可断开**：鼠标和键盘工具会操作用户真实桌面，你应能随时关闭客户端
-- **OCR 辅助决策**：OCR 结果给 AI 提供坐标辅助，不代表 AI 可以绕过权限判断
+- **OCR 辅助决策**：OCR 结果为 AI 提供坐标辅助，不代表 AI 可以绕过权限判断
 - **工作结束后断开**：完成 AI 任务后关闭桌面客户端，避免不必要的访问

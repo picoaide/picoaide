@@ -3,6 +3,7 @@ package main
 import (
   "net"
   "os"
+  "strings"
   "testing"
 
   "github.com/picoaide/picoaide/internal/config"
@@ -62,13 +63,13 @@ func TestPrintUsage_ContainsAppName(t *testing.T) {
   n, _ := r.Read(buf[:])
   output := string(buf[:n])
 
-  if !contains(output, config.AppName) {
+  if !strings.Contains(output, config.AppName) {
     t.Errorf("printUsage output should contain AppName %q, got: %s", config.AppName, output)
   }
-  if !contains(output, "init") {
+  if !strings.Contains(output, "init") {
     t.Errorf("printUsage output should contain 'init' command")
   }
-  if !contains(output, "reset-password") {
+  if !strings.Contains(output, "reset-password") {
     t.Errorf("printUsage output should contain 'reset-password' command")
   }
 }
@@ -76,15 +77,6 @@ func TestPrintUsage_ContainsAppName(t *testing.T) {
 // ============================================================
 // 辅助
 // ============================================================
-
-func contains(s, substr string) bool {
-  for i := 0; i <= len(s)-len(substr); i++ {
-    if s[i:i+len(substr)] == substr {
-      return true
-    }
-  }
-  return false
-}
 
 // ============================================================
 // 编译检查 — 确保 config 包可访问且常量可用

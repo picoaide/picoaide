@@ -12,10 +12,6 @@ import (
   "time"
 )
 
-func (cfg *GlobalConfig) GetPicoConfig() interface{} {
-  return cfg.PicoClaw
-}
-
 func (cfg *GlobalConfig) GetSecurityConfig() interface{} {
   return cfg.Security
 }
@@ -103,57 +99,6 @@ func SkillsDirPath() string {
   return filepath.Join(WorkDir(), "skills")
 }
 
-func RuleCacheDir() string {
-  if dir := strings.TrimSpace(os.Getenv("PICOAIDE_RULE_CACHE_DIR")); dir != "" {
-    return dir
-  }
-  return filepath.Join(WorkDir(), "rules")
-}
-
-func PicoClawAdapterRemoteBaseURL() string {
-  urls := PicoClawAdapterRemoteBaseURLs()
-  if len(urls) > 0 {
-    return urls[0]
-  }
-  return ""
-}
-
-// PicoClawAdapterRemoteBaseURLs 返回多个适配器远程 URL（支持逗号分隔的多个回退地址）
-// 优先级：数据库配置 > PICOAIDE_PICOCLAW_ADAPTER_URLS 环境变量 > PICOAIDE_PICOCLAW_ADAPTER_URL 环境变量 > 默认值
-func PicoClawAdapterRemoteBaseURLs() []string {
-  // 1. 数据库配置（逗号分隔）
-  if cfg, err := LoadFromDB(); err == nil && cfg != nil && cfg.PicoClawAdapterRemoteBaseURL != "" {
-    if urls := parseAdapterURLs(cfg.PicoClawAdapterRemoteBaseURL); len(urls) > 0 {
-      return urls
-    }
-  }
-  // 2. 环境变量（逗号分隔）
-  if value := os.Getenv("PICOAIDE_PICOCLAW_ADAPTER_URLS"); value != "" {
-    if urls := parseAdapterURLs(value); len(urls) > 0 {
-      return urls
-    }
-  }
-  if value := os.Getenv("PICOAIDE_PICOCLAW_ADAPTER_URL"); value != "" {
-    if urls := parseAdapterURLs(value); len(urls) > 0 {
-      return urls
-    }
-  }
-  // 3. 默认
-  return []string{"https://www.picoaide.com/rules/picoclaw"}
-}
-
-func parseAdapterURLs(s string) []string {
-  parts := strings.Split(s, ",")
-  var urls []string
-  for _, p := range parts {
-    p = strings.TrimSpace(p)
-    if p != "" {
-      urls = append(urls, strings.TrimRight(p, "/"))
-    }
-  }
-  return urls
-}
-
 // ============================================================
 // systemd 服务文件管理
 // ============================================================
@@ -161,13 +106,12 @@ func parseAdapterURLs(s string) []string {
 // SystemServiceTemplate systemd 服务文件模板
 const SystemServiceTemplate = `[Unit]
 Description=PicoAide Management API Server
-After=network.target docker.service
+After=network.target
 
 [Service]
 Type=simple
 User=root
 ExecStart=/usr/sbin/picoaide serve
-WorkingDirectory={{.WorkingDir}}
 Restart=always
 RestartSec=5
 
@@ -175,31 +119,17 @@ RestartSec=5
 WantedBy=multi-user.target
 `
 
-// ServiceTemplateData 服务模板数据
-type ServiceTemplateData struct {
-  WorkingDir string
-}
-
 const serviceFilePath = "/etc/systemd/system/picoaide.service"
 
 // InstallService 生成并安装 systemd 服务文件
 func InstallService(cfg *GlobalConfig) error {
-  workDir, _ := os.Getwd()
-  if workDir == "" {
-    workDir = "/data/picoaide"
-  }
-
-  data := ServiceTemplateData{
-    WorkingDir: workDir,
-  }
-
   tmpl, err := template.New("service").Parse(SystemServiceTemplate)
   if err != nil {
     return fmt.Errorf("解析服务模板失败: %w", err)
   }
 
   var buf bytes.Buffer
-  if err := tmpl.Execute(&buf, data); err != nil {
+  if err := tmpl.Execute(&buf, nil); err != nil {
     return fmt.Errorf("生成服务文件失败: %w", err)
   }
   newContent := buf.Bytes()

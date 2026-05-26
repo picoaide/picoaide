@@ -1,9 +1,7 @@
 package main
 
 import (
-  "crypto/rand"
   "fmt"
-  "io"
   "net"
   "os"
   "os/exec"
@@ -12,8 +10,7 @@ import (
 
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
-  dockerpkg "github.com/picoaide/picoaide/internal/docker"
-  "github.com/picoaide/picoaide/internal/user"
+  "github.com/picoaide/picoaide/internal/rootfs"
   "github.com/picoaide/picoaide/internal/util"
   "github.com/picoaide/picoaide/internal/web"
 )
@@ -67,6 +64,15 @@ func main() {
     runInitSilent()
 
   case "serve":
+    // 检查 /data/picoaide 是否已初始化，未初始化则自动执行 init
+    if _, err := os.Stat(filepath.Join(workDir, "picoaide.db")); os.IsNotExist(err) {
+      fmt.Println("检测到未初始化，正在自动执行初始化...")
+      runInitSilent()
+    }
+    if err := rootfs.Ensure(filepath.Join(workDir, "rootfs")); err != nil {
+      fmt.Fprintf(os.Stderr, "初始化沙箱 rootfs 失败: %v\n", err)
+      os.Exit(1)
+    }
     if err := web.Serve(); err != nil {
       fmt.Fprintf(os.Stderr, "Web 服务启动失败: %v\n", err)
       os.Exit(1)
@@ -97,7 +103,7 @@ func main() {
 }
 
 // ============================================================
-// reset-password（非交互式，仅超管）
+// reset-password
 // ============================================================
 
 func runResetPassword(username string) error {
@@ -107,8 +113,7 @@ func runResetPassword(username string) error {
   if !auth.IsSuperadmin(username) {
     return fmt.Errorf("用户 %s 不是超管，仅支持重置超管密码", username)
   }
-
-  password := generatePassword(16)
+  password := auth.GenerateRandomPassword(16)
   if err := auth.ChangePassword(username, password); err != nil {
     return err
   }
@@ -127,12 +132,6 @@ func runInitSilent() {
     fmt.Fprintf(os.Stderr, "错误: 未找到 systemctl，请确认 systemd 可用: %v\n", err)
     os.Exit(1)
   }
-
-  if err := dockerpkg.InitClient(); err != nil {
-    fmt.Fprintf(os.Stderr, "错误: Docker 不可用: %v\n", err)
-    os.Exit(1)
-  }
-  dockerpkg.CloseClient()
 
   if !checkPort(80) {
     fmt.Fprintf(os.Stderr, "错误: 端口 80 已被占用，请先释放\n")
@@ -156,7 +155,12 @@ func runInitSilent() {
     os.Exit(1)
   }
 
-  password := generatePassword(16)
+  if err := rootfs.Ensure(filepath.Join(workDir, "rootfs")); err != nil {
+    fmt.Fprintf(os.Stderr, "初始化沙箱 rootfs 失败: %v\n", err)
+    os.Exit(1)
+  }
+
+  password := auth.GenerateRandomPassword(16)
   if !auth.UserExists("admin") {
     if err := auth.CreateUser("admin", password, "superadmin"); err != nil {
       fmt.Fprintf(os.Stderr, "创建超管失败: %v\n", err)
@@ -181,13 +185,8 @@ func runInitSilent() {
     os.Exit(1)
   }
 
-  if err := user.ReleasePicoClawMigrationRulesCache(config.RuleCacheDir()); err != nil {
-    fmt.Fprintf(os.Stderr, "警告: 初始化迁移规则缓存失败: %v\n", err)
-  }
-
   cfg.Web.AuthMode = "local"
   cfg.Web.Listen = ":80"
-  cfg.Image.Registry = "tencent"
   if err := config.SaveToDB(cfg, "system"); err != nil {
     fmt.Fprintf(os.Stderr, "保存配置失败: %v\n", err)
     os.Exit(1)
@@ -202,7 +201,7 @@ func runInitSilent() {
   fmt.Printf("数据目录: %s\n", workDir)
   fmt.Printf("监听地址: %s\n", cfg.Web.Listen)
   fmt.Println("超管首次登录成功后，secret 文件将被自动删除")
-  fmt.Println("执行 picoaide 启动 Web 管理面板")
+  fmt.Println("执行 picoaide serve 启动 Web 管理面板")
 }
 
 func ensureBinaryInstalled() {
@@ -215,7 +214,7 @@ func ensureBinaryInstalled() {
   if absPath == "/usr/sbin/picoaide" {
     return
   }
-  if err := copyFile(absPath, "/usr/sbin/picoaide"); err != nil {
+  if err := util.CopyFile(absPath, "/usr/sbin/picoaide"); err != nil {
     fmt.Fprintf(os.Stderr, "复制到 /usr/sbin/picoaide 失败: %v\n", err)
     os.Exit(1)
   }
@@ -223,35 +222,6 @@ func ensureBinaryInstalled() {
   fmt.Println("已安装到 /usr/sbin/picoaide")
 }
 
-func copyFile(src, dst string) error {
-  in, err := os.Open(src)
-  if err != nil {
-    return err
-  }
-  defer in.Close()
-  out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-  if err != nil {
-    return err
-  }
-  _, err = io.Copy(out, in)
-  if cerr := out.Close(); cerr != nil && err == nil {
-    err = cerr
-  }
-  return err
-}
-
-func generatePassword(length int) string {
-  b := make([]byte, length)
-  if _, err := rand.Read(b); err != nil {
-    fmt.Fprintf(os.Stderr, "生成密码失败: %v\n", err)
-    os.Exit(1)
-  }
-  chars := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-  for i := range b {
-    b[i] = chars[int(b[i])%len(chars)]
-  }
-  return string(b)
-}
 
 func checkPort(port int) bool {
   ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
@@ -261,3 +231,4 @@ func checkPort(port int) bool {
   ln.Close()
   return true
 }
+

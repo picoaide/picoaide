@@ -519,7 +519,7 @@ func TestRescanSource_SkipsBadMetadata(t *testing.T) {
 // ============================================================
 
 func TestCloneGitSource_InvalidName(t *testing.T) {
-  err := CloneGitSource("../evil", "http://example.com/repo", "", "")
+  err := CloneGitSource("../evil", "http://example.com/repo", "", "", "", "")
   if err == nil {
     t.Fatal("expected error for invalid name")
   }
@@ -529,7 +529,7 @@ func TestCloneGitSource_DirExists(t *testing.T) {
   setWorkDir(t)
   targetDir := filepath.Join(SkillsRootDir(), "existing-source")
   os.MkdirAll(targetDir, 0755)
-  err := CloneGitSource("existing-source", "http://example.com/repo", "", "")
+  err := CloneGitSource("existing-source", "http://example.com/repo", "", "", "", "")
   if err == nil || !strings.Contains(err.Error(), "已存在") {
     t.Fatalf("expected 'already exists' error, got: %v", err)
   }
@@ -537,7 +537,7 @@ func TestCloneGitSource_DirExists(t *testing.T) {
 
 func TestCloneGitSource_InvalidURL(t *testing.T) {
   setWorkDir(t)
-  err := CloneGitSource("test-source", "/nonexistent/path", "", "")
+  err := CloneGitSource("test-source", "/nonexistent/path", "", "", "", "")
   if err == nil {
     t.Fatal("expected error for invalid URL")
   }
@@ -548,7 +548,7 @@ func TestCloneGitSource_Success(t *testing.T) {
   srcDir := t.TempDir()
   initRepoWithCommit(t, srcDir)
 
-  err := CloneGitSource("test-source", srcDir, "", "")
+  err := CloneGitSource("test-source", srcDir, "", "", "", "")
   if err != nil {
     t.Fatalf("unexpected error: %v", err)
   }
@@ -569,7 +569,7 @@ func TestCloneGitSource_WithRef(t *testing.T) {
   }
   srcRepo.Storer.SetReference(plumbing.NewHashReference("refs/heads/dev", headRef.Hash()))
 
-  err = CloneGitSource("test-dev", srcDir, "dev", "branch")
+  err = CloneGitSource("test-dev", srcDir, "dev", "branch", "", "")
   if err != nil {
     t.Fatalf("unexpected error: %v", err)
   }
@@ -584,7 +584,7 @@ func TestCloneGitSource_WithRef(t *testing.T) {
 // ============================================================
 
 func TestPullGitSource_InvalidName(t *testing.T) {
-  _, err := PullGitSource("../evil", "", "")
+  _, err := PullGitSource("../evil", "", "", "", "")
   if err == nil {
     t.Fatal("expected error for invalid name")
   }
@@ -592,7 +592,7 @@ func TestPullGitSource_InvalidName(t *testing.T) {
 
 func TestPullGitSource_NonExistent(t *testing.T) {
   setWorkDir(t)
-  _, err := PullGitSource("no-such-source", "", "")
+  _, err := PullGitSource("no-such-source", "", "", "", "")
   if err == nil || !strings.Contains(err.Error(), "不存在") {
     t.Fatalf("expected 'not exists' error, got: %v", err)
   }
@@ -601,7 +601,7 @@ func TestPullGitSource_NonExistent(t *testing.T) {
 func TestPullGitSource_NotAGitRepo(t *testing.T) {
   setWorkDir(t)
   os.MkdirAll(filepath.Join(SkillsRootDir(), "not-git"), 0755)
-  _, err := PullGitSource("not-git", "", "")
+  _, err := PullGitSource("not-git", "", "", "", "")
   if err == nil || !strings.Contains(err.Error(), "打开 Git 仓库失败") {
     t.Fatalf("expected git open error, got: %v", err)
   }
@@ -626,7 +626,7 @@ func TestPullGitSource_Success(t *testing.T) {
     t.Fatalf("git commit failed: %v", err)
   }
 
-  err = CloneGitSource("test-source", srcDir, "", "")
+  err = CloneGitSource("test-source", srcDir, "", "", "", "")
   if err != nil {
     t.Fatalf("clone failed: %v", err)
   }
@@ -642,7 +642,7 @@ func TestPullGitSource_Success(t *testing.T) {
     t.Fatalf("git commit failed: %v", err)
   }
 
-  result, err := PullGitSource("test-source", "", "")
+  result, err := PullGitSource("test-source", "", "", "", "")
   if err != nil {
     t.Fatalf("pull failed: %v", err)
   }
@@ -674,7 +674,7 @@ func TestPullGitSource_RemovedSkill(t *testing.T) {
   wt.Add("skill-a/SKILL.md")
   wt.Commit("add skill-a", &gogit.CommitOptions{Author: &object.Signature{Name: "test", Email: "test@test.com"}})
 
-  err = CloneGitSource("test-source", srcDir, "", "")
+  err = CloneGitSource("test-source", srcDir, "", "", "", "")
   if err != nil {
     t.Fatalf("clone failed: %v", err)
   }
@@ -687,7 +687,7 @@ func TestPullGitSource_RemovedSkill(t *testing.T) {
   wt.Add("skill-c/SKILL.md")
   wt.Commit("replace skill-a with skill-c", &gogit.CommitOptions{Author: &object.Signature{Name: "test", Email: "test@test.com"}})
 
-  result, err := PullGitSource("test-source", "", "")
+  result, err := PullGitSource("test-source", "", "", "", "")
   if err != nil {
     t.Fatalf("pull failed: %v", err)
   }
@@ -720,7 +720,7 @@ func TestPullGitSource_WithRef(t *testing.T) {
   refName := plumbing.ReferenceName("refs/tags/v1.0.0")
   srcRepo.Storer.SetReference(plumbing.NewHashReference(refName, headRef.Hash()))
 
-  err = CloneGitSource("test-tag", srcDir, "v1.0.0", "tag")
+  err = CloneGitSource("test-tag", srcDir, "v1.0.0", "tag", "", "")
   if err != nil {
     t.Fatalf("clone with tag failed: %v", err)
   }
@@ -739,7 +739,7 @@ func TestPullGitSource_PullWithBranchRef(t *testing.T) {
   wt.Add("skill-a/SKILL.md")
   wt.Commit("add skill-a", &gogit.CommitOptions{Author: &object.Signature{Name: "test", Email: "test@test.com"}})
 
-  err = CloneGitSource("test-source", srcDir, "", "")
+  err = CloneGitSource("test-source", srcDir, "", "", "", "")
   if err != nil {
     t.Fatalf("clone failed: %v", err)
   }
@@ -755,7 +755,7 @@ func TestPullGitSource_PullWithBranchRef(t *testing.T) {
   wt.Add("skill-b/SKILL.md")
   wt.Commit("add skill-b on main", &gogit.CommitOptions{Author: &object.Signature{Name: "test", Email: "test@test.com"}})
 
-  result, err := PullGitSource("test-source", "feature", "branch")
+  result, err := PullGitSource("test-source", "feature", "branch", "", "")
   if err != nil {
     t.Fatalf("pull with branch ref failed: %v", err)
   }
@@ -781,7 +781,7 @@ func TestPullGitSource_PullWithTagRef(t *testing.T) {
   }
   srcRepo.Storer.SetReference(plumbing.NewHashReference("refs/tags/v1.0.0", headRef.Hash()))
 
-  err = CloneGitSource("test-tag-pull", srcDir, "v1.0.0", "tag")
+  err = CloneGitSource("test-tag-pull", srcDir, "v1.0.0", "tag", "", "")
   if err != nil {
     t.Fatalf("clone with tag failed: %v", err)
   }
@@ -797,7 +797,7 @@ func TestPullGitSource_PullWithTagRef(t *testing.T) {
   }
   srcRepo.Storer.SetReference(plumbing.NewHashReference("refs/tags/v1.1.0", headRef2.Hash()))
 
-  result, err := PullGitSource("test-tag-pull", "v1.1.0", "tag")
+  result, err := PullGitSource("test-tag-pull", "v1.1.0", "tag", "", "")
   if err != nil {
     t.Fatalf("pull with tag ref failed: %v", err)
   }
@@ -817,7 +817,7 @@ func TestPullGitSource_WorktreeError(t *testing.T) {
     t.Fatalf("bare clone failed: %v", err)
   }
 
-  _, err = PullGitSource("bare-pull", "", "")
+  _, err = PullGitSource("bare-pull", "", "", "", "")
   if err == nil || !strings.Contains(err.Error(), "工作区") {
     t.Fatalf("expected worktree error, got: %v", err)
   }
@@ -828,12 +828,12 @@ func TestPullGitSource_CheckoutError(t *testing.T) {
   srcDir := t.TempDir()
   initRepoWithCommit(t, srcDir)
 
-  err := CloneGitSource("test-source", srcDir, "", "")
+  err := CloneGitSource("test-source", srcDir, "", "", "", "")
   if err != nil {
     t.Fatalf("clone failed: %v", err)
   }
 
-  _, err = PullGitSource("test-source", "nonexistent-tag", "tag")
+  _, err = PullGitSource("test-source", "nonexistent-tag", "tag", "", "")
   if err == nil {
     t.Fatal("expected checkout error for nonexistent tag")
   }
@@ -852,7 +852,7 @@ func TestPullGitSource_FetchError(t *testing.T) {
   wt.Add("skill-a/SKILL.md")
   wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "test", Email: "test@test.com"}})
 
-  err = CloneGitSource("test-source", srcDir, "", "")
+  err = CloneGitSource("test-source", srcDir, "", "", "", "")
   if err != nil {
     t.Fatalf("clone failed: %v", err)
   }
@@ -873,7 +873,7 @@ func TestPullGitSource_FetchError(t *testing.T) {
   }
   repo.Storer.SetReference(plumbing.NewHashReference("refs/heads/feature", headRef.Hash()))
 
-  _, err = PullGitSource("test-source", "feature", "branch")
+  _, err = PullGitSource("test-source", "feature", "branch", "", "")
   if err == nil {
     t.Fatal("expected fetch error from nonexistent remote")
   }
@@ -884,14 +884,14 @@ func TestPullGitSource_PullFromRemovedOrigin(t *testing.T) {
   srcDir := t.TempDir()
   initRepoWithCommit(t, srcDir)
 
-  err := CloneGitSource("test-source", srcDir, "", "")
+  err := CloneGitSource("test-source", srcDir, "", "", "", "")
   if err != nil {
     t.Fatalf("clone failed: %v", err)
   }
 
   os.RemoveAll(srcDir)
 
-  _, err = PullGitSource("test-source", "", "")
+  _, err = PullGitSource("test-source", "", "", "", "")
   if err == nil {
     t.Fatal("expected pull error after removing origin")
   }
@@ -1532,11 +1532,11 @@ func TestSafePathSegment_UsedInSourceFunctions(t *testing.T) {
   if err == nil {
     t.Error("RescanSource should reject '../bad'")
   }
-  err = CloneGitSource("../bad", "http://ex.com", "", "")
+  err = CloneGitSource("../bad", "http://ex.com", "", "", "", "")
   if err == nil {
     t.Error("CloneGitSource should reject '../bad'")
   }
-  _, err = PullGitSource("../bad", "", "")
+  _, err = PullGitSource("../bad", "", "", "", "")
   if err == nil {
     t.Error("PullGitSource should reject '../bad'")
   }

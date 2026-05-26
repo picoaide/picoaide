@@ -195,12 +195,12 @@ func TestSharedFolders_TestMount(t *testing.T) {
   auth.CreateSharedFolder("test", "", false, "testadmin")
   sf, _ := auth.GetSharedFolderByName("test")
 
-  // 测试挂载（Docker 不可用，预期返回错误信息但请求本身成功）
+  // 测试挂载
   resp := env.postForm(t, "/api/admin/shared-folders/test", "testadmin", url.Values{
     "folder_id": {itoa(int(sf.ID))},
     "username":  {"testuser"},
   })
-  // 请求应该成功返回（即使 Docker 不可用，也会返回正确的结果）
+  // 请求应该成功返回（即使 sandbox 不可用，也会返回正确的结果）
   assertStatus(t, resp, 200)
 }
 

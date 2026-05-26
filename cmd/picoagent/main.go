@@ -1,0 +1,366 @@
+package main
+
+import (
+  "bufio"
+  "bytes"
+  "context"
+  "encoding/json"
+  "fmt"
+  "io"
+  "log/slog"
+  "net"
+  "net/http"
+  "os"
+  "path/filepath"
+  "strings"
+  "time"
+
+  "github.com/picoaide/picoaide/internal/agent"
+)
+
+func main() {
+  // 初始化 slog：所有日志输出到 stderr，带 [PICOAGENT] 前缀
+  slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+    Level: slog.LevelDebug,
+    ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+      if a.Key == slog.MessageKey {
+        a.Value = slog.StringValue("[PICOAGENT] " + a.Value.String())
+      }
+      return a
+    },
+  })))
+
+  slog.Debug("picoagent.starting")
+
+  token := os.Getenv("PICOAGENT_TOKEN")
+  if token == "" {
+    slog.Debug("picoagent.no_token")
+    errorExit("PICOAGENT_TOKEN 环境变量未设置")
+  }
+  slog.Debug("picoagent.token_ok", "token_prefix", token[:20])
+
+  sock := os.Getenv("PICOAGENT_SOCKET")
+  if sock == "" {
+    slog.Debug("picoagent.no_socket")
+    errorExit("PICOAGENT_SOCKET 环境变量未设置")
+  }
+  slog.Debug("picoagent.socket_ok", "socket", sock)
+
+  // 1. 获取配置
+  slog.Debug("picoagent.fetching_config")
+  cfg, err := fetchConfig(sock, token)
+  if err != nil {
+    slog.Debug("picoagent.config_fetch_failed", "error", err.Error())
+    errorExit("获取配置失败: " + err.Error())
+  }
+  slog.Debug("picoagent.config_loaded",
+    "user_id", cfg.UserID,
+    "model_id", cfg.Model.ModelID,
+    "provider", cfg.Model.Provider,
+    "base_url", cfg.Model.BaseURL,
+    "max_tokens", cfg.Model.MaxTokens,
+    "max_iter", cfg.Model.MaxIter,
+    "temperature", cfg.Model.Temperature,
+    "context_window", cfg.Model.ContextWindow,
+    "request_timeout", cfg.RequestTimeout,
+    "tools_count", len(cfg.Tools),
+    "mcp_servers_count", len(cfg.MCPServers),
+    "workspace", cfg.Workspace,
+  )
+
+  // 2. 初始化存储
+  slog.Debug("picoagent.initializing_store")
+  store := agent.NewSessionStore(cfg.Workspace)
+  slog.Debug("picoagent.store_ready", "workspace", cfg.Workspace)
+
+  // 3. 构建系统提示
+  slog.Debug("picoagent.building_sysprompt")
+  sysPrompt := buildSystemPrompt(cfg.Workspace)
+  slog.Debug("picoagent.sysprompt_ready", "length", len(sysPrompt))
+
+  // 4. 读取密钥文件
+  slog.Debug("picoagent.lookup_apikey")
+  apiKey := lookupAPIKey()
+  slog.Debug("picoagent.apikey_status", "found", apiKey != "")
+
+  // 5. 选择模型
+  slog.Debug("picoagent.model_info",
+    "model_id", cfg.Model.ModelID,
+    "provider", cfg.Model.Provider,
+    "base_url", cfg.Model.BaseURL,
+  )
+
+  provider, err := agent.NewProvider(cfg.Model.Provider, cfg.Model.ModelID, cfg.Model.BaseURL, apiKey)
+  if err != nil {
+    errorExit("创建 provider 失败: " + err.Error())
+  }
+  slog.Debug("picoagent.provider_ready")
+
+  // 5. 注册工具
+  slog.Debug("picoagent.registering_tools")
+  tools := agent.NewToolRegistry()
+  cmdTimeout := time.Duration(cfg.RequestTimeout) * time.Second
+  tools.Register(&agent.CommandTool{Timeout: cmdTimeout})
+  tools.Register(&agent.ReadFileTool{})
+  tools.Register(&agent.GrepTool{})
+  tools.Register(&agent.WriteFileTool{})
+  tools.Register(&agent.EditFileTool{})
+  tools.Register(&agent.AppendFileTool{})
+  tools.Register(&agent.ListDirTool{})
+  tools.Register(&agent.GlobTool{})
+  tools.Register(&agent.DeleteFileTool{})
+  tools.Register(&agent.WebSearchTool{})
+  tools.Register(&agent.WebFetchTool{})
+  slog.Debug("picoagent.tools_registered", "count", 11)
+
+  // 连接 MCP 服务器（使用独立 context，不影响主流程超时）
+  mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 10*time.Second)
+  if len(cfg.MCPServers) > 0 {
+    mcpManager := agent.NewMCPToolManager()
+    mcpManager.WorkspaceDir = cfg.Workspace
+    for serverName, serverCfg := range cfg.MCPServers {
+      if serverCfg.Socket == "" {
+        continue
+      }
+      if err := mcpManager.Connect(mcpCtx, serverName, &serverCfg, token); err != nil {
+        slog.Debug("picoagent.mcp_connect_failed", "server", serverName, "error", err.Error())
+        continue
+      }
+      slog.Debug("picoagent.mcp_connected", "server", serverName, "socket", serverCfg.Socket)
+    }
+    mcpManager.RegisterAll(tools)
+  }
+  mcpCancel()
+
+  // 6. 创建引擎 + 设置压缩器摘要 LLM
+  slog.Debug("picoagent.creating_engine")
+  engine := agent.NewEngine(cfg, provider, tools, store)
+  summarizer := agent.NewLLMSummarizer(provider, cfg.Model.ModelID)
+  engine.SetSummarizer(summarizer)
+
+  // 6a. 注册子代理工具
+  subAgentTool := &agent.SubAgentTool{Manager: engine.SubAgentManager()}
+  tools.Register(subAgentTool)
+
+  // 6b. 加载技能
+  skills, err := agent.LoadSkills(cfg.Workspace)
+  if err != nil {
+    slog.Debug("picoagent.skills_load_failed", "error", err.Error())
+  } else if len(skills) > 0 {
+    engine.SetSkills(skills)
+    slog.Debug("picoagent.skills_loaded", "count", len(skills))
+  }
+
+  // 7. 计算统一 session key（跨渠道）
+  scope := agent.SessionScope{
+    Version:    1,
+    AgentID:    "pico",
+    Channel:    "unified",
+    Account:    cfg.UserID,
+    Dimensions: []string{"user"},
+    Values:     map[string]string{"user": cfg.UserID},
+  }
+  sessionKey := agent.BuildSessionKey(scope)
+
+  history, _ := store.LoadLive(sessionKey)
+  slog.Debug("picoagent.session_loaded",
+    "session_key", sessionKey,
+    "history_count", len(history),
+    "user_id", cfg.UserID,
+  )
+
+  // 8. 读取输入消息
+  slog.Debug("picoagent.reading_input")
+  inputMsg, err := readInput()
+  if err != nil {
+    slog.Debug("picoagent.no_input", "error", err.Error())
+    errorExit("读取输入消息失败: " + err.Error())
+  }
+  slog.Debug("picoagent.input_received",
+    "role", inputMsg.Role,
+    "content_length", len(inputMsg.Content),
+    "content_preview", truncateString(inputMsg.Content, 100),
+  )
+
+  // 9. 保存用户消息
+  store.AppendMessage(sessionKey, inputMsg)
+
+  // 10. 处理消息（超时时间从配置读取，默认 120 秒）
+  timeout := cfg.RequestTimeout
+  var ctx context.Context
+  var cancel context.CancelFunc
+  if timeout > 0 {
+    ctx, cancel = context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+  } else {
+    ctx, cancel = context.WithCancel(context.Background())
+  }
+  defer cancel()
+
+  // 10a. 启动心跳
+  heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
+  defer heartbeatCancel()
+  agent.StartHeartbeat(heartbeatCtx, 15*time.Second, func(event agent.StreamEvent) {
+    data, _ := json.Marshal(event)
+    fmt.Println(string(data))
+  })
+
+  slog.Debug("picoagent.engine_process_start",
+    "model_id", cfg.Model.ModelID,
+    "timeout", timeout,
+    "history_count", len(history),
+    "input_length", len(inputMsg.Content),
+  )
+  engine.SetSessionKey(sessionKey)
+  var fullResponse string
+  err = engine.Process(ctx, sysPrompt, history, inputMsg, func(event agent.StreamEvent) {
+    data, _ := json.Marshal(event)
+    fmt.Println(string(data))
+    if event.Type == "text_delta" {
+      var text string
+      if json.Unmarshal(event.Data, &text) == nil {
+        fullResponse += text
+      }
+    }
+  })
+
+  heartbeatCancel()
+
+  if err != nil {
+    slog.Debug("picoagent.engine_error", "error", err.Error(), "response_length", len(fullResponse))
+    errorEvent := agent.ErrorEvent(err.Error())
+    data, _ := json.Marshal(errorEvent)
+    fmt.Println(string(data))
+
+    // 保存部分响应（即使出错也保存已累积的内容）
+    if fullResponse != "" {
+      partialMsg := &agent.Message{
+        Role:    agent.RoleAssistant,
+        Content: fullResponse + "\n\n[响应中断: " + err.Error() + "]",
+      }
+      store.AppendMessage(sessionKey, partialMsg)
+    }
+    os.Exit(1)
+  }
+
+  slog.Debug("picoagent.engine_complete",
+    "response_length", len(fullResponse),
+    "response_preview", truncateString(fullResponse, 100),
+  )
+
+  // 11. 保存助手响应到会话
+  if fullResponse != "" {
+    assistantMsg := &agent.Message{
+      Role:    agent.RoleAssistant,
+      Content: fullResponse,
+    }
+    store.AppendMessage(sessionKey, assistantMsg)
+  }
+
+  fmt.Fprintf(os.Stderr, "[PICOAGENT] done\n")
+  os.Stdout.Sync()
+}
+
+func truncateString(s string, maxLen int) string {
+  if len(s) <= maxLen {
+    return s
+  }
+  return s[:maxLen] + "..."
+}
+
+func errorExit(msg string) {
+  fmt.Fprintf(os.Stderr, "[PICOAGENT] error: %s\n", msg)
+  os.Stdout.Sync()
+  event := agent.ErrorEvent(msg)
+  data, _ := json.Marshal(event)
+  fmt.Println(string(data))
+  os.Stderr.Sync()
+  os.Exit(1)
+}
+
+func lookupAPIKey() string {
+  return os.Getenv("PICOAGENT_API_KEY")
+}
+
+func fetchConfig(sock, token string) (*agent.AgentConfig, error) {
+  client := &http.Client{
+    Timeout: 10 * time.Second,
+    Transport: &http.Transport{
+      DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+        return net.Dial("unix", sock)
+      },
+    },
+  }
+
+  req, err := http.NewRequest("GET", "http://localhost/api/picoagent/me", nil)
+  if err != nil {
+    return nil, fmt.Errorf("创建请求失败: %w", err)
+  }
+  req.Header.Set("Authorization", "Bearer "+token)
+
+  resp, err := client.Do(req)
+  if err != nil {
+    return nil, fmt.Errorf("HTTP 请求失败: %w", err)
+  }
+  defer resp.Body.Close()
+
+  body, err := io.ReadAll(resp.Body)
+  if err != nil {
+    return nil, fmt.Errorf("读取响应失败: %w", err)
+  }
+
+  if resp.StatusCode != http.StatusOK {
+    return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+  }
+
+  var cfg agent.AgentConfig
+  if err := json.Unmarshal(body, &cfg); err != nil {
+    return nil, fmt.Errorf("解析配置失败: %w", err)
+  }
+  return &cfg, nil
+}
+
+func readInput() (*agent.Message, error) {
+  var msg agent.Message
+  decoder := json.NewDecoder(bufio.NewReader(os.Stdin))
+  if err := decoder.Decode(&msg); err != nil {
+    return nil, fmt.Errorf("stdin JSON 解析失败: %w", err)
+  }
+  if msg.Role == "" {
+    return nil, fmt.Errorf("消息缺少 role 字段")
+  }
+  return &msg, nil
+}
+
+func buildSystemPrompt(workspace string) string {
+  var parts []string
+
+  agentContent := readFile(filepath.Join(workspace, "AGENT.md"))
+  if agentContent != "" {
+    parts = append(parts, "## AGENT.md\n\n"+agentContent)
+  }
+
+  soulContent := readFile(filepath.Join(workspace, "SOUL.md"))
+  if soulContent != "" {
+    parts = append(parts, "## SOUL.md\n\n"+soulContent)
+  }
+
+  userContent := readFile(filepath.Join(workspace, "USER.md"))
+  if userContent != "" {
+    parts = append(parts, "## USER.md\n\n"+userContent)
+  }
+
+  memoryContent := readFile(filepath.Join(workspace, "memory", "MEMORY.md"))
+  if memoryContent != "" {
+    parts = append(parts, "## Memory\n\n"+memoryContent)
+  }
+
+  return strings.Join(parts, "\n\n")
+}
+
+func readFile(path string) string {
+  data, err := os.ReadFile(path)
+  if err != nil {
+    return ""
+  }
+  return string(bytes.TrimSpace(data))
+}

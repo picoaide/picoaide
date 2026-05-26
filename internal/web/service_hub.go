@@ -9,14 +9,18 @@ import (
   "time"
 
   "github.com/gorilla/websocket"
+
+  "github.com/picoaide/picoaide/internal/logger"
 )
 
 const commandTimeout = 30 * time.Second
 
 // PendingCall 跟踪一个等待代理响应的工具调用
 type PendingCall struct {
-  resultCh chan<- json.RawMessage
+  mu       sync.Mutex
+  resultCh chan json.RawMessage
   timer    *time.Timer
+  resolved bool
 }
 
 // ServiceHub 管理某一类 MCP 服务的后端 WebSocket 连接
@@ -53,6 +57,7 @@ func (h *ServiceHub) Register(username string, ws *websocket.Conn, extra interfa
 
   // 踢掉旧连接
   if old, ok := h.conns[username]; ok {
+    logger.DebugProcess("kick_old_connection", "service", h.name, "username", username)
     old.Close()
   }
 
@@ -69,15 +74,19 @@ func (h *ServiceHub) Register(username string, ws *websocket.Conn, extra interfa
   go conn.keepAlive()
 
   slog.Info("代理注册", "service", h.name, "username", username)
+  logger.DebugProcess("agent_registered", "service", h.name, "username", username)
   return conn
 }
 
-// Unregister 移除代理连接
-func (h *ServiceHub) Unregister(username string) {
+// Unregister 移除代理连接（检查指针身份，防止旧连接覆盖新连接）
+func (h *ServiceHub) Unregister(conn *AgentConn) {
   h.mu.Lock()
   defer h.mu.Unlock()
-  delete(h.conns, username)
-  slog.Info("代理注销", "service", h.name, "username", username)
+  if current, ok := h.conns[conn.username]; ok && current == conn {
+    delete(h.conns, conn.username)
+    slog.Info("代理注销", "service", h.name, "username", conn.username)
+    logger.DebugProcess("agent_unregistered", "service", h.name, "username", conn.username)
+  }
 }
 
 // GetConnection 获取用户的代理连接
@@ -103,8 +112,14 @@ func (c *AgentConn) Close() {
 
   // 取消所有等待中的调用
   c.pending.Range(func(key, value interface{}) bool {
-    call := value.(*PendingCall)
-    call.timer.Stop()
+    pc := value.(*PendingCall)
+    pc.mu.Lock()
+    if !pc.resolved {
+      pc.resolved = true
+      pc.timer.Stop()
+      close(pc.resultCh)
+    }
+    pc.mu.Unlock()
     c.pending.Delete(key)
     return true
   })
@@ -127,12 +142,19 @@ func (c *AgentConn) SendCommand(ctx context.Context, tool string, params map[str
     return nil, fmt.Errorf("序列化命令失败: %w", err)
   }
 
+  logger.DebugProcess("send_command", "service", c.serviceName, "username", c.username, "tool", tool, "cmd_id", id)
+
   resultCh := make(chan json.RawMessage, 1)
   call := &PendingCall{resultCh: resultCh}
 
   call.timer = time.AfterFunc(commandTimeout, func() {
     c.pending.Delete(id)
-    close(resultCh) // 超时关闭 channel
+    call.mu.Lock()
+    if !call.resolved {
+      call.resolved = true
+      close(resultCh)
+    }
+    call.mu.Unlock()
   })
 
   c.pending.Store(id, call)
@@ -152,6 +174,7 @@ func (c *AgentConn) SendCommand(ctx context.Context, tool string, params map[str
     if !ok {
       return nil, fmt.Errorf("工具调用超时 (%v)", commandTimeout)
     }
+    logger.DebugProcess("command_response", "service", c.serviceName, "username", c.username, "tool", tool, "cmd_id", id)
     return result, nil
   case <-ctx.Done():
     call.timer.Stop()
@@ -166,7 +189,7 @@ func (c *AgentConn) SendCommand(ctx context.Context, tool string, params map[str
 func (c *AgentConn) readPump(hub *ServiceHub) {
   defer func() {
     close(c.done)
-    hub.Unregister(c.username)
+    hub.Unregister(c)
     c.ws.Close()
   }()
 
@@ -188,20 +211,25 @@ func (c *AgentConn) readPump(hub *ServiceHub) {
       continue
     }
 
-    if call, ok := c.pending.Load(msg.ID); ok {
+    if v, ok := c.pending.Load(msg.ID); ok {
       c.pending.Delete(msg.ID)
-      call.(*PendingCall).timer.Stop()
-
-      if msg.Error != nil {
-        errData, _ := json.Marshal(map[string]interface{}{
-          "id":     msg.ID,
-          "result": nil,
-          "error":  msg.Error,
-        })
-        call.(*PendingCall).resultCh <- errData
-      } else {
-        call.(*PendingCall).resultCh <- data
+      pc := v.(*PendingCall)
+      pc.mu.Lock()
+      if !pc.resolved {
+        pc.resolved = true
+        pc.timer.Stop()
+        if msg.Error != nil {
+          errData, _ := json.Marshal(map[string]interface{}{
+            "id":     msg.ID,
+            "result": nil,
+            "error":  msg.Error,
+          })
+          pc.resultCh <- errData
+        } else {
+          pc.resultCh <- data
+        }
       }
+      pc.mu.Unlock()
     }
   }
 }

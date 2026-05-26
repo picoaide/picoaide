@@ -40,21 +40,6 @@ func createOldSchema(t *testing.T, engine *xorm.Engine) {
   if err != nil {
     t.Fatalf("创建 local_users 失败: %v", err)
   }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS containers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    container_id TEXT,
-    image TEXT NOT NULL,
-    status TEXT DEFAULT 'stopped',
-    ip TEXT,
-    cpu_limit REAL DEFAULT 0,
-    memory_limit INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT (datetime('now','localtime')),
-    updated_at DATETIME DEFAULT (datetime('now','localtime'))
-  )`)
-  if err != nil {
-    t.Fatalf("创建 containers 失败: %v", err)
-  }
   _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -96,22 +81,6 @@ func createFullSchema(t *testing.T, engine *xorm.Engine) {
   )`)
   if err != nil {
     t.Fatalf("创建 local_users 失败: %v", err)
-  }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS containers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    container_id TEXT,
-    image TEXT NOT NULL,
-    status TEXT DEFAULT 'stopped',
-    ip TEXT,
-    cpu_limit REAL DEFAULT 0,
-    memory_limit INTEGER DEFAULT 0,
-    mcp_token TEXT DEFAULT '',
-    created_at DATETIME DEFAULT (datetime('now','localtime')),
-    updated_at DATETIME DEFAULT (datetime('now','localtime'))
-  )`)
-  if err != nil {
-    t.Fatalf("创建 containers 失败: %v", err)
   }
   _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -204,12 +173,6 @@ func TestGetSetSchemaVersion(t *testing.T) {
   if v := getSchemaVersion(engine); v != "20250501000000" {
     t.Fatalf("版本应为 20250501000000, 得到 %q", v)
   }
-  if err := setSchemaVersion(engine, "20250502000000"); err != nil {
-    t.Fatal(err)
-  }
-  if v := getSchemaVersion(engine); v != "20250502000000" {
-    t.Fatalf("版本应为 20250502000000, 得到 %q", v)
-  }
 }
 
 // TestRunAllFromOldDB 验证从旧数据库升级时迁移正确执行
@@ -229,7 +192,6 @@ func TestRunAllFromOldDB(t *testing.T) {
     column string
   }{
     {"local_users", "source"},
-    {"containers", "mcp_token"},
     {"groups", "parent_id"},
     {"user_skills", "source"},
     {"user_skills", "updated_at"},

@@ -107,6 +107,44 @@ func GetUserAllSkillSources(username, skillName string) ([]string, error) {
   return []string{}, nil
 }
 
+// GetUserSkills 返回用户绑定的所有技能名称
+func GetUserSkills(username string) ([]string, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
+  var skills []UserSkill
+  if err := engine.Where("username = ?", username).Find(&skills); err != nil {
+    return nil, err
+  }
+  names := make([]string, 0, len(skills))
+  for _, s := range skills {
+    names = append(names, s.SkillName)
+  }
+  return names, nil
+}
+
+// SkillWithSource 技能名称与来源
+type SkillWithSource struct {
+  Name   string
+  Source string
+}
+
+// GetUserSkillsWithSource 返回用户的所有技能及来源
+func GetUserSkillsWithSource(username string) ([]SkillWithSource, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
+  var skills []UserSkill
+  if err := engine.Where("username = ?", username).Find(&skills); err != nil {
+    return nil, err
+  }
+  result := make([]SkillWithSource, 0, len(skills))
+  for _, s := range skills {
+    result = append(result, SkillWithSource{Name: s.SkillName, Source: s.Source})
+  }
+  return result, nil
+}
+
 // ============================================================
 // 默认技能
 // ============================================================

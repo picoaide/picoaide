@@ -11,30 +11,12 @@ type LocalUser struct {
   PasswordHash string `xorm:"notnull 'password_hash'"`
   Role         string `xorm:"notnull 'role'"`
   Source       string `xorm:"notnull 'source'"`
+  IP           string `xorm:"notnull default '' 'ip'"`
   CreatedAt    string `xorm:"notnull 'created_at'"`
 }
 
 func (LocalUser) TableName() string {
   return "local_users"
-}
-
-// ContainerRecord 容器数据库记录
-type ContainerRecord struct {
-  ID          int64   `xorm:"pk autoincr 'id'"`
-  Username    string  `xorm:"unique notnull 'username'"`
-  ContainerID string  `xorm:"'container_id'"`
-  Image       string  `xorm:"notnull 'image'"`
-  Status      string  `xorm:"'status'"`
-  IP          string  `xorm:"'ip'"`
-  CPULimit    float64 `xorm:"'cpu_limit'"`
-  MemoryLimit int64   `xorm:"'memory_limit'"`
-  MCPToken    string  `xorm:"'mcp_token'"`
-  CreatedAt   string  `xorm:"'created_at'"`
-  UpdatedAt   string  `xorm:"'updated_at'"`
-}
-
-func (ContainerRecord) TableName() string {
-  return "containers"
 }
 
 // Setting 系统设置表
@@ -99,7 +81,7 @@ func (UserGroup) TableName() string {
   return "user_groups"
 }
 
-// UserChannel 记录用户可见渠道和启用状态。具体密钥仍存放在用户自己的 .security.yml。
+// UserChannel 记录用户可见渠道和启用状态，凭据以 JSON 存储在 credentials 列。
 type UserChannel struct {
   ID            int64  `xorm:"pk autoincr 'id'"`
   Username      string `xorm:"notnull 'username'"`
@@ -108,6 +90,7 @@ type UserChannel struct {
   Enabled       bool   `xorm:"notnull 'enabled'"`
   Configured    bool   `xorm:"notnull 'configured'"`
   ConfigVersion int    `xorm:"notnull 'config_version'"`
+  Credentials   string `xorm:"'credentials'"`       // JSON 格式的渠道凭据
   UpdatedAt     string `xorm:"notnull 'updated_at'"`
 }
 
@@ -154,7 +137,7 @@ func (SharedFolderMount) TableName() string {
   return "shared_folder_mounts"
 }
 
-// ShareMount 共享文件夹挂载规范（auth 包内部结构，供 web 层转换为 docker.Mount）
+// ShareMount 共享文件夹挂载规范（auth 包内部结构，供 web 层转换为挂载信息）
 type ShareMount struct {
   Source string
   Target string
@@ -213,20 +196,4 @@ type GroupInfo struct {
   Source      string `json:"source"`
   Description string `json:"description"`
   MemberCount int    `json:"member_count"`
-}
-
-// PicoclawAdapterPackage 适配器包数据库记录
-type PicoclawAdapterPackage struct {
-  ID                           int64  `xorm:"pk autoincr 'id'"`
-  AdapterVersion               string `xorm:"notnull 'adapter_version'"`
-  AdapterSchemaVersion         int    `xorm:"notnull 'adapter_schema_version'"`
-  LatestSupportedConfigVersion int    `xorm:"notnull 'latest_supported_config_version'"`
-  Content                      string `xorm:"notnull 'content'"`
-  Hash                         string `xorm:"notnull 'hash'"`
-  RefreshedAt                  string `xorm:"notnull 'refreshed_at'"`
-  CreatedAt                    string `xorm:"notnull 'created_at'"`
-}
-
-func (PicoclawAdapterPackage) TableName() string {
-  return "picoclaw_adapter_packages"
 }

@@ -12,7 +12,7 @@ import (
 //   - 字符串/数字/布尔值 → 直接存储为字符串
 //   - 嵌套 map → 递归展平，键用点连接
 //   - 切片/数组 → 序列化为 JSON 字符串，存储在父键下
-//   - 特殊键 picoclaw、security、skills → 整体序列化为 JSON
+//   - 特殊键 security、skills → 整体序列化为 JSON
 func flattenConfig(data map[string]interface{}) map[string]string {
   result := make(map[string]string)
   flattenRecursive(data, "", result)
@@ -23,7 +23,7 @@ func flattenConfig(data map[string]interface{}) map[string]string {
 func flattenRecursive(data map[string]interface{}, prefix string, result map[string]string) {
   // 需要整体存储为 JSON 的顶层键
   jsonBlobKeys := map[string]bool{
-    "picoclaw": true,
+    
     "security": true,
     "skills":   true,
   }
@@ -66,7 +66,7 @@ func flattenRecursive(data map[string]interface{}, prefix string, result map[str
 func buildNested(flat map[string]string) map[string]interface{} {
   // 需要从 JSON 反序列化的顶层键
   jsonBlobKeys := map[string]bool{
-    "picoclaw": true,
+    
     "security": true,
     "skills":   true,
   }
@@ -75,6 +75,7 @@ func buildNested(flat map[string]string) map[string]interface{} {
   boolKeys := map[string]bool{
     "web.ldap_enabled":       true,
     "web.tls.enabled":        true,
+    "web.debug_mode":         true,
     "ldap.whitelist_enabled": true,
     "oidc.whitelist_enabled": true,
   }

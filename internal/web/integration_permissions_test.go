@@ -20,12 +20,11 @@ func setupBodyLimitEngine(t *testing.T) (*Server, *httptest.Server) {
   t.Helper()
 
   s := &Server{
-    cfg:             &config.GlobalConfig{},
-    secret:          "test-perm-secret",
-    csrfKey:         "test-perm-secret-csrf",
-    dockerAvailable: false,
-    loginLimiter:    newLoginRateLimiter(),
+    secret:       "test-perm-secret",
+    csrfKey:      "test-perm-secret-csrf",
+    loginLimiter: newLoginRateLimiter(),
   }
+  s.cfg.Store(&config.GlobalConfig{})
 
   gin.SetMode(gin.TestMode)
   r := gin.New()
@@ -169,7 +168,6 @@ func TestUnauthenticatedAccess_Returns401(t *testing.T) {
     {"GET", "/api/files"},
     {"GET", "/api/csrf"},
     {"GET", "/api/mcp/token"},
-    {"GET", "/api/dingtalk"},
     {"GET", "/api/admin/users"},
     {"GET", "/api/admin/superadmins"},
     {"GET", "/api/admin/groups"},
@@ -250,12 +248,4 @@ func TestLoginRateLimit_Returns429(t *testing.T) {
   }
 }
 
-func TestDockerDependentEndpoints_Return503(t *testing.T) {
-  env := setupTestServer(t)
-  form := url.Values{"username": {"testuser"}}
-  resp := env.postForm(t, "/api/admin/container/start", "testadmin", form)
-  if resp.StatusCode != 503 {
-    t.Errorf("container/start: status=%d, want 503", resp.StatusCode)
-  }
-  resp.Body.Close()
-}
+

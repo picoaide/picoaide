@@ -8,65 +8,8 @@ import (
   "time"
 
   "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/logger"
 )
-
-// ============================================================
-// 镜像拉取任务状态跟踪
-// ============================================================
-
-type ImagePullTask struct {
-  Running   bool   `json:"running"`
-  Tag       string `json:"tag"`
-  Message   string `json:"message"`
-  Error     string `json:"error,omitempty"`
-  StartedAt string `json:"started_at,omitempty"`
-}
-
-var imagePullStatus struct {
-  mu     sync.Mutex
-  status ImagePullTask
-}
-
-func startImagePull(tag string) {
-  imagePullStatus.mu.Lock()
-  defer imagePullStatus.mu.Unlock()
-  imagePullStatus.status = ImagePullTask{
-    Running:   true,
-    Tag:       tag,
-    Message:   "正在拉取...",
-    StartedAt: time.Now().Format("2006-01-02 15:04:05"),
-  }
-}
-
-func updateImagePull(msg string) {
-  imagePullStatus.mu.Lock()
-  defer imagePullStatus.mu.Unlock()
-  if imagePullStatus.status.Running {
-    imagePullStatus.status.Message = msg
-  }
-}
-
-func finishImagePull() {
-  imagePullStatus.mu.Lock()
-  defer imagePullStatus.mu.Unlock()
-  imagePullStatus.status.Running = false
-  imagePullStatus.status.Message = "拉取完成"
-  imagePullStatus.status.Error = ""
-}
-
-func failImagePull(errMsg string) {
-  imagePullStatus.mu.Lock()
-  defer imagePullStatus.mu.Unlock()
-  imagePullStatus.status.Running = false
-  imagePullStatus.status.Error = errMsg
-  imagePullStatus.status.Message = "拉取失败: " + errMsg
-}
-
-func getImagePullStatus() ImagePullTask {
-  imagePullStatus.mu.Lock()
-  defer imagePullStatus.mu.Unlock()
-  return imagePullStatus.status
-}
 
 // ============================================================
 // 批量任务队列（支持排队）
@@ -127,6 +70,8 @@ func enqueueTask(taskType string, users []string, fn func(username string) error
     return "", fmt.Errorf("没有可操作的用户")
   }
 
+  logger.DebugProcess("enqueue_task", "type", taskType, "total", len(users), "filtered", len(filtered))
+
   taskQueue.mu.Lock()
 
   if atomic.LoadInt32(&taskQueue.active) == 1 {
@@ -137,6 +82,7 @@ func enqueueTask(taskType string, users []string, fn func(username string) error
     })
     taskID := fmt.Sprintf("%s-%d", taskType, time.Now().Unix())
     slog.Info("批量任务已排队", "task_id", taskID, "total", len(filtered))
+    logger.DebugProcess("task_queued", "task_id", taskID, "type", taskType, "pending_count", len(taskQueue.pending))
     taskQueue.mu.Unlock()
     return taskID, nil
   }
@@ -165,6 +111,7 @@ func enqueueTask(taskType string, users []string, fn func(username string) error
   }()
 
   slog.Info("批量任务已提交", "task_id", taskID, "total", len(filtered))
+  logger.DebugProcess("task_submitted", "task_id", taskID, "type", taskType, "total", len(filtered))
   return taskID, nil
 }
 
@@ -176,12 +123,15 @@ func processQueue(fn func(username string) error) {
       break
     }
 
+    logger.DebugProcess("task_execute", "username", item.Username)
     taskErr := item.Fn(item.Username)
     if taskErr != nil {
       atomic.AddInt32(&taskQueue.failed, 1)
       slog.Error("任务执行失败", "username", item.Username, "error", taskErr)
+      logger.DebugProcess("task_failed", "username", item.Username, "error", taskErr.Error())
     } else {
       atomic.AddInt32(&taskQueue.done, 1)
+      logger.DebugProcess("task_succeeded", "username", item.Username)
     }
 
     done := atomic.LoadInt32(&taskQueue.done)
@@ -215,6 +165,7 @@ func processQueue(fn func(username string) error) {
     taskQueue.status.Message = fmt.Sprintf("完成：%d 成功，%d 失败", done, failed)
     taskQueue.status.Pending = len(taskQueue.pending)
   }
+  logger.DebugProcess("task_batch_complete", "done", atomic.LoadInt32(&taskQueue.done), "failed", atomic.LoadInt32(&taskQueue.failed))
 
   if len(taskQueue.pending) > 0 {
     next := taskQueue.pending[0]
@@ -235,6 +186,7 @@ func processQueue(fn func(username string) error) {
     }
     taskQueue.mu.Unlock()
 
+    logger.DebugProcess("process_next_queued_task", "task_id", taskQueue.status.ID, "type", next.taskType, "total", len(next.users))
     go processQueue(next.fn)
     go func() {
       for _, u := range next.users {

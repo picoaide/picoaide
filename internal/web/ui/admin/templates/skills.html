@@ -156,19 +156,30 @@
           <input type="text" id="wizard-url" placeholder="https://github.com/org/repo.git">
         </div>
         <div class="grid-2">
+        <div class="field">
+          <label>引用类型</label>
+          <select id="wizard-ref-type">
+            <option value="branch">分支</option>
+            <option value="tag">Tag</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>引用值</label>
+          <input type="text" id="wizard-ref" placeholder="main / v1.2.3">
+        </div>
+        <div id="wizard-auth-fields" class="hidden" style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--border)">
+          <p class="text-sm text-muted" style="margin-bottom:.5rem">该仓库需要鉴权，请输入访问凭证：</p>
           <div class="field">
-            <label>引用类型</label>
-            <select id="wizard-ref-type">
-              <option value="branch">分支</option>
-              <option value="tag">Tag</option>
-            </select>
+            <label>用户名</label>
+            <input type="text" id="wizard-auth-user" placeholder="GitHub 用户名或 token 名称">
           </div>
           <div class="field">
-            <label>引用值</label>
-            <input type="text" id="wizard-ref" placeholder="main / v1.2.3">
+            <label>密码 / Token</label>
+            <input type="password" id="wizard-auth-pass" placeholder="Personal Access Token 或密码">
           </div>
         </div>
-        <div id="wizard-error" class="msg msg-err hidden" style="margin-top:.5rem"></div>
+      </div>
+      <div id="wizard-error" class="msg msg-err hidden" style="margin-top:.5rem"></div>
       </div>
       <div id="wizard-step-2" class="hidden">
         <p class="text-muted text-sm" style="margin-bottom:1rem">克隆仓库并扫描技能...</p>

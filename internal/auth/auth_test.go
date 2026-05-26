@@ -9,6 +9,16 @@ import (
   "golang.org/x/crypto/bcrypt"
 )
 
+func TestMain(m *testing.M) {
+  old := passwordHashParams
+  passwordHashParams.memory = 64 * 1024
+  passwordHashParams.time = 1
+  passwordHashParams.threads = 1
+  code := m.Run()
+  passwordHashParams = old
+  os.Exit(code)
+}
+
 func testInitDB(t *testing.T) {
   t.Helper()
   tmpDir := t.TempDir()
@@ -153,44 +163,8 @@ func TestChangePassword(t *testing.T) {
   }
 }
 
-func TestAllocateNextIP(t *testing.T) {
-  testInitDB(t)
-
-  ip1, err := AllocateNextIP()
-  if err != nil {
-    t.Fatalf("AllocateNextIP: %v", err)
-  }
-  if ip1 != "100.64.0.2" {
-    t.Errorf("first IP = %q, want %q", ip1, "100.64.0.2")
-  }
-
-  // 插入一条容器记录占用 IP
-  UpsertContainer(&ContainerRecord{
-    Username: "user1",
-    Image:    "test:latest",
-    Status:   "stopped",
-    IP:       ip1,
-  })
-
-  ip2, err := AllocateNextIP()
-  if err != nil {
-    t.Fatalf("AllocateNextIP 2: %v", err)
-  }
-  if ip2 != "100.64.0.3" {
-    t.Errorf("second IP = %q, want %q", ip2, "100.64.0.3")
-  }
-}
-
 func TestMCPToken(t *testing.T) {
   testInitDB(t)
-
-  // 先创建容器记录
-  UpsertContainer(&ContainerRecord{
-    Username: "mcpuser",
-    Image:    "test:latest",
-    Status:   "stopped",
-    IP:       "100.64.0.10",
-  })
 
   token, err := GenerateMCPToken("mcpuser")
   if err != nil {
@@ -561,7 +535,7 @@ func TestDeleteUser_DBError(t *testing.T) {
 
 func TestDeleteAllRegularUsers_DBError(t *testing.T) {
   ResetDB()
-  _, err := DeleteAllRegularUsers()
+  _, _, err := DeleteAllRegularUsers()
   if err == nil {
     t.Error("should error when DB not initialized")
   }
@@ -570,94 +544,6 @@ func TestDeleteAllRegularUsers_DBError(t *testing.T) {
 func TestClearAllGroups_DBError(t *testing.T) {
   ResetDB()
   err := ClearAllGroups()
-  if err == nil {
-    t.Error("should error when DB not initialized")
-  }
-}
-
-func TestClearAllContainers_DBError(t *testing.T) {
-  ResetDB()
-  _, err := ClearAllContainers()
-  if err == nil {
-    t.Error("should error when DB not initialized")
-  }
-}
-
-func TestUpsertContainer_DBError(t *testing.T) {
-  ResetDB()
-  err := UpsertContainer(&ContainerRecord{Username: "u1", Image: "img"})
-  if err == nil {
-    t.Error("should error when DB not initialized")
-  }
-}
-
-func TestGetContainerByUsername_DBError(t *testing.T) {
-  ResetDB()
-  _, err := GetContainerByUsername("u1")
-  if err == nil {
-    t.Error("should error when DB not initialized")
-  }
-}
-
-func TestGetAllContainers_DBError(t *testing.T) {
-  ResetDB()
-  _, err := GetAllContainers()
-  if err == nil {
-    t.Error("should error when DB not initialized")
-  }
-}
-
-func TestDeleteContainer_DBError(t *testing.T) {
-  ResetDB()
-  err := DeleteContainer("u1")
-  if err == nil {
-    t.Error("should error when DB not initialized")
-  }
-}
-
-func TestUpdateContainerStatus_DBError(t *testing.T) {
-  ResetDB()
-  err := UpdateContainerStatus("u1", "running")
-  if err == nil {
-    t.Error("should error when DB not initialized")
-  }
-}
-
-func TestUpdateContainerID_DBError(t *testing.T) {
-  ResetDB()
-  err := UpdateContainerID("u1", "abc")
-  if err == nil {
-    t.Error("should error when DB not initialized")
-  }
-}
-
-func TestUpdateContainerImage_DBError(t *testing.T) {
-  ResetDB()
-  err := UpdateContainerImage("u1", "img:latest")
-  if err == nil {
-    t.Error("should error when DB not initialized")
-  }
-}
-
-func TestUpsertUserChannelStatus_DBError(t *testing.T) {
-  ResetDB()
-  err := UpsertUserChannelStatus("u1", "web", true, true, false, 1)
-  if err == nil {
-    t.Error("should error when DB not initialized")
-  }
-}
-
-func TestGetUserChannelStatus_DBError(t *testing.T) {
-  ResetDB()
-  _, err := GetUserChannelStatus("u1", "web")
-  if err == nil {
-    t.Error("should error when DB not initialized")
-  }
-}
-
-func TestAllocateNextIP_DBError(t *testing.T) {
-  ResetDB()
-  _, err := AllocateNextIP()
   if err == nil {
     t.Error("should error when DB not initialized")
   }
@@ -1128,7 +1014,7 @@ func TestDeleteAllRegularUsers_SessionError(t *testing.T) {
   CreateUser("sa", "pass", "superadmin")
   CreateUser("reg", "pass", "user")
 
-  count, err := DeleteAllRegularUsers()
+  _, count, err := DeleteAllRegularUsers()
   if err != nil {
     t.Fatalf("DeleteAllRegularUsers: %v", err)
   }
@@ -1316,7 +1202,7 @@ func TestDeleteAllRegularUsers_NoRegularUsers(t *testing.T) {
   testInitDB(t)
   CreateUser("sa", "pass", "superadmin")
 
-  count, err := DeleteAllRegularUsers()
+  _, count, err := DeleteAllRegularUsers()
   if err != nil {
     t.Fatalf("DeleteAllRegularUsers: %v", err)
   }
@@ -1389,17 +1275,6 @@ func TestSharedFolderMembers_PublicGroupIntersection(t *testing.T) {
   }
   if len(members) != 1 || members[0] != "u1" {
     t.Errorf("members = %v, want [u1]", members)
-  }
-}
-
-func TestClearAllContainers_Empty(t *testing.T) {
-  testInitDB(t)
-  count, err := ClearAllContainers()
-  if err != nil {
-    t.Fatalf("ClearAllContainers: %v", err)
-  }
-  if count != 0 {
-    t.Errorf("count = %d, want 0", count)
   }
 }
 

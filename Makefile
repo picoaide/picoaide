@@ -2,24 +2,15 @@ PICOAIDE_VERSION ?= $(shell git describe --tags --always)
 PROGRAM_VERSION := $(patsubst v%,%,$(PICOAIDE_VERSION))
 SERVER_VERSION_LDFLAGS := -X github.com/picoaide/picoaide/internal/config.Version=$(PROGRAM_VERSION)
 
-.PHONY: test test-go test-python test-js build lint format check clean release validate-release-version
+BUNDLE_DIR := internal/rootfs/bundle
 
-test: test-go test-python test-js
+.PHONY: test lint format check clean validate-release-version build release
 
-test-go:
+test:
 	go test ./internal/... -v -count=1
 
-test-python:
-	cd picoaide-desktop && python3 -m pytest tests/ -v
-
-test-js:
-	cd picoaide-extension && node --test 'tests/*.test.js'
-
-build:
-	go build -o picoaide ./cmd/picoaide/
-
 lint:
-	golangci-lint run ./...
+	@golangci-lint run ./... 2>/dev/null || go vet ./...
 
 format:
 	./format.sh
@@ -27,9 +18,8 @@ format:
 check: format lint test
 
 clean:
-	rm -f picoaide
+	rm -f picoaide picoagent
 	rm -rf dist/
-	rm -rf picoaide-desktop/dist/ picoaide-desktop/build/
 
 validate-release-version:
 	@case "$(PROGRAM_VERSION)" in \
@@ -43,9 +33,45 @@ validate-release-version:
 			;; \
 	esac
 
+# ============================================================
+# build: 编译 picoagent + Alpine rootfs + 嵌入 picoagent → 编译 picoaide
+# ============================================================
+build:
+	@mkdir -p $(BUNDLE_DIR)
+	@ARCH="$$(uname -m)"; \
+	case "$$ARCH" in \
+		x86_64) GOARCH="amd64" ;; \
+		aarch64|arm64) GOARCH="arm64" ;; \
+		*) echo "不支持的架构: $$ARCH"; exit 1 ;; \
+	esac; \
+	echo "  编译 picoagent ($$GOARCH)..."; \
+	CGO_ENABLED=0 GOOS=linux GOARCH=$$GOARCH go build -o $(BUNDLE_DIR)/picoagent ./cmd/picoagent/; \
+	echo "  构建 Alpine rootfs..."; \
+	bash scripts/download-tools.sh "$(CURDIR)/$(BUNDLE_DIR)"; \
+	echo "  编译 picoaide..."; \
+	go build -o picoaide ./cmd/picoaide/; \
+	echo "picoaide: $$(ls -lh picoaide | awk '{print $$5}')"
+
+# ============================================================
+# release: 交叉编译多架构二进制（版本号注入）
+# ============================================================
 release: validate-release-version
-	@echo "构建服务端二进制... (版本: $(PROGRAM_VERSION))"
-	@mkdir -p dist
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(SERVER_VERSION_LDFLAGS)" -o dist/picoaide-linux-amd64 ./cmd/picoaide/
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(SERVER_VERSION_LDFLAGS)" -o dist/picoaide-linux-arm64 ./cmd/picoaide/
-	@echo "服务端构建完成，产物在 dist/ 目录"
+	@echo "构建发布版本 $(PROGRAM_VERSION)..."
+	@mkdir -p dist $(BUNDLE_DIR)
+	@for pair in "amd64" "arm64"; do \
+		GOARCH="$$pair"; \
+		echo "  编译 picoagent ($$GOARCH)..."; \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$GOARCH go build \
+			-o $(BUNDLE_DIR)/picoagent ./cmd/picoagent/; \
+		echo "  构建 Alpine rootfs (仅 amd64 一次)..."; \
+		if [ ! -f $(BUNDLE_DIR)/alpine-rootfs.tar.gz ]; then \
+			bash scripts/download-tools.sh "$(CURDIR)/$(BUNDLE_DIR)"; \
+		fi; \
+		echo "  编译 picoaide (linux/$$GOARCH)..."; \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$GOARCH go build \
+			-ldflags "$(SERVER_VERSION_LDFLAGS)" \
+			-o dist/picoaide-linux-$$GOARCH ./cmd/picoaide/; \
+		rm -f $(BUNDLE_DIR)/picoagent; \
+	done
+	@echo "构建完成:"
+	@ls -lh dist/

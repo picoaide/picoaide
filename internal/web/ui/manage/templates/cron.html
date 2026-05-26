@@ -1,0 +1,59 @@
+<section class="page-header">
+  <div>
+    <div class="page-kicker">个人工作区</div>
+    <h2>定时任务</h2>
+    <p>查看和管理你的 AI 定时任务。任务到时间后会自动执行预设的提示词，并将结果通过所有已开启的通讯渠道通知你。</p>
+  </div>
+</section>
+<div id="cron-msg" class="msg"></div>
+
+<div class="card" id="cron-list-card">
+  <div class="card-header">
+    任务列表
+    <button class="btn btn-sm btn-primary" id="cron-create-btn">+ 新建任务</button>
+  </div>
+  <div class="table-wrap">
+    <table id="cron-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>提示词</th>
+          <th>调度</th>
+          <th>下次执行</th>
+          <th>上次执行</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="cron-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="cron-modal" class="modal-overlay" style="display:none">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span id="cron-modal-title">新建定时任务</span>
+      <button class="modal-close-btn" id="cron-modal-close">&times;</button>
+    </div>
+    <div class="modal-body" id="cron-modal-body">
+      <div class="field">
+        <label>提示词 <span class="text-muted">（定时执行时 AI 执行的内容）</span></label>
+        <textarea id="cron-prompt-input" rows="3" placeholder="例：提醒我喝水"></textarea>
+      </div>
+      <div class="field">
+        <label>调度表达式 <span class="text-muted">（支持 cron/every/at 三种格式）</span></label>
+        <input type="text" id="cron-schedule-input" placeholder="cron 0 8 * * *">
+        <p class="text-sm text-muted" style="margin-top:4px">
+          <code>cron 分 时 日 月 周</code> — 标准 cron 表达式，如 <code>cron 0 8 * * *</code> 每天早8点<br>
+          <code>every 毫秒数</code> — 间隔执行，如 <code>every 86400000</code> 每24小时<br>
+          <code>at unix毫秒时间戳</code> — 一次性执行
+        </p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline btn-sm" id="cron-modal-cancel">取消</button>
+      <button class="btn btn-primary btn-sm" id="cron-modal-ok">保存</button>
+    </div>
+  </div>
+</div>

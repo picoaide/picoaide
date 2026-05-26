@@ -5,48 +5,6 @@ import (
   "time"
 )
 
-func TestImageConfigIsTencent(t *testing.T) {
-  tests := []struct {
-    registry string
-    want     bool
-  }{
-    {"github", false},
-    {"tencent", true},
-    {"", false},
-    {"other", false},
-  }
-  for _, tt := range tests {
-    cfg := ImageConfig{Registry: tt.registry}
-    if got := cfg.IsTencent(); got != tt.want {
-      t.Errorf("ImageConfig{Registry:%q}.IsTencent() = %v, want %v", tt.registry, got, tt.want)
-    }
-  }
-}
-
-func TestImageConfigRepoName(t *testing.T) {
-  cfg := ImageConfig{}
-  if got := cfg.RepoName(); got != "picoaide/picoaide" {
-    t.Errorf("RepoName() = %q, want %q", got, "picoaide/picoaide")
-  }
-}
-
-func TestImageConfigPullRef(t *testing.T) {
-  tests := []struct {
-    registry string
-    tag      string
-    want     string
-  }{
-    {"github", "v1.0", "ghcr.io/picoaide/picoaide:v1.0"},
-    {"tencent", "v1.0", "hkccr.ccs.tencentyun.com/picoaide/picoaide:v1.0"},
-  }
-  for _, tt := range tests {
-    cfg := ImageConfig{Registry: tt.registry}
-    if got := cfg.PullRef(tt.tag); got != tt.want {
-      t.Errorf("PullRef(%q) = %q, want %q", tt.tag, got, tt.want)
-    }
-  }
-}
-
 func TestDefaultGlobalConfigToKV(t *testing.T) {
   cfg := DefaultGlobalConfig()
   kv, err := configToKV(cfg)
@@ -58,12 +16,6 @@ func TestDefaultGlobalConfigToKV(t *testing.T) {
   }
   if _, ok := kv["web.password"]; ok {
     t.Fatal("web.password should not be stored in global config")
-  }
-  if kv["image.registry"] != "github" {
-    t.Fatalf("image.registry = %q", kv["image.registry"])
-  }
-  if kv["picoclaw"] == "" {
-    t.Fatal("picoclaw default should be stored as JSON")
   }
   if kv["security"] == "" {
     t.Fatal("security default should be stored as JSON")

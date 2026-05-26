@@ -5,6 +5,7 @@ import (
   "fmt"
   "log/slog"
   "net/http"
+  "net/url"
   "os"
   "path/filepath"
   "strings"
@@ -42,7 +43,7 @@ func (s *Server) handleAdminSkillsSources(c *gin.Context) {
   }
 
   var sources []SourceInfo
-  for _, sw := range s.cfg.Skills.Sources {
+  for _, sw := range s.loadConfig().Skills.Sources {
     skills, _ := skill.ListSourceSkills(sw.Name)
     info := SourceInfo{
       Name:       sw.Name,
@@ -56,7 +57,7 @@ func (s *Server) handleAdminSkillsSources(c *gin.Context) {
       info.LastRefresh = sw.Reg.LastRefresh
     }
     if sw.Git != nil {
-      info.URL = sw.Git.URL
+      info.URL = stripGitURLCredentials(sw.Git.URL)
       info.Ref = sw.Git.Ref
       info.RefType = sw.Git.RefType
       info.LastPull = sw.Git.LastPull
@@ -91,6 +92,8 @@ func (s *Server) handleAdminSkillsSourcesGitAdd(c *gin.Context) {
   repoURL := strings.TrimSpace(c.PostForm("url"))
   ref := strings.TrimSpace(c.PostForm("ref"))
   refType := strings.TrimSpace(c.PostForm("ref_type"))
+  username := strings.TrimSpace(c.PostForm("username"))
+  password := c.PostForm("password") // 不 TrimSpace——密码可能有空格
 
   if name == "" || repoURL == "" {
     writeError(c, http.StatusBadRequest, "名称和 URL 不能为空")
@@ -109,8 +112,16 @@ func (s *Server) handleAdminSkillsSourcesGitAdd(c *gin.Context) {
 
   os.MkdirAll(skill.SkillsRootDir(), 0755)
 
-  if err := skill.CloneGitSource(name, repoURL, ref, refType); err != nil {
-    writeError(c, http.StatusInternalServerError, "Git clone 失败: "+err.Error())
+  if err := skill.CloneGitSource(name, repoURL, ref, refType, username, password); err != nil {
+    if skill.IsAuthError(err) {
+      writeJSON(c, http.StatusUnauthorized, map[string]interface{}{
+        "success":    false,
+        "error":      "Git clone 失败: " + err.Error(),
+        "needs_auth": true,
+      })
+    } else {
+      writeError(c, http.StatusInternalServerError, "Git clone 失败: "+err.Error())
+    }
     return
   }
 
@@ -121,24 +132,38 @@ func (s *Server) handleAdminSkillsSourcesGitAdd(c *gin.Context) {
     return
   }
 
-  gitSource := &config.GitSource{
-    Name:    name,
-    URL:     repoURL,
-    Ref:     ref,
-    RefType: refType,
-    Enabled: true,
+  creds := []config.SkillRepoCredential{}
+  if username != "" && password != "" {
+    creds = append(creds, config.SkillRepoCredential{
+      Name:     "default",
+      Provider: "http",
+      Mode:     "https",
+      Username: username,
+      Secret:   password,
+    })
   }
-  s.cfg.Skills.Sources = append(s.cfg.Skills.Sources, config.SkillsSourceWrapper{
-    Type: "git",
-    Name: name,
-    Git:  gitSource,
+
+  gitSource := &config.GitSource{
+    Name:        name,
+    URL:         repoURL,
+    Ref:         ref,
+    RefType:     refType,
+    Credentials: creds,
+    Enabled:     true,
+  }
+  s.updateSkills(func(sc config.SkillsConfig) config.SkillsConfig {
+    sc.Sources = append(sc.Sources, config.SkillsSourceWrapper{
+      Type: "git",
+      Name: name,
+      Git:  gitSource,
+    })
+    return sc
   })
-  s.saveSkillsConfig()
 
   writeJSON(c, http.StatusOK, map[string]interface{}{
-    "success":  true,
-    "message":  fmt.Sprintf("Git 源 %s 已添加，发现 %d 个技能：%s", name, len(found), strings.Join(found, "、")),
-    "skills":   found,
+    "success": true,
+    "message": fmt.Sprintf("Git 源 %s 已添加，发现 %d 个技能：%s", name, len(found), strings.Join(found, "、")),
+    "skills":  found,
   })
 }
 
@@ -178,7 +203,7 @@ func (s *Server) handleAdminSkillsSourcesRemove(c *gin.Context) {
     auth.DeleteSkill(sk.Name)
     users, _ := auth.GetUsersForSkill(sk.Name)
     for _, username := range users {
-      targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", sk.Name)
+      targetDir := filepath.Join(user.UserDir(s.loadConfig(), username), "skills", sk.Name)
       os.RemoveAll(targetDir)
     }
   }
@@ -188,14 +213,16 @@ func (s *Server) handleAdminSkillsSourcesRemove(c *gin.Context) {
   os.RemoveAll(sourceDir)
 
   // 删配置
-  var filtered []config.SkillsSourceWrapper
-  for _, sw := range s.cfg.Skills.Sources {
-    if sw.Name != name {
-      filtered = append(filtered, sw)
+  s.updateSkills(func(sc config.SkillsConfig) config.SkillsConfig {
+    var filtered []config.SkillsSourceWrapper
+    for _, sw := range sc.Sources {
+      if sw.Name != name {
+        filtered = append(filtered, sw)
+      }
     }
-  }
-  s.cfg.Skills.Sources = filtered
-  s.saveSkillsConfig()
+    sc.Sources = filtered
+    return sc
+  })
 
   writeSuccess(c, fmt.Sprintf("源 %s 已删除，已清理 %d 个关联技能", name, len(skills)))
 }
@@ -221,7 +248,7 @@ func (s *Server) handleAdminSkillsSourcesPull(c *gin.Context) {
   }
 
   var gs *config.GitSource
-  for _, sw := range s.cfg.Skills.Sources {
+  for _, sw := range s.loadConfig().Skills.Sources {
     if sw.Name == name && sw.Git != nil {
       gs = sw.Git
       break
@@ -232,26 +259,36 @@ func (s *Server) handleAdminSkillsSourcesPull(c *gin.Context) {
     return
   }
 
-  result, err := skill.PullGitSource(name, gs.Ref, gs.RefType)
-  if err != nil {
-    writeError(c, http.StatusInternalServerError, "拉取失败: "+err.Error())
-    return
-  }
-
-  // 对更新和新增的技能，重新部署到已绑用户
-  needsDeploy := append(result.Added, result.Updated...)
-  for _, skillName := range needsDeploy {
-    users, _ := auth.GetUsersForSkill(skillName)
-    for _, username := range users {
-      if err := s.deploySkillToUser(skillName, username); err != nil {
-        slog.Warn("自动重部署失败", "skill", skillName, "username", username, "error", err)
-      }
+  // 从配置中读取已存储的鉴权信息
+  pullUser, pullPass := "", ""
+  for _, cred := range gs.Credentials {
+    if cred.Name == "default" {
+      pullUser = cred.Username
+      pullPass = cred.Secret
+      break
     }
   }
 
+  result, err := skill.PullGitSource(name, gs.Ref, gs.RefType, pullUser, pullPass)
+  if err != nil {
+    if skill.IsAuthError(err) {
+      writeJSON(c, http.StatusUnauthorized, map[string]interface{}{
+        "success":    false,
+        "error":      "拉取失败: " + err.Error() + "。请在技能源页面删除后重新添加并填写鉴权信息。",
+        "needs_auth": true,
+      })
+    } else {
+      writeError(c, http.StatusInternalServerError, "拉取失败: "+err.Error())
+    }
+    return
+  }
+
+  // 源更新后无需重新部署，沙箱运行时自动从源只读挂载
   // 更新 LastPull
-  s.cfg.Skills.Sources = updateSourceLastPull(s.cfg.Skills.Sources, name)
-  s.saveSkillsConfig()
+  s.updateSkills(func(sc config.SkillsConfig) config.SkillsConfig {
+    sc.Sources = updateSourceLastPull(sc.Sources, name)
+    return sc
+  })
 
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success": true,
@@ -282,7 +319,7 @@ func (s *Server) handleAdminSkillsSourcesRefresh(c *gin.Context) {
   }
 
   var rs *config.RegistrySource
-  for _, sw := range s.cfg.Skills.Sources {
+  for _, sw := range s.loadConfig().Skills.Sources {
     if sw.Name == name && sw.Reg != nil {
       rs = sw.Reg
       break
@@ -300,8 +337,10 @@ func (s *Server) handleAdminSkillsSourcesRefresh(c *gin.Context) {
   }
 
   // 更新 LastRefresh
-  s.cfg.Skills.Sources = updateSourceLastRefresh(s.cfg.Skills.Sources, name)
-  s.saveSkillsConfig()
+  s.updateSkills(func(sc config.SkillsConfig) config.SkillsConfig {
+    sc.Sources = updateSourceLastRefresh(sc.Sources, name)
+    return sc
+  })
 
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success": true,
@@ -332,7 +371,7 @@ func (s *Server) handleAdminSkillsRegistryInstall(c *gin.Context) {
   }
 
   var rs *config.RegistrySource
-  for _, sw := range s.cfg.Skills.Sources {
+  for _, sw := range s.loadConfig().Skills.Sources {
     if sw.Name == sourceName && sw.Reg != nil {
       rs = sw.Reg
       break
@@ -378,7 +417,7 @@ func (s *Server) handleAdminSkillsRegistryList(c *gin.Context) {
   }
 
   var rs *config.RegistrySource
-  for _, sw := range s.cfg.Skills.Sources {
+  for _, sw := range s.loadConfig().Skills.Sources {
     if sw.Name == sourceName && sw.Reg != nil {
       rs = sw.Reg
       break
@@ -447,8 +486,22 @@ func timeNow() string {
 // 辅助函数
 // ============================================================
 
+// stripGitURLCredentials 移除 Git URL 中的认证信息（用户名和密码/Token）
+func stripGitURLCredentials(rawURL string) string {
+  u, err := url.Parse(rawURL)
+  if err != nil {
+    return rawURL
+  }
+  if u.User != nil {
+    u.User = nil
+    return u.String()
+  }
+  return rawURL
+}
+
 func (s *Server) saveSkillsConfig() {
-  skillsJSON, err := json.Marshal(s.cfg.Skills)
+  // 取出当前 Skills 配置并序列化保存到数据库
+  skillsJSON, err := json.Marshal(s.loadConfig().Skills)
   if err != nil {
     slog.Error("序列化技能配置失败", "error", err)
     return
@@ -461,4 +514,15 @@ func (s *Server) saveSkillsConfig() {
   if _, err := engine.Exec("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('skills', ?, datetime('now','localtime'))", string(skillsJSON)); err != nil {
     slog.Error("保存技能配置失败", "error", err)
   }
+}
+
+// updateSkills 原子地修改 Skills 配置并持久化到数据库
+func (s *Server) updateSkills(fn func(config.SkillsConfig) config.SkillsConfig) {
+  s.configMu.Lock()
+  defer s.configMu.Unlock()
+  prevCfg := s.loadConfig()
+  newCfg := *prevCfg
+  newCfg.Skills = fn(prevCfg.Skills)
+  s.cfg.Store(&newCfg)
+  s.saveSkillsConfig()
 }

@@ -1,39 +1,36 @@
 <section class="page-header">
   <div>
     <div class="page-kicker">平台配置</div>
-    <h2>证书配置</h2>
-    <p>管理 HTTPS 加密访问和 SSL 证书。</p>
+    <h2>HTTPS 证书</h2>
+    <p>上传 TLS 证书后 PicoAide 将同时监听 :443（HTTPS），外部 :80 自动 301 跳转至 HTTPS。</p>
+    <p class="text-sm text-muted" style="margin-top:4px">沙箱内部网桥 (100.64.0.1:80) 始终通过 HTTP 提供服务，不受证书配置影响。</p>
   </div>
 </section>
 <div id="tls-msg" class="msg"></div>
 
-<div class="card">
+<div class="card" id="tls-status-card">
   <div class="card-header">当前状态</div>
-  <div id="tls-status">
-    <div class="text-sm text-muted">加载中...</div>
+  <div class="grid-2" id="tls-status-fields">
+    <div class="field"><label>状态</label><span id="tls-enabled-label" class="text-muted">检查中...</span></div>
+    <div class="field"><label>证书域名</label><span id="tls-subject" class="text-muted">-</span></div>
+    <div class="field"><label>颁发者</label><span id="tls-issuer" class="text-muted">-</span></div>
+    <div class="field"><label>有效期至</label><span id="tls-not-after" class="text-muted">-</span></div>
   </div>
 </div>
 
-<div class="card">
-  <div class="card-header">HTTPS 开关</div>
+<div class="card" id="tls-upload-card">
+  <div class="card-header">上传证书</div>
+  <p class="text-sm text-muted">上传 PEM 格式的证书文件和私钥文件。证书和私钥将直接存入数据库配置表，不会写入文件系统。</p>
   <div class="field">
-    <label>启用 HTTPS</label>
-    <select id="tls-enabled">
-      <option value="false">关闭</option>
-      <option value="true">开启</option>
-    </select>
+    <label>证书 (PEM)</label>
+    <textarea id="cert-pem-input" rows="6" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="font-family:monospace;font-size:13px"></textarea>
   </div>
-</div>
-
-<div class="card" id="cert-upload-card" style="display:none">
-  <div class="card-header">证书文件</div>
-  <div id="current-cert-info" class="text-sm text-muted mb-1"></div>
-  <div class="field"><label>证书文件 (PEM)</label><input type="file" id="cert-file" accept=".pem,.crt,.cert"></div>
-  <div class="field"><label>私钥文件 (PEM)</label><input type="file" id="key-file" accept=".pem,.key"></div>
-  <p class="text-sm text-muted">上传后将校验证书域名与当前浏览器访问的域名是否一致。保存后服务将自动重启。</p>
-</div>
-
-<div class="btn-group mt-2" style="justify-content:flex-end">
-  <button class="btn btn-ghost" id="reset-btn">重置</button>
-  <button class="btn btn-primary" id="save-btn">保存配置</button>
+  <div class="field">
+    <label>私钥 (PEM)</label>
+    <textarea id="key-pem-input" rows="6" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" style="font-family:monospace;font-size:13px"></textarea>
+  </div>
+  <div class="btn-group mt-2" style="justify-content:flex-end">
+    <button class="btn btn-ghost" id="tls-clear-btn" style="color:var(--red)">清除证书</button>
+    <button class="btn btn-primary" id="tls-upload-btn">上传并启用</button>
+  </div>
 </div>

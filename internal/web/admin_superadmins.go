@@ -164,3 +164,44 @@ func (s *Server) handleAdminSuperadminReset(c *gin.Context) {
   }{true, "密码已重置", password})
   logger.Audit("password.reset", "username", username, "operator", s.getSessionUser(c))
 }
+
+// handleAdminChangePassword 超管修改自己的密码
+func (s *Server) handleAdminChangePassword(c *gin.Context) {
+  username := s.requireSuperadmin(c)
+  if username == "" {
+    return
+  }
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
+    return
+  }
+
+  oldPassword := c.PostForm("old_password")
+  newPassword := c.PostForm("new_password")
+  if oldPassword == "" || newPassword == "" {
+    writeError(c, http.StatusBadRequest, "请输入旧密码和新密码")
+    return
+  }
+  if len(newPassword) < 6 {
+    writeError(c, http.StatusBadRequest, "新密码至少 6 个字符")
+    return
+  }
+
+  ok, _, err := auth.AuthenticateLocal(username, oldPassword)
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "验证密码失败")
+    return
+  }
+  if !ok {
+    writeError(c, http.StatusUnauthorized, "旧密码错误")
+    return
+  }
+
+  if err := auth.ChangePassword(username, newPassword); err != nil {
+    writeError(c, http.StatusInternalServerError, "修改密码失败: "+err.Error())
+    return
+  }
+
+  writeSuccess(c, "密码修改成功")
+  logger.Audit("password.change", "username", username)
+}

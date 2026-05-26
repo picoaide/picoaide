@@ -1,31 +1,77 @@
 // PicoAide Helper — Browser MCP 工具执行
-// 通过 WebSocket 接收 Go Relay 的工具命令，用 Chrome Extension API 执行
+// 通过 WebSocket 接收 Go Relay 的工具命令，用 Chrome Debugger API 后台执行
 
 // ─── 配置常量 ─────────────────────────────────────────────────────────────────
 const CONFIG = {
   connectionTimeout: 5000,
   connectTimeout: 15000,
   retryDelays: [0, 100, 200, 400, 800],
+  keepaliveInterval: 20000,
+  reconnectBaseDelay: 1000,
+  reconnectMaxDelay: 30000,
+  reconnectMaxAttempts: 50,
+  debuggerVersion: '1.3',
 };
 
 // ─── 全局状态 ─────────────────────────────────────────────────────────────────
 
-let currentTabId = null;            // 当前控制的标签页 ID
-let groupId = null;                 // Chrome 标签组 ID
-const groupTabIds = new Set();      // 标签组成员集合
-let active = false;                 // 连接是否激活
+let currentTabId = null;
+let groupId = null;
+const groupTabIds = new Set();
+let active = false;
+let debuggerAttached = false;
 
-// Service Worker 可能被终止重启，从 session storage 恢复 currentTabId
-chrome.storage.session.get('currentTabId').then(r => {
-  if (r.currentTabId) currentTabId = r.currentTabId;
-}).catch(() => {});
+// 连接状态：'connected' | 'reconnecting' | 'disconnected'
+let connectionState = 'disconnected';
+
+// 自动重连状态（持久化到 session storage 以跨越 SW 重启）
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+let reconnectUrl = null;
+let reconnectServerBase = null;
+let wsReplacing = false; // 正在替换旧 WS（connectWebSocket 中），屏蔽旧 WS 的 close 事件
+let wsGraceUntil = 0;    // 新 WS 连上后的宽限期（毫秒时间戳），期内忽略 close 事件
+
+// 重连状态恢复
+let reconnectStateReady = false;
+let savedMcpToken = ''; // 持久化的 MCP token，重连时复用避免 session cookie 依赖
+const reconnectStatePromise = new Promise(resolve => {
+  chrome.storage.session.get(['currentTabId', 'reconnectServerBase', 'reconnectUrl', 'reconnectAttempt', 'mcpToken']).then(r => {
+    if (r.currentTabId) currentTabId = r.currentTabId;
+    if (r.reconnectServerBase) reconnectServerBase = r.reconnectServerBase;
+    if (r.reconnectUrl) reconnectUrl = r.reconnectUrl;
+    if (r.reconnectAttempt) reconnectAttempt = r.reconnectAttempt;
+    if (r.mcpToken) savedMcpToken = r.mcpToken;
+    reconnectStateReady = true;
+    resolve();
+  }).catch(() => { reconnectStateReady = true; resolve(); });
+});
+
+reconnectStatePromise.then(async () => {
+  await restorePromise; // 等 restoreState 确认 offscreen 是否还活着
+  if (!active && reconnectServerBase && currentTabId) {
+    connectionState = 'reconnecting';
+    scheduleReconnect();
+  }
+});
 
 function setCurrentTabId(tabId) {
   currentTabId = tabId;
   chrome.storage.session.set({ currentTabId: tabId }).catch(() => {});
 }
 
-// ─── 常量 ─────────────────────────────────────────────────────────────────────
+function saveReconnectState() {
+  chrome.storage.session.set({
+    reconnectServerBase: reconnectServerBase || '',
+    reconnectUrl: reconnectUrl || '',
+    reconnectAttempt: reconnectAttempt,
+    mcpToken: savedMcpToken || '',
+  }).catch(() => {});
+}
+
+function clearReconnectState() {
+  chrome.storage.session.remove(['reconnectServerBase', 'reconnectUrl', 'reconnectAttempt', 'mcpToken']).catch(() => {});
+}
 
 const GROUP_TITLE = 'PicoAide';
 const GROUP_COLOR = 'green';
@@ -36,11 +82,9 @@ const NON_DEBUGGABLE_SCHEMES = ['chrome:', 'edge:', 'devtools:'];
 async function ensureOffscreenDocument() {
   const existingContexts = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [chrome.runtime.getURL('offscreen.html')]
+    documentUrls: [chrome.runtime.getURL('offscreen.html')],
   });
-  if (existingContexts.length > 0) {
-    return;
-  }
+  if (existingContexts.length > 0) return;
   await chrome.offscreen.createDocument({
     url: 'offscreen.html',
     reasons: ['WEB_RTC'],
@@ -75,18 +119,95 @@ function waitForTabComplete(tabId, timeoutMs = CONFIG.connectTimeout) {
   });
 }
 
-// 在标签页中执行 content script
-async function executeContentScript(tabId, func, ...args) {
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func,
-    args,
-  });
-  if (results[0]?.error) {
-    throw new Error(results[0].error.message || 'Content script error');
+// 检查标签页是否存在
+async function ensureTabExists() {
+  if (!currentTabId) throw new Error('没有活动的标签页');
+  try {
+    await chrome.tabs.get(currentTabId);
+  } catch {
+    setCurrentTabId(null);
+    throw new Error('标签页已关闭');
   }
-  return results[0]?.result;
 }
+
+// 确保 Debugger 已附加（导航后可能断开，自动重连）
+async function ensureDebugger() {
+  if (!currentTabId) throw new Error('没有活动的标签页');
+  if (debuggerAttached) return;
+  await attachDebugger(currentTabId);
+}
+
+// 通过 Debugger Runtime.evaluate 在标签页中执行 JS（不激活标签页）
+async function evaluateInTab(fnOrExpr, ...args) {
+  await ensureTabExists();
+  await ensureDebugger();
+
+  const isFn = typeof fnOrExpr === 'function';
+  const expression = isFn
+    ? `(${fnOrExpr.toString()}).apply(null, ${JSON.stringify(args)})`
+    : fnOrExpr;
+
+  const result = await chrome.debugger.sendCommand(
+    { tabId: currentTabId },
+    'Runtime.evaluate',
+    { expression, returnByValue: true, awaitPromise: true },
+  );
+
+  if (result.exceptionDetails) {
+    const msg = result.exceptionDetails.text
+      || result.exceptionDetails.exception?.description
+      || '执行错误';
+    throw new Error(msg.replace(/^Uncaught\s/, ''));
+  }
+  return result.result.value;
+}
+
+// ─── Debugger 生命周期 ────────────────────────────────────────────────────────
+
+function attachDebugger(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.attach({ tabId }, CONFIG.debuggerVersion, () => {
+      if (chrome.runtime.lastError) {
+        const msg = chrome.runtime.lastError.message;
+        // 如果 debugger 已被其他上下文附加（如 Chrome DevTools），先 detach 再重试
+        if (msg.includes('already attached')) {
+          chrome.debugger.detach({ tabId }, () => {
+            chrome.debugger.attach({ tabId }, CONFIG.debuggerVersion, () => {
+              if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
+              }
+              debuggerAttached = true;
+              resolve();
+            });
+          });
+        } else {
+          reject(new Error(msg));
+        }
+        return;
+      }
+      debuggerAttached = true;
+      resolve();
+    });
+  });
+}
+
+function detachDebugger(tabId) {
+  return new Promise(resolve => {
+    if (!debuggerAttached) { resolve(); return; }
+    chrome.debugger.detach({ tabId }, () => {
+      debuggerAttached = false;
+      resolve();
+    });
+  });
+}
+
+// Debugger 被 Chrome 主动断开（如标签页关闭/导航到新页面）
+chrome.debugger.onDetach.addListener((source) => {
+  if (source.tabId === currentTabId) {
+    debuggerAttached = false;
+  }
+});
 
 // ─── 标签组管理 ───────────────────────────────────────────────────────────────
 
@@ -103,7 +224,7 @@ async function addTabToGroup(tabId) {
     });
     groupTabIds.add(tabId);
   } catch (e) {
-    console.error('[PicoAide] 加入标签组失败:', e);
+    console.error('[PicoAide] 标签组失败:', e);
   }
 }
 
@@ -141,23 +262,158 @@ async function cleanupStaleGroups() {
 // ─── 徽章管理 ─────────────────────────────────────────────────────────────────
 
 function updateBadgeConnected() {
+  connectionState = 'connected';
   chrome.action.setBadgeText({ text: 'ON' });
   chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
 }
 
-function updateBadgeOff() {
-  chrome.action.setBadgeText({ text: '' });
-  // 清除特定标签页的徽章覆盖（updateTabBadge 设置的）
-  if (currentTabId) {
-    chrome.action.setBadgeText({ tabId: currentTabId, text: '' }).catch(() => {});
-  }
+function updateBadgeReconnecting(attempt) {
+  connectionState = 'reconnecting';
+  chrome.action.setBadgeText({ text: attempt > 0 ? String(attempt) : 'R' });
+  chrome.action.setBadgeBackgroundColor({ color: '#FF9800' });
 }
 
-async function updateTabBadge(tabId) {
+function updateBadgeOff() {
+  connectionState = 'disconnected';
+  chrome.action.setBadgeText({ text: '' });
+}
+
+// ─── 自动重连 ─────────────────────────────────────────────────────────────────
+
+function stopReconnect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  reconnectAttempt = 0;
+  clearReconnectState();
+}
+
+async function scheduleReconnect() {
+  // 如果内存中还没有重连信息，尝试从 storage 恢复（SW 重启时可能落后于消息）
+  if (!reconnectServerBase) {
+    await reconnectStatePromise;
+  }
+  if (!reconnectServerBase) return; // 确实没有重连信息
+
+  reconnectAttempt++;
+  saveReconnectState();
+  updateBadgeReconnecting(reconnectAttempt);
+  if (reconnectAttempt > CONFIG.reconnectMaxAttempts) {
+    console.log('[PicoAide] 重连次数已达上限，停止重试');
+    await fullDisconnect();
+    return;
+  }
+
+  // 指数退避 + 随机抖动
+  const delay = Math.min(
+    CONFIG.reconnectBaseDelay * Math.pow(2, reconnectAttempt - 1),
+    CONFIG.reconnectMaxDelay,
+  ) + Math.random() * 1000;
+
+  console.log(`[PicoAide] 将在 ${Math.round(delay)}ms 后自动重连 (第 ${reconnectAttempt} 次)`);
+
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    try {
+      await tryReconnect();
+    } catch (e) {
+      console.log('[PicoAide] 重连失败:', e.message);
+      scheduleReconnect();
+    }
+  }, delay);
+}
+
+async function tryReconnect() {
+  if (!reconnectServerBase || !currentTabId) return;
+
+  console.log('[PicoAide] 尝试重连...');
+
+  // 检查标签页是否还在
   try {
-    await chrome.action.setBadgeText({ tabId, text: 'ON' });
-    await chrome.action.setBadgeBackgroundColor({ tabId, color: '#4CAF50' });
-  } catch {}
+    const tab = await chrome.tabs.get(currentTabId);
+    console.log('[PicoAide] 标签页存在:', tab.id, tab.url);
+  } catch (e) {
+    console.log('[PicoAide] 标签页已关闭，停止重连');
+    await fullDisconnect();
+    return;
+  }
+
+  // 重新附加 Debugger。如果 F12 开发者工具打开会导致附加失败，
+  // 但不影响 WebSocket 连接和自动重连，仅影响后续工具调用。
+  try {
+    await attachDebugger(currentTabId);
+    debuggerAttached = true;
+    console.log('[PicoAide] Debugger 已附加');
+  } catch (e) {
+    console.error('[PicoAide] 附加 Debugger 失败(不影响重连):', e.message);
+    debuggerAttached = false;
+  }
+
+  // 获取最新 MCP token（syncUser 可能重置了 token）
+  let mcpToken = '';
+  try {
+    const resp = await fetch(reconnectServerBase + '/api/mcp/token', { credentials: 'include' });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.success) mcpToken = data.token;
+    }
+  } catch (e) {
+    console.error('[PicoAide] 刷新 token 失败:', e.message);
+  }
+  if (!mcpToken) mcpToken = savedMcpToken; // fallback
+  if (!mcpToken) throw new Error('无可用 token');
+  savedMcpToken = mcpToken;
+  saveReconnectState();
+
+  const wsUrl = reconnectServerBase.replace(/^http/, 'ws') + '/api/browser/ws?token=' + encodeURIComponent(mcpToken);
+
+  // 确保 offscreen document 存在
+  await ensureOffscreenDocument();
+
+  let wsHandler;
+  const openPromise = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      if (wsHandler) chrome.runtime.onMessage.removeListener(wsHandler);
+      reject(new Error('重连超时'));
+    }, CONFIG.connectionTimeout);
+
+    wsHandler = function handler(msg) {
+      if (msg.type === 'offscreen-open') {
+        clearTimeout(timeout);
+        if (wsHandler) chrome.runtime.onMessage.removeListener(wsHandler);
+        console.log('[PicoAide] WebSocket 重连成功');
+        resolve();
+      } else if (msg.type === 'offscreen-error') {
+        clearTimeout(timeout);
+        if (wsHandler) chrome.runtime.onMessage.removeListener(wsHandler);
+        console.error('[PicoAide] WebSocket 重连错误:', msg.error);
+        reject(new Error(msg.error || 'WebSocket 重连失败'));
+      }
+    };
+    chrome.runtime.onMessage.addListener(wsHandler);
+  });
+
+  try {
+    wsReplacing = true;
+    wsGraceUntil = Infinity; // 连接期间屏蔽所有旧 WS 的延迟 close 事件
+    console.log('[PicoAide] 发送 offscreen-connect');
+    sendToOffscreen('offscreen-connect', { url: wsUrl });
+    await openPromise;
+  } finally {
+    wsReplacing = false;
+    wsGraceUntil = 0; // 连接完成，后续 close 视为真实断开
+    if (wsHandler) {
+      chrome.runtime.onMessage.removeListener(wsHandler);
+      wsHandler = null;
+    }
+  }
+
+  reconnectAttempt = 0;
+  saveReconnectState();
+  active = true;
+  console.log('[PicoAide] 自动重连成功');
+  updateBadgeConnected();
 }
 
 // ─── 工具处理器 ───────────────────────────────────────────────────────────────
@@ -188,122 +444,95 @@ async function handleToolCommand(msg) {
   const handler = TOOL_HANDLERS[msg.tool];
   if (!handler) {
     sendToOffscreen('offscreen-send', {
-      data: JSON.stringify({ id: msg.id, error: { message: '未知工具: ' + msg.tool } })
+      data: JSON.stringify({ id: msg.id, error: { message: '未知工具: ' + msg.tool } }),
     });
     return;
   }
   try {
     const result = await handler(msg.params || {});
     sendToOffscreen('offscreen-send', {
-      data: JSON.stringify({ id: msg.id, result })
+      data: JSON.stringify({ id: msg.id, result }),
     });
   } catch (e) {
     sendToOffscreen('offscreen-send', {
-      data: JSON.stringify({ id: msg.id, error: { message: e.message || String(e) } })
+      data: JSON.stringify({ id: msg.id, error: { message: e.message || String(e) } }),
     });
   }
 }
 
+// navigate — Page.navigate 后台导航，不激活标签页
 async function handleNavigate(params) {
-  if (!currentTabId) throw new Error('没有活动的标签页');
-  await chrome.tabs.update(currentTabId, { url: params.url });
+  await ensureTabExists();
+  await ensureDebugger();
+  await chrome.debugger.sendCommand({ tabId: currentTabId }, 'Page.navigate', { url: params.url });
   return await waitForTabComplete(currentTabId);
 }
 
+// screenshot — Page.captureScreenshot 后台截图，不激活标签页
 async function handleScreenshot() {
-  if (!currentTabId) throw new Error('没有活动的标签页');
-  const tab = await chrome.tabs.get(currentTabId);
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-  const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
-  return {
-    content: [{ type: 'image', data: base64, mimeType: 'image/png' }]
-  };
+  await ensureTabExists();
+  await ensureDebugger();
+  const result = await chrome.debugger.sendCommand({ tabId: currentTabId }, 'Page.captureScreenshot', { format: 'png' });
+  return { content: [{ type: 'image', data: result.data, mimeType: 'image/png' }] };
 }
 
+// click — Runtime.evaluate
 async function handleClick(params) {
-  if (!currentTabId) throw new Error('没有活动的标签页');
-  return await executeContentScript(currentTabId,
-    (selector) => {
-      const el = document.querySelector(selector);
-      if (!el) throw new Error('找不到元素: ' + selector);
-      el.scrollIntoView({ block: 'center', behavior: 'instant' });
-      el.click();
-      return { success: true };
-    },
-    params.selector
-  );
+  return await evaluateInTab((selector) => {
+    const el = document.querySelector(selector);
+    if (!el) throw new Error('找不到元素: ' + selector);
+    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    el.click();
+    return { success: true };
+  }, params.selector);
 }
 
+// type — Runtime.evaluate 后台输入
 async function handleType(params) {
-  if (!currentTabId) throw new Error('没有活动的标签页');
-  return await executeContentScript(currentTabId,
-    (selector, text) => {
-      const el = document.querySelector(selector);
-      if (!el) throw new Error('找不到元素: ' + selector);
-      el.focus();
-      el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-      // 选中输入框内已有文字
-      if (el.setSelectionRange) {
-        el.setSelectionRange(0, (el.value || '').length);
-      }
-      // 尝试用 execCommand 模拟键盘输入
-      const ok = document.execCommand('insertText', false, text);
-      // execCommand 失败时回退到原生 setter + 事件
-      if (!ok || !el.value) {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype, 'value'
-        ).set;
-        setter.call(el, text);
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      return { success: true };
-    },
-    params.selector, params.text
-  );
+  return await evaluateInTab((selector, text) => {
+    const el = document.querySelector(selector);
+    if (!el) throw new Error('找不到元素: ' + selector);
+    el.focus();
+    el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+    if (el.setSelectionRange) {
+      el.setSelectionRange(0, (el.value || '').length);
+    }
+    const ok = document.execCommand('insertText', false, text);
+    if (!ok || !el.value) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(el, text);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    return { success: true };
+  }, params.selector, params.text);
 }
 
+// get_content — Runtime.evaluate
 async function handleGetContent(params) {
-  if (!currentTabId) throw new Error('没有活动的标签页');
   const selector = params.selector || 'body';
-  return await executeContentScript(currentTabId,
-    (sel) => {
-      const el = document.querySelector(sel);
-      if (!el) return { content: '' };
-      // input/textarea 用 value，其他元素用 innerText
-      if (typeof el.value === 'string') return { content: el.value };
-      return { content: el.innerText };
-    },
-    selector
-  );
+  return await evaluateInTab((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return { content: '' };
+    if (typeof el.value === 'string') return { content: el.value };
+    return { content: el.innerText };
+  }, selector);
 }
 
+// execute — Runtime.evaluate
 async function handleExecute(params) {
-  if (!currentTabId) throw new Error('没有活动的标签页');
-  const results = await chrome.scripting.executeScript({
-    target: { tabId: currentTabId },
-    world: 'MAIN',
-    func: (code) => {
-      try { return eval(code); }
-      catch (e) { return { error: e.message }; }
-    },
-    args: [params.script],
-  });
-  return { result: results[0]?.result };
+  const result = await evaluateInTab('(function(){ try { return ' + params.script + ' } catch(e) { return {error: e.message} } })()');
+  return { result };
 }
 
+// 纯 tabs API，无需 debugger（不激活标签页）
 async function handleTabsList() {
   const tabs = await chrome.tabs.query({});
   return {
     tabs: tabs.map(t => ({
-      id: t.id,
-      url: t.url,
-      title: t.title,
-      active: t.active,
-      current: t.id === currentTabId,
-      windowId: t.windowId,
-      index: t.index,
-    }))
+      id: t.id, url: t.url, title: t.title, active: t.active,
+      current: t.id === currentTabId, windowId: t.windowId, index: t.index,
+    })),
   };
 }
 
@@ -321,41 +550,42 @@ async function handleTabClose(params) {
 }
 
 async function handleGoBack() {
-  if (!currentTabId) throw new Error('没有活动的标签页');
-  return await executeContentScript(currentTabId,
-    () => { history.back(); return { success: true }; }
-  );
+  await ensureTabExists();
+  await ensureDebugger();
+  await chrome.debugger.sendCommand({ tabId: currentTabId }, 'Page.navigateToHistoryEntry', {
+    entryId: (await chrome.debugger.sendCommand({ tabId: currentTabId }, 'Page.getNavigationHistory')).currentIndex - 1,
+  });
+  return await waitForTabComplete(currentTabId);
 }
 
 async function handleGoForward() {
-  if (!currentTabId) throw new Error('没有活动的标签页');
-  return await executeContentScript(currentTabId,
-    () => { history.forward(); return { success: true }; }
-  );
+  await ensureTabExists();
+  await ensureDebugger();
+  const history = await chrome.debugger.sendCommand({ tabId: currentTabId }, 'Page.getNavigationHistory');
+  const entries = history.entries || [];
+  const nextIdx = history.currentIndex + 1;
+  if (nextIdx >= entries.length) throw new Error('没有前进页面');
+  await chrome.debugger.sendCommand({ tabId: currentTabId }, 'Page.navigateToHistoryEntry', { entryId: nextIdx });
+  return await waitForTabComplete(currentTabId);
 }
 
+// reload — Page.reload 后台刷新
 async function handleReload(params) {
-  if (!currentTabId) throw new Error('没有活动的标签页');
-  await chrome.tabs.reload(currentTabId, { bypassCache: !!params.bypassCache });
+  await ensureTabExists();
+  await ensureDebugger();
+  await chrome.debugger.sendCommand({ tabId: currentTabId }, 'Page.reload', { ignoreCache: !!params.bypassCache });
   return await waitForTabComplete(currentTabId);
 }
 
 async function handleCurrentTab() {
-  if (!currentTabId) throw new Error('没有活动的标签页');
+  await ensureTabExists();
   const tab = await chrome.tabs.get(currentTabId);
   return {
-    tab: {
-      id: tab.id,
-      url: tab.url,
-      title: tab.title,
-      active: tab.active,
-      windowId: tab.windowId,
-      index: tab.index,
-      status: tab.status,
-    }
+    tab: { id: tab.id, url: tab.url, title: tab.title, active: tab.active, windowId: tab.windowId, index: tab.index, status: tab.status },
   };
 }
 
+// tab_select — 显式切换标签页（预期行为：跳转到该标签页）
 async function handleTabSelect(params) {
   const tabId = Number(params.tabId);
   if (!Number.isInteger(tabId)) throw new Error('tabId 必须是整数');
@@ -366,142 +596,103 @@ async function handleTabSelect(params) {
   }
   setCurrentTabId(tabId);
   addTabToGroup(tabId).catch(() => {});
-  updateTabBadge(tabId).catch(() => {});
   return { success: true, tabId };
 }
 
+// scroll — Runtime.evaluate
 async function handleScroll(params) {
-  if (!currentTabId) throw new Error('没有活动的标签页');
-  return await executeContentScript(currentTabId,
-    (selector, x, y) => {
-      const dx = Number(x) || 0;
-      const dy = Number(y) || 0;
-      if (selector) {
-        const el = document.querySelector(selector);
-        if (!el) throw new Error('找不到元素: ' + selector);
-        el.scrollBy({ left: dx, top: dy, behavior: 'instant' });
-        return { success: true, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop };
-      }
-      window.scrollBy({ left: dx, top: dy, behavior: 'instant' });
-      return { success: true, scrollX: window.scrollX, scrollY: window.scrollY };
-    },
-    params.selector || '', params.x || 0, params.y || 0
-  );
-}
-
-async function handleKeyPress(params) {
-  if (!currentTabId) throw new Error('没有活动的标签页');
-  if (!params.key) throw new Error('key 不能为空');
-  return await executeContentScript(currentTabId,
-    (selector, key, modifiers) => {
-      const target = selector ? document.querySelector(selector) : (document.activeElement || document.body);
-      if (!target) throw new Error(selector ? '找不到元素: ' + selector : '找不到可接收按键的元素');
-      if (target.focus) target.focus();
-
-      const eventInit = {
-        key,
-        code: key.length === 1 ? 'Key' + key.toUpperCase() : key,
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        ...modifiers,
-      };
-      const down = new KeyboardEvent('keydown', eventInit);
-      const press = new KeyboardEvent('keypress', eventInit);
-      const up = new KeyboardEvent('keyup', eventInit);
-      target.dispatchEvent(down);
-      target.dispatchEvent(press);
-      target.dispatchEvent(up);
-
-      if (key === 'Enter') {
-        if (target.tagName === 'FORM') target.requestSubmit?.();
-        else target.closest?.('form')?.requestSubmit?.();
-      }
-      return { success: true };
-    },
-    params.selector || '', params.key, {
-      ctrlKey: !!params.ctrlKey,
-      shiftKey: !!params.shiftKey,
-      altKey: !!params.altKey,
-      metaKey: !!params.metaKey,
-    }
-  );
-}
-
-async function handleGetAttribute(params) {
-  if (!currentTabId) throw new Error('没有活动的标签页');
-  return await executeContentScript(currentTabId,
-    (selector, name) => {
+  return await evaluateInTab((selector, x, y) => {
+    const dx = Number(x) || 0;
+    const dy = Number(y) || 0;
+    if (selector) {
       const el = document.querySelector(selector);
       if (!el) throw new Error('找不到元素: ' + selector);
-      const attrValue = el.getAttribute(name);
-      const propValue = el[name];
-      const propType = typeof propValue;
-      const serializablePropValue = propValue == null || ['string', 'number', 'boolean'].includes(propType)
-        ? propValue
-        : String(propValue);
-      return {
-        name,
-        value: attrValue !== null ? attrValue : serializablePropValue,
-        attributeValue: attrValue,
-        propertyValue: serializablePropValue,
-        propertyType: propType,
-      };
-    },
-    params.selector, params.name
-  );
+      el.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+      return { success: true, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop };
+    }
+    window.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+    return { success: true, scrollX: window.scrollX, scrollY: window.scrollY };
+  }, params.selector || '', params.x || 0, params.y || 0);
 }
 
+// key_press — Runtime.evaluate
+async function handleKeyPress(params) {
+  if (!params.key) throw new Error('key 不能为空');
+  return await evaluateInTab((selector, key, modifiers) => {
+    const target = selector ? document.querySelector(selector) : (document.activeElement || document.body);
+    if (!target) throw new Error(selector ? '找不到元素: ' + selector : '找不到可接收按键的元素');
+    if (target.focus) target.focus();
+    const eventInit = {
+      key, code: key.length === 1 ? 'Key' + key.toUpperCase() : key,
+      bubbles: true, cancelable: true, composed: true, ...modifiers,
+    };
+    target.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+    target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
+    target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+    if (key === 'Enter') {
+      if (target.tagName === 'FORM') target.requestSubmit?.();
+      else target.closest?.('form')?.requestSubmit?.();
+    }
+    return { success: true };
+  }, params.selector || '', params.key, {
+    ctrlKey: !!params.ctrlKey, shiftKey: !!params.shiftKey,
+    altKey: !!params.altKey, metaKey: !!params.metaKey,
+  });
+}
+
+// get_attribute — Runtime.evaluate
+async function handleGetAttribute(params) {
+  return await evaluateInTab((selector, name) => {
+    const el = document.querySelector(selector);
+    if (!el) throw new Error('找不到元素: ' + selector);
+    const attrValue = el.getAttribute(name);
+    const propValue = el[name];
+    const propType = typeof propValue;
+    const serializablePropValue = propValue == null || ['string', 'number', 'boolean'].includes(propType)
+      ? propValue : String(propValue);
+    return {
+      name, value: attrValue !== null ? attrValue : serializablePropValue,
+      attributeValue: attrValue, propertyValue: serializablePropValue, propertyType: propType,
+    };
+  }, params.selector, params.name);
+}
+
+// get_links — Runtime.evaluate
 async function handleGetLinks(params) {
-  if (!currentTabId) throw new Error('没有活动的标签页');
   const limit = params.limit || 100;
-  return await executeContentScript(currentTabId,
-    (selector, maxLinks) => {
-      const root = selector ? document.querySelector(selector) : document;
-      if (!root) throw new Error('找不到元素: ' + selector);
-      const links = Array.from(root.querySelectorAll('a[href]'))
-        .slice(0, Math.max(0, Number(maxLinks) || 100))
-        .map(a => ({
-          text: (a.innerText || a.textContent || '').trim(),
-          href: a.href,
-          title: a.title || '',
-          target: a.target || '',
-        }));
-      return { links };
-    },
-    params.selector || '', limit
-  );
+  return await evaluateInTab((selector, maxLinks) => {
+    const root = selector ? document.querySelector(selector) : document;
+    if (!root) throw new Error('找不到元素: ' + selector);
+    const links = Array.from(root.querySelectorAll('a[href]'))
+      .slice(0, Math.max(0, Number(maxLinks) || 100))
+      .map(a => ({ text: (a.innerText || a.textContent || '').trim(), href: a.href, title: a.title || '', target: a.target || '' }));
+    return { links };
+  }, params.selector || '', limit);
 }
 
+// wait — Runtime.evaluate 用 Promise + MutationObserver（awaitPromise: true）
 async function handleWait(params) {
-  if (!currentTabId) throw new Error('没有活动的标签页');
   const timeout = params.timeout || 10000;
-  return await executeContentScript(currentTabId,
-    (selector, timeoutMs) => {
-      return new Promise((resolve, reject) => {
-        const el = document.querySelector(selector);
-        if (el) { resolve({ found: true }); return; }
-        const root = document.body || document.documentElement;
-        if (!root) {
-          reject(new Error('页面尚未准备好'));
-          return;
-        }
-        const observer = new MutationObserver(() => {
-          if (document.querySelector(selector)) {
-            observer.disconnect();
-            clearTimeout(timer);
-            resolve({ found: true });
-          }
-        });
-        observer.observe(root, { childList: true, subtree: true });
-        const timer = setTimeout(() => {
+  return await evaluateInTab((selector, timeoutMs) => {
+    return new Promise((resolve, reject) => {
+      const el = document.querySelector(selector);
+      if (el) { resolve({ found: true }); return; }
+      const root = document.body || document.documentElement;
+      if (!root) { reject(new Error('页面尚未准备好')); return; }
+      const observer = new MutationObserver(() => {
+        if (document.querySelector(selector)) {
           observer.disconnect();
-          reject(new Error('等待超时: ' + selector));
-        }, timeoutMs);
+          clearTimeout(timer);
+          resolve({ found: true });
+        }
       });
-    },
-    params.selector, timeout
-  );
+      observer.observe(root, { childList: true, subtree: true });
+      const timer = setTimeout(() => {
+        observer.disconnect();
+        reject(new Error('等待超时: ' + selector));
+      }, timeoutMs);
+    });
+  }, params.selector, timeout);
 }
 
 // ─── Offscreen 消息处理 ──────────────────────────────────────────────────────
@@ -511,11 +702,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'offscreen-message') {
     let message;
     try { message = JSON.parse(msg.data); } catch { return false; }
-
-    // 工具命令：Go Relay → Extension
     if (message.id !== undefined && message.tool) {
       handleToolCommand(message);
-      return false;
     }
     return false;
   }
@@ -526,8 +714,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === 'offscreen-close') {
-    console.log('[PicoAide] WebSocket 关闭, code=' + msg.code);
-    if (active) cdpDisable();
+    console.log('[PicoAide] WebSocket 关闭, code=' + msg.code + ', clean=' + msg.wasClean);
+    // 宽限期内忽略 close（新 WS 连上后旧 WS 的延迟事件）
+    if (Date.now() < wsGraceUntil) {
+      return false;
+    }
+    // 任何关闭都自动重连（fullDisconnect 会清 reconnectServerBase 阻止重连）
+    scheduleReconnect();
     return false;
   }
 
@@ -536,8 +729,51 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return false;
   }
 
+  // popup 消息
+  if (msg.action === 'cdpStatus' || msg.action === 'cdpToggle' || msg.action === 'cdpForceCleanup') {
+    handlePopupMessage(msg, sendResponse);
+    return true;
+  }
+
   return false;
 });
+
+// ─── popup 消息处理 ────────────────────────────────────────────────────────────
+
+async function handlePopupMessage(msg, sendResponse) {
+  switch (msg.action) {
+    case 'cdpStatus':
+      {
+        await reconnectStatePromise;
+        if (!restorePromiseDone) await restorePromise;
+        let state = connectionState;
+        if (!active && reconnectServerBase) {
+          state = 'reconnecting';
+        }
+        sendResponse({ active, connectionState: state, connectedTabIds: currentTabId ? [currentTabId] : [], tabCount: currentTabId ? 1 : 0 });
+      }
+      break;
+
+    case 'cdpToggle':
+      if (active) {
+        await fullDisconnect();
+        sendResponse({ active: false });
+      } else {
+        try {
+          await cdpEnable();
+          sendResponse({ active: true, error: null });
+        } catch (err) {
+          sendResponse({ active: false, error: err.message });
+        }
+      }
+      break;
+
+    case 'cdpForceCleanup':
+      await fullDisconnect();
+      sendResponse({ done: true });
+      break;
+  }
+}
 
 // ─── 连接生命周期 ─────────────────────────────────────────────────────────────
 
@@ -564,132 +800,108 @@ async function cdpEnable() {
     throw new Error('获取 MCP token 失败: ' + e.message);
   }
 
-  // 断线重连时保留 currentTabId
   if (!currentTabId) {
     setCurrentTabId(tab.id);
   }
 
+  stopReconnect();
+
+  await attachDebugger(currentTabId);
+
   const wsUrl = base.replace(/^http/, 'ws') + '/api/browser/ws?token=' + encodeURIComponent(mcpToken);
+
+  // 保存连接信息和 MCP token 用于自动重连
+  reconnectServerBase = base;
+  reconnectUrl = wsUrl;
+  reconnectAttempt = 0;
+  savedMcpToken = mcpToken;
+  saveReconnectState();
 
   await ensureOffscreenDocument();
 
-  // 等待 WebSocket 连接建立
+  let wsHandler;
   const openPromise = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      chrome.runtime.onMessage.removeListener(handler);
+      if (wsHandler) chrome.runtime.onMessage.removeListener(wsHandler);
       reject(new Error('连接超时(5s)'));
     }, CONFIG.connectionTimeout);
 
-    function handler(msg) {
+    wsHandler = function handler(msg) {
       if (msg.type === 'offscreen-open') {
         clearTimeout(timeout);
-        chrome.runtime.onMessage.removeListener(handler);
+        if (wsHandler) chrome.runtime.onMessage.removeListener(wsHandler);
         resolve();
       } else if (msg.type === 'offscreen-error') {
         clearTimeout(timeout);
-        chrome.runtime.onMessage.removeListener(handler);
+        if (wsHandler) chrome.runtime.onMessage.removeListener(wsHandler);
         reject(new Error(msg.error || 'WebSocket 连接失败'));
       }
-    }
-    chrome.runtime.onMessage.addListener(handler);
+    };
+    chrome.runtime.onMessage.addListener(wsHandler);
   });
-  sendToOffscreen('offscreen-connect', { url: wsUrl });
-  await openPromise;
+  try {
+    wsReplacing = true;
+    wsGraceUntil = Infinity;
+    sendToOffscreen('offscreen-connect', { url: wsUrl });
+    await openPromise;
+  } finally {
+    wsReplacing = false;
+    wsGraceUntil = 0;
+    if (wsHandler) {
+      chrome.runtime.onMessage.removeListener(wsHandler);
+      wsHandler = null;
+    }
+  }
 
   active = true;
+  updateBadgeConnected();
 
   await cleanupStaleGroups();
   addTabToGroup(currentTabId).catch(() => {});
-  updateTabBadge(currentTabId).catch(() => {});
-
-  updateBadgeConnected();
 }
 
-async function cdpDisable() {
-  if (!active) return;
+// 用户主动断开 — 完整清理，不重连
+async function fullDisconnect() {
+  stopReconnect();
   active = false;
+  reconnectServerBase = null; // 清内存状态，阻止 scheduleReconnect 启动
+  reconnectUrl = null;
+  savedMcpToken = '';
+  await detachDebugger(currentTabId);
   sendToOffscreen('offscreen-disconnect', {});
   await ungroupAll();
   updateBadgeOff();
 }
 
-// ─── popup.js 消息处理 ────────────────────────────────────────────────────────
-
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.action === 'cdpStatus') {
-    if (_restoreDone) {
-      sendResponse({
-        active,
-        connectedTabIds: currentTabId ? [currentTabId] : [],
-        tabCount: currentTabId ? 1 : 0,
-      });
-      return false;
-    }
-    // 等待状态恢复完成
-    _restoreP.then(() => {
-      sendResponse({
-        active,
-        connectedTabIds: currentTabId ? [currentTabId] : [],
-        tabCount: currentTabId ? 1 : 0,
-      });
-    });
-    return true;
-  }
-
-  if (msg.action === 'cdpToggle') {
-    if (active) {
-      cdpDisable().then(() => sendResponse({ active: false }));
-    } else {
-      cdpEnable().then(
-        () => sendResponse({ active: true, error: null }),
-        (err) => sendResponse({ active: false, error: err.message })
-      );
-    }
-    return true;
-  }
-
-  if (msg.action === 'cdpForceCleanup') {
-    cdpDisable().then(() => sendResponse({ done: true }));
-    return true;
-  }
-
-  return false;
-});
-
 // ─── Service Worker 存活保持 ────────────────────────────────────────────────────
 
-// offscreen 通过 chrome.runtime.connect 建立长连接端口，保持 Service Worker 存活
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'sw-keepalive') {
-    // 端口存在期间 Service Worker 不会被杀
     port.onDisconnect.addListener(() => {});
   }
 });
 
 // ─── Service Worker 启动时恢复状态 ──────────────────────────────────────────────
 
-// 恢复状态 Promise，cdpStatus 等待它完成后再响应
-let _restoreDone = false;
-let _restoreResolve;
-const _restoreP = new Promise(r => { _restoreResolve = r; });
+let restorePromiseDone = false;
+let restoreResolve;
+const restorePromise = new Promise(r => { restoreResolve = r; });
 
 async function restoreState() {
   try {
-    // 检查 offscreen document 是否存在
     const contexts = await chrome.runtime.getContexts({
       contextTypes: ['OFFSCREEN_DOCUMENT'],
-      documentUrls: [chrome.runtime.getURL('offscreen.html')]
+      documentUrls: [chrome.runtime.getURL('offscreen.html')],
     });
     if (contexts.length === 0) return;
 
-    // 检查 WebSocket 是否仍连接
     const resp = await chrome.runtime.sendMessage({ type: 'offscreen-status' });
     if (resp && resp.connected) {
       active = true;
+      connectionState = 'connected';
       updateBadgeConnected();
       if (currentTabId) {
         addTabToGroup(currentTabId).catch(() => {});
-        updateTabBadge(currentTabId).catch(() => {});
       }
     }
   } catch {}
@@ -698,6 +910,6 @@ async function restoreState() {
 (async () => {
   await restoreState();
   if (!active) cleanupStaleGroups().catch(() => {});
-  _restoreDone = true;
-  _restoreResolve();
+  restorePromiseDone = true;
+  restoreResolve();
 })();

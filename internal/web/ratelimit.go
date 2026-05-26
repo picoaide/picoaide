@@ -19,6 +19,8 @@ type rateLimiter struct {
   attempts map[string][]time.Time
   limit    int
   window   time.Duration
+  done     chan struct{}
+  stopped  bool
 }
 
 func newRateLimiter(limit int, window time.Duration) *rateLimiter {
@@ -26,9 +28,19 @@ func newRateLimiter(limit int, window time.Duration) *rateLimiter {
     attempts: make(map[string][]time.Time),
     limit:    limit,
     window:   window,
+    done:     make(chan struct{}),
   }
   go rl.cleanup()
   return rl
+}
+
+func (rl *rateLimiter) Stop() {
+  rl.mu.Lock()
+  defer rl.mu.Unlock()
+  if !rl.stopped {
+    rl.stopped = true
+    close(rl.done)
+  }
 }
 
 func newLoginRateLimiter() *rateLimiter {
@@ -38,23 +50,28 @@ func newLoginRateLimiter() *rateLimiter {
 func (rl *rateLimiter) cleanup() {
   ticker := time.NewTicker(time.Minute)
   defer ticker.Stop()
-  for range ticker.C {
-    rl.mu.Lock()
-    now := time.Now()
-    for ip, times := range rl.attempts {
-      var valid []time.Time
-      for _, t := range times {
-        if now.Sub(t) < rl.window {
-          valid = append(valid, t)
+  for {
+    select {
+    case <-rl.done:
+      return
+    case <-ticker.C:
+      rl.mu.Lock()
+      now := time.Now()
+      for ip, times := range rl.attempts {
+        var valid []time.Time
+        for _, t := range times {
+          if now.Sub(t) < rl.window {
+            valid = append(valid, t)
+          }
+        }
+        if len(valid) == 0 {
+          delete(rl.attempts, ip)
+        } else {
+          rl.attempts[ip] = valid
         }
       }
-      if len(valid) == 0 {
-        delete(rl.attempts, ip)
-      } else {
-        rl.attempts[ip] = valid
-      }
+      rl.mu.Unlock()
     }
-    rl.mu.Unlock()
   }
 }
 
@@ -79,29 +96,11 @@ func (rl *rateLimiter) allow(ip string) bool {
 }
 
 func clientIPFromRequest(r *http.Request) string {
-  if ip := r.Header.Get("X-Real-IP"); ip != "" {
-    return ip
-  }
-  if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-    if idx := stringsIndex(ip, ","); idx > 0 {
-      return ip[:idx]
-    }
-    return ip
-  }
   host, _, err := net.SplitHostPort(r.RemoteAddr)
   if err != nil {
     return r.RemoteAddr
   }
   return host
-}
-
-func stringsIndex(s, substr string) int {
-  for i := 0; i <= len(s)-len(substr); i++ {
-    if s[i:i+len(substr)] == substr {
-      return i
-    }
-  }
-  return -1
 }
 
 // rateLimitLogin 返回 Gin 中间件用于登录限流

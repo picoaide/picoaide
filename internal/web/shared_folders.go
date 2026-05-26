@@ -29,13 +29,12 @@ func (s *Server) handleSharedFolders(c *gin.Context) {
     Mounted  bool   `json:"mounted"`
   }
   type userFolderView struct {
-    ID            int              `json:"id"`
-    Name          string           `json:"name"`
-    Description   string           `json:"description"`
-    IsPublic      bool             `json:"is_public"`
-    MemberCount   int              `json:"member_count"`
-    Members       []userMemberView `json:"members"`
-    ContainerPath string           `json:"container_path"`
+    ID          int              `json:"id"`
+    Name        string           `json:"name"`
+    Description string           `json:"description"`
+    IsPublic    bool             `json:"is_public"`
+    MemberCount int              `json:"member_count"`
+    Members     []userMemberView `json:"members"`
   }
 
   result := make([]userFolderView, 0, len(folders))
@@ -50,13 +49,12 @@ func (s *Server) handleSharedFolders(c *gin.Context) {
       })
     }
     result = append(result, userFolderView{
-      ID:            int(f.ID),
-      Name:          f.Name,
-      Description:   f.Description,
-      IsPublic:      f.IsPublic,
-      MemberCount:   len(members),
-      Members:       memberViews,
-      ContainerPath: "workspace/share/" + f.Name + "/",
+      ID:          int(f.ID),
+      Name:        f.Name,
+      Description: f.Description,
+      IsPublic:    f.IsPublic,
+      MemberCount: len(members),
+      Members:     memberViews,
     })
   }
 

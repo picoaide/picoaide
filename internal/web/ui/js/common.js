@@ -30,7 +30,7 @@ function formBody(obj) {
 function esc(s) {
   var d = document.createElement('div');
   d.textContent = String(s);
-  return d.innerHTML;
+  return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 var Api = {
@@ -43,7 +43,7 @@ var Api = {
       }).then(function(r) {
         if (r.status === 412) {
           return r.json().then(function(d) {
-            alertModal('本地无可用镜像，请先到<a href="/admin/images" style="color:#4fc3f7" onclick="navigate(\'images\');return false">镜像管理</a>拉取镜像');
+            alertModal('服务暂不可用，请稍后重试');
             return { success: false, error: 'NO_IMAGE' };
           });
         }

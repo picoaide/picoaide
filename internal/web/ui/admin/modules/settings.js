@@ -3,17 +3,9 @@ var rawConfig = {};
 export async function init(ctx) {
   const { Api, showMsg, $, $$ } = ctx;
   await loadConfig();
-  await loadMigrationRulesInfo();
 
   $('#save-btn').addEventListener('click', saveConfig);
   $('#reset-btn').addEventListener('click', async () => { if (await confirmModal('重新加载？未保存的修改将丢失。')) loadConfig(); });
-  $('#refresh-migration-rules-btn')?.addEventListener('click', refreshMigrationRules);
-  $('#upload-migration-rules-btn')?.addEventListener('click', uploadMigrationRules);
-  $('#migration-rules-file')?.addEventListener('change', function() {
-    var file = this.files && this.files[0];
-    $('#migration-rules-file-name').textContent = file ? file.name : '未选择适配包';
-    $('#upload-migration-rules-btn').disabled = !file;
-  });
 
   async function loadConfig() {
     showMsg('#settings-msg', '加载中...', true);
@@ -38,6 +30,11 @@ export async function init(ctx) {
       var val = deepGet(rawConfig, sel.dataset.path);
       if (val !== undefined && val !== null) sel.value = val;
     });
+    // 调试模式开关
+    var debugMode = deepGet(rawConfig, 'web.debug_mode');
+    if ($('#debug-mode-toggle')) {
+      $('#debug-mode-toggle').checked = debugMode === true;
+    }
   }
 
   async function saveConfig() {
@@ -47,16 +44,6 @@ export async function init(ctx) {
     try {
       var res = await Api.post('/api/config', { config: JSON.stringify(rawConfig) });
       showMsg('#settings-msg', res.message || res.error, res.success);
-    } catch (e) { showMsg('#settings-msg', e.message, false); }
-  }
-
-  async function refreshMigrationRules() {
-    if (!await confirmModal('确定从远端更新 Picoclaw 配置适配包吗？')) return;
-    showMsg('#settings-msg', '正在更新配置适配...', true);
-    try {
-      var res = await Api.post('/api/admin/migration-rules/refresh', {});
-      showMsg('#settings-msg', res.message || res.error, res.success);
-      if (res.success && res.rules) renderMigrationRulesInfo(res.rules);
     } catch (e) { showMsg('#settings-msg', e.message, false); }
   }
 
@@ -86,79 +73,6 @@ export async function init(ctx) {
     }
   }
 
-  async function loadMigrationRulesInfo() {
-    try {
-      var res = await Api.get('/api/admin/migration-rules');
-      if (res.success && res.rules) renderMigrationRulesInfo(res.rules);
-    } catch (e) {
-      var el = $('#migration-rules-info');
-      if (el) el.textContent = '配置适配读取失败: ' + e.message;
-    }
-  }
-
-  async function uploadMigrationRules() {
-    var fileInput = $('#migration-rules-file');
-    var file = fileInput && fileInput.files && fileInput.files[0];
-    if (!file) {
-      showMsg('#settings-msg', '请选择配置适配 zip 包', false);
-      return;
-    }
-    showMsg('#settings-msg', '正在导入配置适配包...', true);
-    try {
-      var csrf = await getCSRF();
-      var form = new FormData();
-      form.append('file', file);
-      form.append('csrf_token', csrf);
-      var base = await getServerUrl();
-      var resp = await fetch(base + '/api/admin/migration-rules/upload', {
-        method: 'POST',
-        credentials: 'include',
-        body: form,
-      });
-      var res = await resp.json();
-      showMsg('#settings-msg', res.message || res.error, !!res.success);
-      if (res.success && res.rules) renderMigrationRulesInfo(res.rules);
-      if (fileInput && res.success) {
-        fileInput.value = '';
-        $('#migration-rules-file-name').textContent = '未选择适配包';
-        $('#upload-migration-rules-btn').disabled = true;
-      }
-    } catch (e) { showMsg('#settings-msg', e.message, false); }
-  }
-
-  function renderMigrationRulesInfo(rules) {
-    var el = $('#migration-rules-info');
-    if (!el || !rules) return;
-    var versions = rules.versions || [];
-    var changed = versions.filter(function(v) { return !!v.config_changed; }).map(function(v) {
-      return v.version + '(' + v.from_config + '->' + v.to_config + ')';
-    });
-    var versionText = versions.map(function(v) {
-      return v.version + ':v' + v.config_version + (v.config_changed ? '*' : '');
-    }).join('，');
-    el.innerHTML =
-      (rules.adapter_version ? 'Adapter ' + ctx.esc(rules.adapter_version) + '，' : '') +
-      (rules.adapter_schema_version ? '规则格式 v' + ctx.esc(rules.adapter_schema_version) + '，' : '') +
-      '当前支持配置版本 v' + ctx.esc(rules.picoaide_supported_config_version) +
-      '，规则声明最高 v' + ctx.esc(rules.latest_supported_config_version) +
-      (rules.updated_at ? '，更新时间 ' + ctx.esc(rules.updated_at) : '') +
-      '<br>版本映射：' + ctx.esc(versionText || '无') +
-      '<br>配置变更：' + ctx.esc(changed.join('，') || '无');
-  }
-
-  $('#apply-all-btn').addEventListener('click', async function() {
-    if (!await confirmModal('确定要下发配置到所有用户并重启其容器吗？')) return;
-    showMsg('#settings-msg', '正在提交下发任务...', true);
-    try {
-      var res = await Api.post('/api/admin/config/apply', {});
-      if (res.task_id) {
-        pollTaskStatus('#settings-msg', res.message);
-      } else {
-        showMsg('#settings-msg', res.message || res.error, res.success);
-      }
-    } catch (e) { showMsg('#settings-msg', e.message, false); }
-  });
-
   function collectFields() {
     $$('input[data-path]').forEach(function(input) {
       deepSet(rawConfig, input.dataset.path, input.value);
@@ -166,11 +80,14 @@ export async function init(ctx) {
     $$('select[data-path]').forEach(function(sel) {
       deepSet(rawConfig, sel.dataset.path, sel.value);
     });
+    // 调试模式开关
+    if ($('#debug-mode-toggle')) {
+      deepSet(rawConfig, 'web.debug_mode', $('#debug-mode-toggle').checked);
+    }
   }
 
   function removeFixedConfigFields() {
     if (rawConfig.web) {
-      delete rawConfig.web.container_base_url;
       delete rawConfig.web.password;
     }
   }
@@ -205,23 +122,4 @@ function deepSet(obj, path, value) {
 
 async function getServerUrl() {
   return window.location.origin.replace(/\/+$/, '');
-}
-
-async function pollTaskStatus(selector, initialMsg) {
-  showMsg(selector, initialMsg + '...', true);
-  var poll = async function() {
-    try {
-      var st = await Api.get('/api/admin/task/status');
-      if (st.running) {
-        var pct = st.total > 0 ? Math.round((st.done + st.failed) / st.total * 100) : 0;
-        showMsg(selector, initialMsg + ' ' + (st.done + st.failed) + '/' + st.total + ' (' + pct + '%)', true);
-        setTimeout(poll, 2000);
-      } else {
-        showMsg(selector, st.message || '完成', st.failed === 0);
-      }
-    } catch (e) {
-      showMsg(selector, '查询进度失败: ' + e.message, false);
-    }
-  };
-  setTimeout(poll, 1500);
 }

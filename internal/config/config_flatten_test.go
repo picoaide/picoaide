@@ -34,11 +34,6 @@ func TestFlattenConfig(t *testing.T) {
 
 func TestFlattenConfigJsonBlobs(t *testing.T) {
   input := map[string]interface{}{
-    "picoclaw": map[string]interface{}{
-      "agents": map[string]interface{}{
-        "model": "gpt-4",
-      },
-    },
     "security": map[string]interface{}{
       "api_key": "secret",
     },
@@ -49,13 +44,7 @@ func TestFlattenConfigJsonBlobs(t *testing.T) {
 
   result := flattenConfig(input)
 
-  // picoclaw/security/skills 应整体存为 JSON
-  if _, ok := result["picoclaw.agents.model"]; ok {
-    t.Error("picoclaw should not be flattened, should be stored as JSON blob")
-  }
-  if result["picoclaw"] == "" {
-    t.Error("picoclaw should be stored as JSON blob")
-  }
+  // security/skills 应整体存为 JSON
   if result["security"] == "" {
     t.Error("security should be stored as JSON blob")
   }
@@ -111,23 +100,18 @@ func TestBuildNested(t *testing.T) {
 }
 
 func TestBuildNestedJsonBlobs(t *testing.T) {
-  flat := map[string]string{
-    "picoclaw": `{"agents":{"model":"gpt-4"}}`,
+  kv := map[string]string{
     "security": `{"api_key":"secret"}`,
   }
 
-  result := buildNested(flat)
+  result := buildNested(kv)
 
-  pico, ok := result["picoclaw"].(map[string]interface{})
+  sec, ok := result["security"].(map[string]interface{})
   if !ok {
-    t.Fatal("picoclaw should be parsed from JSON")
+    t.Fatal("security should be parsed from JSON")
   }
-  agents, ok := pico["agents"].(map[string]interface{})
-  if !ok {
-    t.Fatal("picoclaw.agents should be a map")
-  }
-  if agents["model"] != "gpt-4" {
-    t.Errorf("picoclaw.agents.model = %q", agents["model"])
+  if sec["api_key"] != "secret" {
+    t.Errorf("security.api_key = %q", sec["api_key"])
   }
 }
 
@@ -202,18 +186,14 @@ func TestRemoveFixedConfigFields(t *testing.T) {
       "session_secret": "secret",
     },
     "web": map[string]interface{}{
-      "listen":             ":80",
-      "container_base_url": "http://172.17.0.1:8080",
-      "password":           "legacy-secret",
+      "listen":   ":80",
+      "password": "legacy-secret",
     },
   }
 
   removeFixedConfigFields(input)
 
   web := input["web"].(map[string]interface{})
-  if _, ok := web["container_base_url"]; ok {
-    t.Fatal("container_base_url should be removed from raw config")
-  }
   if _, ok := web["password"]; ok {
     t.Fatal("password should be removed from raw config")
   }

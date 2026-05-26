@@ -8,7 +8,15 @@ async function getServerUrl() {
 async function api(method, path, opts = {}) {
   const base = await getServerUrl();
   if (!base) throw new Error('未设置服务器地址');
-  return fetch(`${base}${path}`, { method, credentials: 'include', ...opts });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    return await fetch(`${base}${path}`, {
+      method, credentials: 'include', signal: controller.signal, ...opts,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function apiJSON(method, path, opts = {}) {
@@ -194,6 +202,12 @@ async function updateCdpUI() {
       cdpBtn.style.background = '#e74c3c';
       cdpBtn.style.color = '#fff';
       setStatus('AI 浏览器控制已开启', 'ok');
+    } else if (status.connectionState === 'reconnecting') {
+      cdpBtn.textContent = '正在重连...';
+      cdpBtn.style.background = '#FF9800';
+      cdpBtn.style.color = '#fff';
+      cdpBtn.disabled = true;
+      setStatus('正在自动重连...', '');
     } else {
       resetCdpBtn();
     }
@@ -206,12 +220,19 @@ function resetCdpBtn() {
   cdpBtn.textContent = '授权AI控制当前标签页';
   cdpBtn.style.background = '';
   cdpBtn.style.color = '';
+  cdpBtn.disabled = false;
 }
 
 cdpBtn.addEventListener('click', async () => {
   setStatus('处理中...', '');
-  // 如果当前已开启，不需要同意直接关闭
   const status = await chrome.runtime.sendMessage({ action: 'cdpStatus' }).catch(() => ({ active: false }));
+  // 正在重连时点击：停止重连，然后重新授权
+  if (status.connectionState === 'reconnecting') {
+    await chrome.runtime.sendMessage({ action: 'cdpToggle' });
+    // 等待状态更新后再次点击
+    location.reload();
+    return;
+  }
   if (!status.active) {
     const ok = await showConfirm(
       '确认授权AI浏览器控制',
@@ -257,6 +278,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     const info = await apiJSON('GET', '/api/user/info');
     if (info.success) {
       showMain(info.username || '', info.role || '');
+      return;
+    }
+  } catch {}
+
+  // 服务器不可达时检查是否正在重连
+  try {
+    const status = await chrome.runtime.sendMessage({ action: 'cdpStatus' });
+    if (status.connectionState === 'reconnecting') {
+      cdpBtn.textContent = '正在重连...';
+      cdpBtn.style.background = '#FF9800';
+      cdpBtn.style.color = '#fff';
+      cdpBtn.disabled = true;
+      setStatus('服务器断开，正在自动重连...', '');
+      return;
+    }
+    // CDP 活跃但登录查询失败（网络超时/cookie 丢失），仍显示控制界面
+    if (status.active) {
+      showMain('', '');
       return;
     }
   } catch {}

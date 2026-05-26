@@ -58,14 +58,14 @@ func (s *Server) handleAdminGroups(c *gin.Context) {
     PageSize    int              `json:"page_size,omitempty"`
     Total       int              `json:"total,omitempty"`
     TotalPages  int              `json:"total_pages,omitempty"`
-  }{true, s.cfg.UnifiedAuthEnabled(), groups, page, pageSize, total, totalPages})
+  }{true, s.loadConfig().UnifiedAuthEnabled(), groups, page, pageSize, total, totalPages})
 }
 
 func (s *Server) handleAdminGroupCreate(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if s.cfg.UnifiedAuthEnabled() {
+  if s.loadConfig().UnifiedAuthEnabled() {
     writeError(c, http.StatusForbidden, "用户组由当前认证源同步，不允许手动创建")
     return
   }
@@ -80,6 +80,7 @@ func (s *Server) handleAdminGroupCreate(c *gin.Context) {
   name := strings.TrimSpace(c.PostForm("name"))
   description := strings.TrimSpace(c.PostForm("description"))
   parentIDStr := strings.TrimSpace(c.PostForm("parent_id"))
+  logger.DebugRecv("POST", "/api/admin/groups/create", "group", name, "operator", s.getSessionUser(c))
   if name == "" {
     writeError(c, http.StatusBadRequest, "组名不能为空")
     return
@@ -93,10 +94,12 @@ func (s *Server) handleAdminGroupCreate(c *gin.Context) {
     }
     parentID = &pid
   }
+  logger.DebugProcess("create_group", "group", name, "parent_id", parentID)
   if err := auth.CreateGroup(name, "local", description, parentID); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
+  logger.DebugSend("POST", "/api/admin/groups/create", http.StatusOK, "group", name)
   writeSuccess(c, "组 "+name+" 创建成功")
 }
 
@@ -104,7 +107,7 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if s.cfg.UnifiedAuthEnabled() {
+  if s.loadConfig().UnifiedAuthEnabled() {
     writeError(c, http.StatusForbidden, "用户组由当前认证源同步，不允许手动删除")
     return
   }
@@ -117,16 +120,17 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
     return
   }
   name := strings.TrimSpace(c.PostForm("name"))
+  logger.DebugRecv("POST", "/api/admin/groups/delete", "group", name, "operator", s.getSessionUser(c))
   if name == "" {
     writeError(c, http.StatusBadRequest, "组名不能为空")
     return
   }
   gid, err := auth.GetGroupID(name)
-  groupMembers := []string{}
   if err == nil {
-    groupMembers, _ = auth.GetGroupMembersForDeploy(name)
+    auth.GetGroupMembersForDeploy(name)
   }
 
+  logger.DebugProcess("delete_group", "group", name)
   if err := auth.DeleteGroup(name); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
@@ -134,33 +138,10 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
 
   // 共享文件夹清理：移除该组的关联
   if gid > 0 {
-    affectedFolders, _ := auth.RemoveGroupFromAllSharedFolders(gid)
-    // 如果有孤立文件夹，通知管理员
-    if len(affectedFolders) > 0 {
-      // 需要重启的用户 = 原组成员中失去共享访问的用户
-      restartUsers := []string{}
-      for _, username := range groupMembers {
-        needsRestart := false
-        for _, folderID := range affectedFolders {
-          ok, _ := auth.IsUserInSharedFolder(folderID, username)
-          if !ok {
-            needsRestart = true
-            break
-          }
-        }
-        if needsRestart {
-          restartUsers = append(restartUsers, username)
-        }
-      }
-      restartUsers = uniqueStrings(restartUsers)
-      if len(restartUsers) > 0 {
-        enqueueTask("mount-shared-folder", restartUsers, func(username string) error {
-          return s.recreateUserContainerWithSharedMounts(username)
-        })
-      }
-    }
+    auth.RemoveGroupFromAllSharedFolders(gid)
   }
 
+  logger.DebugSend("POST", "/api/admin/groups/delete", http.StatusOK, "group", name)
   writeSuccess(c, "组 "+name+" 已删除")
 }
 
@@ -168,7 +149,7 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if s.cfg.UnifiedAuthEnabled() {
+  if s.loadConfig().UnifiedAuthEnabled() {
     writeError(c, http.StatusForbidden, "用户组成员由当前认证源同步，不允许手动修改")
     return
   }
@@ -203,17 +184,6 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
   // 审计日志：记录谁添加了哪些用户到组
   logger.Audit("group.members.add", "group", groupName, "usernames", usernames, "operator", s.getSessionUser(c))
 
-  // 检查共享文件夹影响，自动重启新加入成员的容器
-  gid, err := auth.GetGroupID(groupName)
-  if err == nil {
-    affected, _ := auth.OnGroupMembersAdded(gid, usernames)
-    if len(affected) > 0 {
-      enqueueTask("mount-shared-folder", affected, func(username string) error {
-        return s.recreateUserContainerWithSharedMounts(username)
-      })
-    }
-  }
-
   writeSuccess(c, fmt.Sprintf("已添加 %d 个用户到组 %s", len(usernames), groupName))
 }
 
@@ -236,7 +206,7 @@ func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if s.cfg.UnifiedAuthEnabled() {
+  if s.loadConfig().UnifiedAuthEnabled() {
     writeError(c, http.StatusForbidden, "用户组成员由当前认证源同步，不允许手动修改")
     return
   }
@@ -257,21 +227,9 @@ func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
   // 审计日志：记录谁从组移除了用户
   logger.Audit("group.members.remove", "group", groupName, "username", username, "operator", s.getSessionUser(c))
 
-  gid, _ := auth.GetGroupID(groupName)
-
   if err := auth.RemoveUserFromGroup(groupName, username); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
-  }
-
-  // 检查共享文件夹影响，自动重启失去访问的用户容器
-  if gid > 0 {
-    affected, _ := auth.OnGroupMembersRemoved(gid, username)
-    if len(affected) > 0 {
-      enqueueTask("mount-shared-folder", affected, func(u string) error {
-        return s.recreateUserContainerWithSharedMounts(u)
-      })
-    }
   }
 
   writeSuccess(c, "已从组 "+groupName+" 移除 "+username)
@@ -308,11 +266,10 @@ func (s *Server) handleAdminGroupSkillsBind(c *gin.Context) {
   }
   userCount := 0
   for _, username := range members {
-    if err := s.deploySkillToUser(skillName, username); err == nil {
-      auth.BindSkillToUser(username, skillName, "group")
+    if err := auth.BindSkillToUser(username, skillName, "group"); err == nil {
       userCount++
     } else {
-      slog.Warn("部署技能到组成员失败", "skill", skillName, "group", groupName, "username", username, "error", err)
+      slog.Warn("绑定技能到组成员失败", "skill", skillName, "group", groupName, "username", username, "error", err)
     }
   }
 
@@ -320,7 +277,7 @@ func (s *Server) handleAdminGroupSkillsBind(c *gin.Context) {
     Success   bool   `json:"success"`
     Message   string `json:"message"`
     UserCount int    `json:"user_count"`
-  }{true, fmt.Sprintf("技能 %s 已绑定到组 %s 并部署到 %d 个用户", skillName, groupName, userCount), userCount})
+  }{true, fmt.Sprintf("技能 %s 已绑定到组 %s 的 %d 个用户", skillName, groupName, userCount), userCount})
 }
 
 func (s *Server) handleAdminGroupSkillsUnbind(c *gin.Context) {
@@ -357,7 +314,7 @@ func (s *Server) handleAdminGroupSkillsUnbind(c *gin.Context) {
     if err := auth.UnbindSkillFromUser(username, skillName); err != nil {
       slog.Error("解绑技能失败", "skill", skillName, "username", username, "error", err)
     }
-    targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName)
+    targetDir := filepath.Join(user.UserDir(s.loadConfig(), username), "skills", skillName)
     if err := os.RemoveAll(targetDir); err == nil {
       cleanedCount++
     }
@@ -409,15 +366,20 @@ func (s *Server) handleAdminGroupMembers(c *gin.Context) {
     inheritedMembers = filterMembers(inheritedMembers)
   }
   members, memberTotal, memberTotalPages, memberPage, memberPageSize := paginateSlice(members, pager)
+
+  // 查询该组绑定的技能（通过 user_skills.source='group' 去重）
+  skills := getGroupSkills(groupName)
+
   writeJSON(c, http.StatusOK, struct {
     Success          bool     `json:"success"`
     Members          []string `json:"members"`
     InheritedMembers []string `json:"inherited_members"`
+    Skills           []string `json:"skills,omitempty"`
     Page             int      `json:"page,omitempty"`
     PageSize         int      `json:"page_size,omitempty"`
     Total            int      `json:"total,omitempty"`
     TotalPages       int      `json:"total_pages,omitempty"`
-  }{true, members, inheritedMembers, memberPage, memberPageSize, memberTotal, memberTotalPages})
+  }{true, members, inheritedMembers, skills, memberPage, memberPageSize, memberTotal, memberTotalPages})
 }
 
 // handleAdminAuthSyncGroups 手动触发 LDAP 组同步
@@ -433,12 +395,12 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
     writeError(c, http.StatusForbidden, "无效请求")
     return
   }
-  if !authsource.HasDirectoryProvider(s.cfg) {
+  if !authsource.HasDirectoryProvider(s.loadConfig()) {
     writeError(c, http.StatusBadRequest, "当前认证方式不支持目录同步")
     return
   }
 
-  authMode := s.cfg.AuthMode()
+  authMode := s.loadConfig().AuthMode()
   result, err := s.syncUsersFromDirectory(false)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "同步账号失败: "+err.Error())
@@ -447,9 +409,9 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
 
   groupCount := 0
   userCount := 0
-  groupResult, err := authsource.SyncGroups(authMode, s.cfg, func(username string) error {
-    if rec, _ := auth.GetContainerByUsername(username); rec == nil {
-      return s.initExternalUser(username)
+  groupResult, err := authsource.SyncGroups(authMode, s.loadConfig(), func(username string) error {
+    if !auth.UserExists(username) {
+      return s.initializeUser(username)
     }
     return nil
   })
@@ -466,5 +428,29 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
     Message     string `json:"message"`
     GroupCount  int    `json:"group_count"`
     MemberCount int    `json:"member_count"`
-  }{true, fmt.Sprintf("同步完成，新初始化 %d 个账号，补齐镜像 %d 个，发现 %d 个组，共 %d 个组成员关系", result.InitializedCount, result.ImageUpdatedCount, groupCount, userCount), groupCount, userCount})
+  }{true, fmt.Sprintf("同步完成，新初始化 %d 个账号，发现 %d 个组，共 %d 个组成员关系", result.InitializedCount, groupCount, userCount), groupCount, userCount})
+}
+
+// getGroupSkills 查询指定组绑定的技能（通过 user_skills.source='group' 去重）
+func getGroupSkills(groupName string) []string {
+  members, _, err := auth.GetGroupMembersWithSubGroups(groupName)
+  if err != nil || len(members) == 0 {
+    return nil
+  }
+  // 查询这些成员中 source='group' 的技能
+  skillMap := make(map[string]bool)
+  for _, username := range members {
+    skills, _ := auth.GetUserSkills(username)
+    for _, sk := range skills {
+      src, _ := auth.GetUserSkillSource(username, sk)
+      if src == "group" {
+        skillMap[sk] = true
+      }
+    }
+  }
+  result := make([]string, 0, len(skillMap))
+  for sk := range skillMap {
+    result = append(result, sk)
+  }
+  return result
 }

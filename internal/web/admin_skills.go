@@ -11,6 +11,7 @@ import (
 
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/skill"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
@@ -105,34 +106,6 @@ func (s *Server) handleAdminSkills(c *gin.Context) {
   })
 }
 
-// ============================================================
-// 部署
-// ============================================================
-
-func (s *Server) deploySkillToUser(skillName, username string) error {
-  if err := util.SafePathSegment(skillName); err != nil {
-    return fmt.Errorf("技能名不合法: %w", err)
-  }
-  source := findSkillSource(skillName)
-  if source == "" {
-    return fmt.Errorf("技能 %s 未在任何源中找到", skillName)
-  }
-  srcPath := filepath.Clean(filepath.Join(skill.SkillsRootDir(), source, skillName))
-  targetDir := filepath.Clean(filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName))
-  skillsBase := filepath.Clean(filepath.Join(skill.SkillsRootDir(), source))
-  userSkillsBase := filepath.Clean(filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills"))
-  if !strings.HasPrefix(srcPath, skillsBase+string(os.PathSeparator)) || !strings.HasPrefix(targetDir, userSkillsBase+string(os.PathSeparator)) {
-    return fmt.Errorf("非法技能路径")
-  }
-  if err := os.RemoveAll(targetDir); err != nil {
-    return fmt.Errorf("删除旧技能目录失败: %w", err)
-  }
-  if err := util.CopyDir(srcPath, targetDir); err != nil {
-    return fmt.Errorf("复制技能失败: %w", err)
-  }
-  return nil
-}
-
 func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
@@ -150,6 +123,7 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
   targetUser := strings.TrimSpace(c.PostForm("username"))
   targetGroup := strings.TrimSpace(c.PostForm("group_name"))
   skillSource := strings.TrimSpace(c.PostForm("source"))
+  logger.DebugRecv("POST", "/api/admin/skills/deploy", "skill", skillName, "user", targetUser, "group", targetGroup, "operator", s.getSessionUser(c))
 
   if skillName == "" {
     writeError(c, http.StatusBadRequest, "技能名称不能为空")
@@ -172,17 +146,16 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
   }
 
   deployFn := func(username string) error {
-    if err := s.deploySkillToUser(skillName, username); err != nil {
-      return err
-    }
     return auth.BindSkillToUser(username, skillName, skillSource)
   }
 
   if targetUser != "" {
+    logger.DebugProcess("deploy_skill_to_user", "skill", skillName, "username", targetUser)
     if err := deployFn(targetUser); err != nil {
       writeError(c, http.StatusInternalServerError, err.Error())
       return
     }
+    logger.DebugSend("POST", "/api/admin/skills/deploy", http.StatusOK, "skill", skillName, "target", targetUser)
     writeJSON(c, http.StatusOK, map[string]interface{}{
       "success":     true,
       "message":     fmt.Sprintf("已将技能 %s 部署到 %s", skillName, targetUser),
@@ -205,18 +178,20 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
       return
     }
   } else {
-    targets, getErr = user.GetUserList(s.cfg)
+    targets, getErr = user.GetUserList(s.loadConfig())
     if getErr != nil {
       writeError(c, http.StatusInternalServerError, "获取用户列表失败: "+getErr.Error())
       return
     }
   }
 
+  logger.DebugProcess("deploy_skill_async", "skill", skillName, "target_count", len(targets), "target_group", targetGroup)
   taskID, err := enqueueTask("skills-deploy", targets, deployFn)
   if err != nil {
     writeError(c, http.StatusConflict, err.Error())
     return
   }
+  logger.DebugSend("POST", "/api/admin/skills/deploy", http.StatusOK, "skill", skillName, "task_id", taskID)
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success":     true,
     "message":     fmt.Sprintf("已提交技能部署任务，共 %d 个用户", len(targets)),
@@ -304,7 +279,7 @@ func (s *Server) handleAdminSkillsRemove(c *gin.Context) {
   }
 
   for _, username := range affectedUsers {
-    targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", name)
+    targetDir := filepath.Join(user.UserDir(s.loadConfig(), username), "skills", name)
     os.RemoveAll(targetDir)
   }
 
@@ -349,13 +324,10 @@ func (s *Server) handleAdminSkillsUserBind(c *gin.Context) {
     return
   }
 
-  if err := s.deploySkillToUser(skillName, username); err != nil {
-    writeError(c, http.StatusInternalServerError, "部署失败: "+err.Error())
-    return
-  }
-
   if err := auth.BindSkillToUser(username, skillName, skillSource); err != nil {
-    slog.Error("绑定记录写入失败（文件已部署）", "skill", skillName, "username", username, "error", err)
+    slog.Error("绑定记录写入失败", "skill", skillName, "username", username, "error", err)
+    writeError(c, http.StatusInternalServerError, "绑定失败: "+err.Error())
+    return
   }
 
   writeSuccess(c, fmt.Sprintf("技能 %s 已绑定到 %s", skillName, username))
@@ -393,12 +365,6 @@ func (s *Server) handleAdminSkillsUserUnbind(c *gin.Context) {
   if err := auth.UnbindSkillFromUser(username, skillName); err != nil {
     writeError(c, http.StatusInternalServerError, "解绑失败: "+err.Error())
     return
-  }
-
-  has, err := auth.UserHasSkillFromAnySource(username, skillName)
-  if err == nil && !has {
-    targetDir := filepath.Join(user.UserDir(s.cfg, username), ".picoclaw", "workspace", "skills", skillName)
-    os.RemoveAll(targetDir)
   }
 
   writeSuccess(c, fmt.Sprintf("已从 %s 解绑技能 %s", username, skillName))
@@ -475,7 +441,7 @@ func (s *Server) handleAdminSkillsDefaultsToggle(c *gin.Context) {
   })
 }
 
-// applyDefaultSkillsToUser 为新用户绑定并部署默认技能
+// applyDefaultSkillsToUser 为新用户绑定默认技能（不再复制到用户目录，启动沙箱时只读挂载）
 func (s *Server) applyDefaultSkillsToUser(username string) {
   skills, err := auth.LoadDefaultSkills()
   if err != nil {
@@ -483,10 +449,6 @@ func (s *Server) applyDefaultSkillsToUser(username string) {
   }
   for _, skillName := range skills {
     if err := util.SafePathSegment(skillName); err != nil {
-      continue
-    }
-    if err := s.deploySkillToUser(skillName, username); err != nil {
-      slog.Warn("部署默认技能失败", "skill", skillName, "username", username, "error", err)
       continue
     }
     if err := auth.BindSkillToUser(username, skillName, "default"); err != nil {

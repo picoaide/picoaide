@@ -82,24 +82,23 @@ func setupTestServer(t *testing.T) *testEnv {
   }
 
   // 初始化普通用户的工作目录和容器记录
-  if err := user.InitUser(cfg, "testuser", ""); err != nil {
+  if err := user.InitUser(cfg, "testuser"); err != nil {
     t.Fatalf("InitUser(testuser): %v", err)
   }
 
   // 确保工作区目录存在（文件管理 API 依赖此目录）
-  workspaceDir := filepath.Join(user.UserDir(cfg, "testuser"), ".picoclaw", "workspace")
+  workspaceDir := user.UserDir(cfg, "testuser")
   if err := os.MkdirAll(workspaceDir, 0755); err != nil {
     t.Fatalf("MkdirAll workspace: %v", err)
   }
 
-  // 创建 Server 实例（Docker 不可用）
+  // 创建 Server 实例
   s := &Server{
-    cfg:             cfg,
-    secret:          "test-integration-secret",
-    csrfKey:         "test-integration-secret-csrf",
-    dockerAvailable: false,
-    loginLimiter:    newLoginRateLimiter(),
+    secret:       "test-integration-secret",
+    csrfKey:      "test-integration-secret-csrf",
+    loginLimiter: newLoginRateLimiter(),
   }
+  s.cfg.Store(cfg)
 
   // 注册所有路由到 Gin 引擎
   gin.SetMode(gin.TestMode)

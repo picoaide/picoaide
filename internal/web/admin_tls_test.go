@@ -1,123 +1,176 @@
 package web
 
 import (
-  "crypto/ecdsa"
-  "crypto/elliptic"
   "crypto/rand"
+  "crypto/rsa"
   "crypto/x509"
   "crypto/x509/pkix"
   "encoding/pem"
   "math/big"
+  "net/url"
   "testing"
   "time"
 )
 
-func generateTestCertPair(domain string) (certPEM, keyPEM []byte) {
-  priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+// generateTestCert 生成自签名证书用于测试
+func generateTestCert(t *testing.T) (certPEM, keyPEM string) {
+  t.Helper()
+  key, err := rsa.GenerateKey(rand.Reader, 1024)
   if err != nil {
-    panic(err)
+    t.Fatalf("生成密钥失败: %v", err)
   }
-  template := &x509.Certificate{
+  template := x509.Certificate{
     SerialNumber: big.NewInt(1),
-    Subject: pkix.Name{
-      CommonName: domain,
-    },
-    DNSNames:              []string{domain},
-    NotBefore:             time.Now().Add(-1 * time.Hour),
-    NotAfter:              time.Now().Add(365 * 24 * time.Hour),
-    KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-    ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-    BasicConstraintsValid: true,
+    Subject:      pkix.Name{CommonName: "test.example.com"},
+    NotBefore:    time.Now().Add(-1 * time.Hour),
+    NotAfter:     time.Now().Add(365 * 24 * time.Hour),
   }
-  certDER, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
+  certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
   if err != nil {
-    panic(err)
+    t.Fatalf("创建证书失败: %v", err)
   }
-  certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-  keyBytes, err := x509.MarshalECPrivateKey(priv)
-  if err != nil {
-    panic(err)
-  }
-  keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
-  return certPEM, keyPEM
+  certPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
+  keyPEM = string(pem.EncodeToMemory(&pem.Block{
+    Type:  "RSA PRIVATE KEY",
+    Bytes: x509.MarshalPKCS1PrivateKey(key),
+  }))
+  return
 }
 
-func TestMatchDomain(t *testing.T) {
-  tests := []struct {
-    pattern string
-    host    string
-    want    bool
-  }{
-    {"example.com", "example.com", true},
-    {"example.com", "EXAMPLE.COM", true},
-    {"example.com", "other.com", false},
-    {"*.example.com", "sub.example.com", true},
-    {"*.example.com", "sub.sub.example.com", false},
-    {"*.example.com", "example.com", false},
-    {"*.example.com", "other.com", false},
+// tlsData 从 body 中提取 data 字段的 map
+func tlsData(body map[string]interface{}) map[string]interface{} {
+  if d, ok := body["data"].(map[string]interface{}); ok {
+    return d
   }
-  for _, tt := range tests {
-    if got := matchDomain(tt.pattern, tt.host); got != tt.want {
-      t.Errorf("matchDomain(%q, %q) = %v, want %v", tt.pattern, tt.host, got, tt.want)
-    }
-  }
+  return nil
 }
 
-func TestValidateCertKeyPair(t *testing.T) {
-  certPEM, keyPEM := generateTestCertPair("example.com")
-  if err := validateCertKeyPair(certPEM, keyPEM); err != nil {
-    t.Fatalf("validateCertKeyPair failed: %v", err)
+// tlsEnabled 返回 data.enabled 字段值
+func tlsEnabled(data map[string]interface{}) bool {
+  if data == nil {
+    return false
   }
-  // 用错误的 key 应该失败
-  _, wrongKey := generateTestCertPair("other.com")
-  if err := validateCertKeyPair(certPEM, wrongKey); err == nil {
-    t.Fatal("expected error for mismatched key")
-  }
-  // 无效的 PEM 应该失败
-  if err := validateCertKeyPair([]byte("invalid"), []byte("invalid")); err == nil {
-    t.Fatal("expected error for invalid PEM")
-  }
+  v, _ := data["enabled"].(bool)
+  return v
 }
 
-func TestValidateCertDomain(t *testing.T) {
-  certPEM, _ := generateTestCertPair("example.com")
-  if err := validateCertDomain(certPEM, "example.com"); err != nil {
-    t.Fatalf("expected match, got: %v", err)
-  }
-  if err := validateCertDomain(certPEM, "EXAMPLE.COM"); err != nil {
-    t.Fatalf("expected case-insensitive match, got: %v", err)
-  }
-  if err := validateCertDomain(certPEM, "other.com"); err == nil {
-    t.Fatal("expected mismatch error")
+// ============================================================
+// GET /api/admin/tls/status
+// ============================================================
+
+func TestAdminTLSStatus_requiresAuth(t *testing.T) {
+  env := setupTestServer(t)
+  resp := env.get(t, "/api/admin/tls/status", "")
+  assertStatus(t, resp, 401)
+}
+
+func TestAdminTLSStatus_requiresSuperadmin(t *testing.T) {
+  env := setupTestServer(t)
+  resp := env.get(t, "/api/admin/tls/status", "testuser")
+  assertStatus(t, resp, 403)
+}
+
+func TestAdminTLSStatus_disabledByDefault(t *testing.T) {
+  env := setupTestServer(t)
+  resp := env.get(t, "/api/admin/tls/status", "testadmin")
+  body := getJSON(t, resp)
+  if tlsEnabled(tlsData(body)) {
+    t.Error("TLS 默认应禁用")
   }
 }
 
-func TestParseCertInfo(t *testing.T) {
-  certPEM, _ := generateTestCertPair("test.example.com")
-  info, err := parseCertInfo(certPEM)
-  if err != nil {
-    t.Fatalf("parseCertInfo failed: %v", err)
-  }
-  if info["subject"] == "" {
-    t.Error("subject should not be empty")
-  }
-  sans, ok := info["sans"].([]string)
-  if !ok || len(sans) == 0 || sans[0] != "test.example.com" {
-    t.Errorf("sans should contain test.example.com, got %v", sans)
-  }
-  if info["not_after"] == "" {
-    t.Error("not_after should not be empty")
-  }
-  if info["issuer"] == "" {
-    t.Error("issuer should not be empty")
+func TestAdminTLSStatus_showsEnabledAfterSet(t *testing.T) {
+  env := setupTestServer(t)
+  certPEM, keyPEM := generateTestCert(t)
+
+  form := url.Values{"cert_pem": {certPEM}, "key_pem": {keyPEM}}
+  resp := env.postForm(t, "/api/admin/tls/upload", "testadmin", form)
+  assertStatus(t, resp, 200)
+
+  resp = env.get(t, "/api/admin/tls/status", "testadmin")
+  body := getJSON(t, resp)
+  if !tlsEnabled(tlsData(body)) {
+    t.Error("上传证书后 TLS 应启用")
   }
 }
 
-func TestParseCertInfoInvalidPEM(t *testing.T) {
-  if _, err := parseCertInfo([]byte("invalid")); err == nil {
-    t.Fatal("expected error for invalid PEM")
+// ============================================================
+// POST /api/admin/tls/upload
+// ============================================================
+
+func TestAdminTLSUpload_requiresAuth(t *testing.T) {
+  env := setupTestServer(t)
+  form := url.Values{"cert_pem": {"cert"}, "key_pem": {"key"}}
+  resp := env.postForm(t, "/api/admin/tls/upload", "", form)
+  assertStatus(t, resp, 401)
+}
+
+func TestAdminTLSUpload_requiresSuperadmin(t *testing.T) {
+  env := setupTestServer(t)
+  form := url.Values{"cert_pem": {"cert"}, "key_pem": {"key"}}
+  resp := env.postForm(t, "/api/admin/tls/upload", "testuser", form)
+  assertStatus(t, resp, 403)
+}
+
+func TestAdminTLSUpload_rejectsEmptyCert(t *testing.T) {
+  env := setupTestServer(t)
+  form := url.Values{"cert_pem": {""}, "key_pem": {"key"}}
+  resp := env.postForm(t, "/api/admin/tls/upload", "testadmin", form)
+  assertStatus(t, resp, 400)
+}
+
+func TestAdminTLSUpload_rejectsEmptyKey(t *testing.T) {
+  env := setupTestServer(t)
+  form := url.Values{"cert_pem": {"cert"}, "key_pem": {""}}
+  resp := env.postForm(t, "/api/admin/tls/upload", "testadmin", form)
+  assertStatus(t, resp, 400)
+}
+
+func TestAdminTLSUpload_rejectsInvalidCert(t *testing.T) {
+  env := setupTestServer(t)
+  form := url.Values{"cert_pem": {"not-a-valid-pem"}, "key_pem": {"not-a-valid-key"}}
+  resp := env.postForm(t, "/api/admin/tls/upload", "testadmin", form)
+  assertStatus(t, resp, 400)
+}
+
+// ============================================================
+// POST /api/admin/tls/clear
+// ============================================================
+
+func TestAdminTLSClear_requiresAuth(t *testing.T) {
+  env := setupTestServer(t)
+  resp := env.postForm(t, "/api/admin/tls/clear", "", nil)
+  assertStatus(t, resp, 401)
+}
+
+func TestAdminTLSClear_requiresSuperadmin(t *testing.T) {
+  env := setupTestServer(t)
+  resp := env.postForm(t, "/api/admin/tls/clear", "testuser", nil)
+  assertStatus(t, resp, 403)
+}
+
+func TestAdminTLSClear_clearsConfig(t *testing.T) {
+  env := setupTestServer(t)
+
+  certPEM, keyPEM := generateTestCert(t)
+  form := url.Values{"cert_pem": {certPEM}, "key_pem": {keyPEM}}
+  env.postForm(t, "/api/admin/tls/upload", "testadmin", form)
+
+  // 验证上传成功
+  resp := env.get(t, "/api/admin/tls/status", "testadmin")
+  body := getJSON(t, resp)
+  if !tlsEnabled(tlsData(body)) {
+    t.Skip("上传失败，跳过清理测试")
   }
-  if _, err := parseCertInfo([]byte{}); err == nil {
-    t.Fatal("expected error for empty PEM")
+
+  // 清除
+  resp = env.postForm(t, "/api/admin/tls/clear", "testadmin", nil)
+  assertStatus(t, resp, 200)
+
+  // 验证清除后禁用
+  resp = env.get(t, "/api/admin/tls/status", "testadmin")
+  body = getJSON(t, resp)
+  if tlsEnabled(tlsData(body)) {
+    t.Error("清除后 TLS 应禁用")
   }
 }

@@ -96,7 +96,6 @@ func TestAdminUsers_LDAPModeUsesSyncedLocalUsers(t *testing.T) {
     Users   []struct {
       Username string `json:"username"`
       Source   string `json:"source"`
-      Status   string `json:"status"`
     } `json:"users"`
   }
   parseJSON(t, resp, &result)
@@ -107,9 +106,6 @@ func TestAdminUsers_LDAPModeUsesSyncedLocalUsers(t *testing.T) {
     if u.Username == "ldapuser" {
       if u.Source != "ldap" {
         t.Fatalf("ldapuser source = %q, want ldap", u.Source)
-      }
-      if u.Status != "未初始化" {
-        t.Fatalf("ldapuser status = %q, want 未初始化", u.Status)
       }
       return
     }

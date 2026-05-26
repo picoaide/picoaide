@@ -69,13 +69,8 @@ func LoadFromDB() (*GlobalConfig, error) {
   cfg.OIDC.UsernameClaim = kv["oidc.username_claim"]
   cfg.OIDC.GroupsClaim = kv["oidc.groups_claim"]
   cfg.OIDC.SyncInterval = kv["oidc.sync_interval"]
-  cfg.Image.Name = kv["image.name"]
-  cfg.Image.Tag = kv["image.tag"]
-  cfg.Image.Timezone = kv["image.timezone"]
-  cfg.Image.Registry = kv["image.registry"]
   cfg.UsersRoot = kv["users_root"]
   cfg.ArchiveRoot = kv["archive_root"]
-  cfg.PicoClawAdapterRemoteBaseURL = kv["picoclaw_adapter_remote_base_url"]
   cfg.Web.Listen = kv["web.listen"]
   cfg.Web.AuthMode = kv["web.auth_mode"]
   cfg.Web.LogRetention = kv["web.log_retention"]
@@ -91,18 +86,15 @@ func LoadFromDB() (*GlobalConfig, error) {
   cfg.LDAP.WhitelistEnabled, _ = strconv.ParseBool(kv["ldap.whitelist_enabled"])
   cfg.OIDC.WhitelistEnabled, _ = strconv.ParseBool(kv["oidc.whitelist_enabled"])
 
+  // debug_mode
+  cfg.Web.DebugMode, _ = strconv.ParseBool(kv["web.debug_mode"])
+
   // TLS 配置
   cfg.Web.TLS.Enabled, _ = strconv.ParseBool(kv["web.tls.enabled"])
   cfg.Web.TLS.CertPEM = kv["web.tls.cert_pem"]
   cfg.Web.TLS.KeyPEM = kv["web.tls.key_pem"]
 
   // 结构化字段从 JSON 反序列化
-  if v, ok := kv["picoclaw"]; ok && v != "" {
-    var picoclaw interface{}
-    if err := json.Unmarshal([]byte(v), &picoclaw); err == nil {
-      cfg.PicoClaw = picoclaw
-    }
-  }
   if v, ok := kv["security"]; ok && v != "" {
     var security interface{}
     if err := json.Unmarshal([]byte(v), &security); err == nil {
@@ -145,10 +137,6 @@ func configToKV(cfg *GlobalConfig) (map[string]string, error) {
   kv["oidc.groups_claim"] = cfg.OIDC.GroupsClaim
   kv["oidc.whitelist_enabled"] = strconv.FormatBool(cfg.OIDC.WhitelistEnabled)
   kv["oidc.sync_interval"] = cfg.OIDC.SyncInterval
-  kv["image.name"] = cfg.Image.Name
-  kv["image.tag"] = cfg.Image.Tag
-  kv["image.timezone"] = cfg.Image.Timezone
-  kv["image.registry"] = cfg.Image.Registry
   kv["users_root"] = cfg.UsersRoot
   kv["archive_root"] = cfg.ArchiveRoot
   kv["web.listen"] = cfg.Web.Listen
@@ -160,19 +148,15 @@ func configToKV(cfg *GlobalConfig) (map[string]string, error) {
     kv["web.ldap_enabled"] = strconv.FormatBool(*cfg.Web.LDAPEnabled)
   }
 
+  // Debug 模式
+  kv["web.debug_mode"] = strconv.FormatBool(cfg.Web.DebugMode)
+
   // TLS 配置
   kv["web.tls.enabled"] = strconv.FormatBool(cfg.Web.TLS.Enabled)
   kv["web.tls.cert_pem"] = cfg.Web.TLS.CertPEM
   kv["web.tls.key_pem"] = cfg.Web.TLS.KeyPEM
 
   // 结构化字段序列化为 JSON
-  if cfg.PicoClaw != nil {
-    b, err := json.Marshal(cfg.PicoClaw)
-    if err != nil {
-      return nil, fmt.Errorf("序列化 picoclaw 配置失败: %w", err)
-    }
-    kv["picoclaw"] = string(b)
-  }
   if cfg.Security != nil {
     b, err := json.Marshal(cfg.Security)
     if err != nil {
@@ -344,7 +328,6 @@ func removeFixedConfigFields(data map[string]interface{}) {
   if !ok {
     return
   }
-  delete(web, "container_base_url")
   delete(web, "password")
 }
 

@@ -1,70 +1,57 @@
 ---
 title: "故障排查"
-description: "PicoAide 常见问题的诊断步骤和解决方案"
-weight: 7
+description: "PicoAide 常见问题的诊断步骤和解决方案 — 容器、认证、代理、配置和客户端问题"
+weight: 8
 draft: false
 ---
 
 本文档按问题类型分类，提供诊断思路和解决方案。如果以下方法无法解决问题，请到 [GitHub Issues](https://github.com/picoaide/picoaide/issues) 提交反馈。
 
-## 容器问题
+## 服务启动问题
 
-### 容器启动失败
+### 服务无法启动
 
-**现象**：用户容器无法启动，管理后台显示容器状态异常。
-
-**排查步骤**：
-
-1. 检查 Docker 是否正常运行：
-   ```bash
-   docker info
-   systemctl status docker
-   ```
-
-2. 检查 picoaide-net 网络是否存在：
-   ```bash
-   docker network ls | grep picoaide-net
-   ```
-   如果不存在，重启 picoaide 服务会自动创建。
-
-3. 查看具体错误信息：
-   ```bash
-   journalctl -u picoaide -n 50 --no-pager | grep -i error
-   ```
-
-**常见原因**：
-- Docker 未安装或未运行
-- 镜像未拉取（检查 `docker images` 是否有对应镜像）
-- 网络 `picoaide-net` 被误删除
-- 磁盘空间不足
-
-### Docker 不可用
-
-**现象**：管理后台显示"服务不可用"。
-
-**说明**：PicoAide 在 Docker 不可用时仍可启动，管理后台和 API 可以正常使用，但所有容器、镜像相关操作不可用。
-
-**解决方案**：安装并启动 Docker，然后重启 picoaide。
-
-### 容器 IP 冲突
-
-**现象**：容器创建失败或启动后无法访问网络。
-
-**原因**：`picoaide-net` 使用 `100.64.0.0/16` 地址段。如果这个网段与公司内网或其他 Docker 网络冲突，会导致 IP 分配失败。
-
-**解决方案**：`picoaide-net` 使用 CGNAT 地址空间，通常不会与内网冲突。如果确实冲突，需要调整网络规划。
-
-### 删除用户后容器未清理
-
-**现象**：删除用户后 Docker 中仍存在该用户的容器。
+**现象**：`systemctl start picoaide` 后服务启动失败。
 
 **排查步骤**：
+
 ```bash
-docker ps -a | grep picoaide-
-docker rm -f picoaide-<username>
+# 查看服务状态和错误信息
+systemctl status picoaide
+
+# 查看最近日志
+journalctl -u picoaide -n 50 --no-pager
+
+# 检查是否有 root 权限
+whoami
 ```
 
-正常情况下删除用户时会自动停止并删除容器。如果手动删除数据库记录可能导致残留，需要手动清理。
+**常见原因**：
+- 未使用 root 用户运行
+- 端口 80/443 被占用
+- 工作目录 `/data/picoaide` 权限不正确
+- SQLite 数据库文件损坏（系统会自动备份为 `picoaide.db.broken.<timestamp>`）
+
+### 网桥创建失败
+
+**现象**：日志显示无法创建 `picoaide-br` 网桥。
+
+**排查步骤**：
+
+```bash
+# 检查是否已存在
+ip link show picoaide-br
+
+# 检查 iptables 规则
+iptables -L FORWARD -n
+
+# 检查内核模块
+lsmod | grep br_netfilter
+```
+
+**解决方案**：
+- 安装 bridge 和 netfilter 内核模块
+- 确保系统没有其他进程占用了 100.64.0.0/16 网段
 
 ## 认证问题
 
@@ -89,12 +76,10 @@ docker rm -f picoaide-<username>
 
 ### 超管无法登录
 
-**现象**：超管账户登录被拒绝。
-
 **排查步骤**：
 1. 确认使用的用户名正确
 2. 如果忘记密码，使用 `picoaide reset-password <username>` 重置
-3. 确认系统至少有一个超管（查看数据库 `local_users` 表中 role 为 `superadmin` 的记录）
+3. 确认系统至少有一个超管（查看数据库 `local_users` 表）
 
 ### CSRF Token 过期
 
@@ -106,37 +91,28 @@ docker rm -f picoaide-<username>
 
 ### Browser 代理未连接
 
-**现象**：AI 调用 browser 工具时返回 `picoaide-browser 代理未连接`。
+**现象**：AI 调用 browser 工具时返回"代理未连接"。
 
 **排查步骤**：
+
 1. 确认浏览器扩展已用普通用户登录
 2. 确认用户已点击扩展的「授权 AI 控制当前标签页」按钮
 3. 确认扩展的 WebSocket 连接保持在线（不要关闭扩展弹窗）
-4. 确认用户容器配置中包含 browser MCP server：
-   ```json
-   {
-     "tools": {
-       "mcp": {
-         "servers": {
-           "browser": {
-             "enabled": true,
-             "type": "sse",
-             "url": "http://100.64.0.1:80/api/mcp/sse/browser?token=<mcp-token>"
-           }
-         }
-       }
-     }
-   }
-   ```
+4. 确认用户沙箱配置中包含 browser MCP server 的连接信息
+
+常见原因：
+- 扩展使用了超管账号登录（服务端会拒绝）
+- 扩展与服务端网络不通
+- 浏览器进入了省电模式
 
 ### Computer 代理未连接
 
-**现象**：AI 调用 computer 工具时返回 `picoaide-computer 代理未连接`。
+**现象**：AI 调用 computer 工具时返回"代理未连接"。
 
 **排查步骤**：
 1. 确认桌面客户端已启动并登录
-2. 确认客户端已经通过 WebSocket 连接到服务端
-3. 检查客户端关闭或网络断开会导致连接中断
+2. 确认客户端已通过 WebSocket 连接到服务端
+3. 检查客户端日志是否有错误信息
 
 ### WebSocket 频繁断开
 
@@ -148,7 +124,7 @@ docker rm -f picoaide-<username>
 **解决方案**：
 - 检查网络稳定性
 - 如果通过反向代理，确认配置了 WebSocket 支持
-- 教育用户保持扩展或客户端窗口活跃
+- 保持扩展或客户端窗口活跃
 
 ## 配置问题
 
@@ -156,39 +132,50 @@ docker rm -f picoaide-<username>
 
 **排查步骤**：
 1. 确认配置已保存到数据库（settings 表）
-2. 某些配置修改后需要重启容器才能生效（如渠道配置）
+2. 某些配置修改后需要重启沙箱才能生效（如渠道配置）
 3. 重启服务：`systemctl restart picoaide`
 
-### Picoclaw Adapter 迁移失败
+## 沙箱问题
 
-**现象**：升级镜像或应用配置时提示配置版本不兼容。
+### 沙箱启动失败
 
-**原因**：当前配置版本到目标版本的迁移链不存在或不完整。
+**现象**：用户沙箱无法启动。
 
-**解决方案**：
-1. 刷新 Adapter 包到最新版本
-2. 如果需要中间版本迁移，先升级到中间版本再升级到目标版本
-3. 检查 Adapter 的 `migrations/` 目录是否包含所需的迁移规则
+**排查步骤**：
 
-### Adapter ZIP 上传失败
+```bash
+# 查看服务端日志
+journalctl -u picoaide -n 50 --no-pager | grep -i error
 
-**现象**：上传 Adapter zip 包时提示格式错误。
-
-**解决方案**：zip 内应直接包含以下文件，不要包含 `picoclaw/` 顶层目录：
-
-```text
-index.json
-hash
-schemas/config-v1.json
-ui/ui-v1.json
-migrations/v1-to-v2.json
+# 检查 overlayfs 是否可用
+mount | grep overlay
 ```
+
+**常见原因**：
+- overlayfs 内核模块未加载
+- Alpine rootfs 文件不存在或损坏
+- 磁盘空间不足
+- 100.64.0.0/16 网段被占用
+
+### 网络隔离失效
+
+**现象**：容器间可以互相通信。
+
+**排查**：
+
+```bash
+# 检查 iptables 规则
+iptables -L FORWARD -n | grep picoaide
+
+# 确保有 DROP 规则
+iptables -I FORWARD -i picoaide-br -o picoaide-br -j DROP
+```
+
+正常情况下，所有通过 `picoaide-br` 网桥的容器间通信都会被 DROP。
 
 ## 扩展和客户端问题
 
 ### 扩展登录失败
-
-**现象**：浏览器扩展输入账号密码后登录失败。
 
 **排查步骤**：
 1. 确认使用普通用户账号（超管不能登录扩展）
@@ -197,19 +184,15 @@ migrations/v1-to-v2.json
 
 ### Cookie 同步无效
 
-**现象**：Cookie 同步成功，但 AI 仍无法访问目标网站。
-
-**说明**：Cookie 同步只把当前页面的登录态写入用户的 `.security.yml`，让 AI Agent 可以在配置中复用。它**不**等同于打开浏览器控制连接。如果需要 AI 操作浏览器页面，必须启用 browser MCP 连接。
+**说明**：Cookie 同步只把当前页面的登录态写入用户的 `.security.yml`，让 AI Agent 可以在配置中复用。它**不**等同于打开浏览器控制连接。如果需要 AI 操作浏览器页面，必须在扩展中完成授权流程。
 
 ### 桌面文件访问失败
 
-**现象**：AI 调用 `computer_file_read` 或 `computer_file_write` 时失败。
-
 **排查步骤**：
-1. 先在管理后台配置桌面客户端的文件白名单目录
+1. 在桌面客户端设置中配置文件白名单目录
 2. AI 应先调用 `computer_whitelist` 获取可访问目录
 3. 确认 AI 访问的文件路径在白名单范围内
-4. 检查客户端侧的权限设置是否允许文件操作
+4. 检查客户端侧的权限组设置是否允许文件操作
 
 ## 日志与调试
 
@@ -222,6 +205,7 @@ PicoAide 使用结构化 JSON 日志，写入 `logs/picoaide.log`：
 ```
 
 查看日志：
+
 ```bash
 # 实时追踪
 journalctl -u picoaide -f
@@ -231,14 +215,6 @@ journalctl -u picoaide -n 100
 
 # 查看指定时间的日志
 journalctl -u picoaide --since "2026-05-12 10:00" --until "2026-05-12 11:00"
-```
-
-### 容器日志
-
-查看特定用户的容器日志：
-```bash
-docker logs picoaide-<username>
-docker logs -f picoaide-<username>  # 实时追踪
 ```
 
 ### 调试端点

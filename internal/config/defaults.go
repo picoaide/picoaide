@@ -23,76 +23,12 @@ func DefaultGlobalConfig() *GlobalConfig {
       GroupsClaim:   "groups",
       SyncInterval:  "0",
     },
-    Image: ImageConfig{
-      Name:     "ghcr.io/picoaide/picoaide",
-      Timezone: "Asia/Shanghai",
-      Registry: "github",
-    },
     UsersRoot:   "./users",
     ArchiveRoot: "./archive",
     Web: WebConfig{
       Listen:       ":80",
       LogRetention: "6m",
-    },
-    PicoClaw: map[string]interface{}{
-      "agents": map[string]interface{}{
-        "defaults": map[string]interface{}{
-          "model_name":          "gpt-5.4",
-          "max_tokens":          32768,
-          "max_tool_iterations": 50,
-        },
-      },
-      "model_list": []interface{}{
-        map[string]interface{}{
-          "model_name":      "gpt-5.4",
-          "model":           "openai/gpt-5.4",
-          "api_base":        "https://api.openai.com/v1",
-          "request_timeout": 6000,
-        },
-      },
-      "channel_list": map[string]interface{}{
-        "dingtalk": map[string]interface{}{
-          "enabled": false,
-          "type":    "dingtalk",
-        },
-        "feishu": map[string]interface{}{
-          "enabled": false,
-          "type":    "feishu",
-        },
-      },
-      "tools": map[string]interface{}{
-        "install_skill": map[string]interface{}{
-          "enabled": false,
-        },
-        "skills": map[string]interface{}{
-          "registries": map[string]interface{}{
-            "clawhub": map[string]interface{}{
-              "enabled": false,
-            },
-            "github": map[string]interface{}{
-              "enabled": false,
-            },
-          },
-        },
-        "web": map[string]interface{}{
-          "duckduckgo": map[string]interface{}{
-            "enabled": true,
-          },
-        },
-        "mcp": map[string]interface{}{
-          "enabled":               true,
-          "max_inline_text_chars": 8192,
-          "servers": map[string]interface{}{
-            "browser": map[string]interface{}{
-              "enabled": false,
-            },
-          },
-        },
-      },
-      "gateway": map[string]interface{}{
-        "host": "0.0.0.0",
-        "port": 18790,
-      },
+      DebugMode:    false,
     },
     Security: map[string]interface{}{
       "model_list": map[string]interface{}{

@@ -3,241 +3,120 @@ package web
 import (
   "crypto/tls"
   "crypto/x509"
-  "encoding/pem"
   "fmt"
-  "net"
   "net/http"
-  "os/exec"
-  "strings"
   "time"
 
   "github.com/gin-gonic/gin"
-  "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
-
-  "log/slog"
 )
 
 // ============================================================
-// TLS 证书管理
+// TLS 证书管理 API
 // ============================================================
 
-// handleAdminTLSStatus 返回当前 TLS 配置状态
+// handleAdminTLSStatus 查询当前 TLS 证书状态
 func (s *Server) handleAdminTLSStatus(c *gin.Context) {
-  username := s.requireAuth(c)
-  if username == "" {
-    return
-  }
-  if !auth.IsSuperadmin(username) {
-    writeError(c, http.StatusForbidden, "仅超级管理员可访问")
+  if s.requireSuperadmin(c) == "" {
     return
   }
 
-  resp := map[string]interface{}{
-    "success":    true,
-    "enabled":    s.cfg.Web.TLS.Enabled,
-    "configured": s.cfg.Web.TLS.CertPEM != "" && s.cfg.Web.TLS.KeyPEM != "",
+  cfg := s.loadConfig()
+  result := map[string]interface{}{
+    "enabled":  cfg.Web.TLS.Enabled,
+    "has_cert": cfg.Web.TLS.CertPEM != "" && cfg.Web.TLS.KeyPEM != "",
   }
 
-  if resp["configured"].(bool) {
-    if info, err := parseCertInfo([]byte(s.cfg.Web.TLS.CertPEM)); err == nil {
-      resp["cert_info"] = info
-    }
-  }
-
-  writeJSON(c, http.StatusOK, resp)
-}
-
-// handleAdminTLSUpload 上传证书/启禁 HTTPS
-func (s *Server) handleAdminTLSUpload(c *gin.Context) {
-  username := s.requireAuth(c)
-  if username == "" {
-    return
-  }
-  if !auth.IsSuperadmin(username) {
-    writeError(c, http.StatusForbidden, "仅超级管理员可访问")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
-
-  enabled := c.PostForm("enabled") == "true"
-
-  if enabled {
-    certFile, err := c.FormFile("cert")
-    if err != nil {
-      writeError(c, http.StatusBadRequest, "请上传证书文件 (cert.pem)")
-      return
-    }
-    keyFile, err := c.FormFile("key")
-    if err != nil {
-      writeError(c, http.StatusBadRequest, "请上传私钥文件 (key.pem)")
-      return
-    }
-
-    certData, err := certFile.Open()
-    if err != nil {
-      writeError(c, http.StatusInternalServerError, "读取证书文件失败")
-      return
-    }
-    defer certData.Close()
-    keyData, err := keyFile.Open()
-    if err != nil {
-      writeError(c, http.StatusInternalServerError, "读取私钥文件失败")
-      return
-    }
-    defer keyData.Close()
-
-    certBytes := make([]byte, certFile.Size)
-    if _, err := certData.Read(certBytes); err != nil {
-      writeError(c, http.StatusInternalServerError, "读取证书文件失败")
-      return
-    }
-    keyBytes := make([]byte, keyFile.Size)
-    if _, err := keyData.Read(keyBytes); err != nil {
-      writeError(c, http.StatusInternalServerError, "读取私钥文件失败")
-      return
-    }
-
-    // 验证 PEM 和证书
-    if err := validateCertKeyPair(certBytes, keyBytes); err != nil {
-      writeError(c, http.StatusBadRequest, "证书校验失败: "+err.Error())
-      return
-    }
-
-    // 域名匹配校验
-    host := c.Request.Host
-    if h, _, err := net.SplitHostPort(host); err == nil {
-      host = h
-    }
-    if err := validateCertDomain(certBytes, host); err != nil {
-      writeError(c, http.StatusBadRequest, err.Error())
-      return
-    }
-
-    certInfo, _ := parseCertInfo(certBytes)
-
-    // 保存到 DB
-    s.cfg.Web.TLS.CertPEM = string(certBytes)
-    s.cfg.Web.TLS.KeyPEM = string(keyBytes)
-    s.cfg.Web.TLS.Enabled = true
-    if err := config.SaveToDB(s.cfg, username); err != nil {
-      writeError(c, http.StatusInternalServerError, "保存配置失败: "+err.Error())
-      return
-    }
-
-    // 异步重启
-    go func() {
-      time.Sleep(1 * time.Second)
-      if err := exec.Command("systemctl", "restart", "picoaide").Run(); err != nil {
-        slog.Error("重启服务失败", "error", err)
+  // 解析证书获取详细信息
+  if cfg.Web.TLS.CertPEM != "" {
+    if cert, err := tls.X509KeyPair([]byte(cfg.Web.TLS.CertPEM), []byte(cfg.Web.TLS.KeyPEM)); err == nil {
+      if len(cert.Certificate) > 0 {
+        if parsed, err := x509.ParseCertificate(cert.Certificate[0]); err == nil {
+          result["subject"] = parsed.Subject.CommonName
+          result["issuer"] = parsed.Issuer.CommonName
+          result["not_before"] = parsed.NotBefore.Format(time.RFC3339)
+          result["not_after"] = parsed.NotAfter.Format(time.RFC3339)
+          if time.Now().After(parsed.NotAfter) {
+            result["expired"] = true
+          }
+        }
       }
-    }()
+    }
+  }
 
-    writeJSON(c, http.StatusOK, map[string]interface{}{
-      "success":   true,
-      "message":   fmt.Sprintf("证书已保存，服务重启中，请稍后通过 https://%s 访问", host),
-      "cert_info": certInfo,
-    })
+  writeJSON(c, http.StatusOK, gin.H{"success": true, "data": result})
+}
+
+// handleAdminTLSUpload 上传 TLS 证书和私钥
+func (s *Server) handleAdminTLSUpload(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
     return
   }
 
-  // 关闭 HTTPS
-  s.cfg.Web.TLS.Enabled = false
-  if err := config.SaveToDB(s.cfg, username); err != nil {
-    writeError(c, http.StatusInternalServerError, "保存配置失败: "+err.Error())
+  certPEM := c.PostForm("cert_pem")
+  keyPEM := c.PostForm("key_pem")
+
+  if certPEM == "" || keyPEM == "" {
+    writeError(c, http.StatusBadRequest, "证书和私钥不能为空")
     return
   }
 
-  go func() {
-    time.Sleep(1 * time.Second)
-    if err := exec.Command("systemctl", "restart", "picoaide").Run(); err != nil {
-      slog.Error("重启服务失败", "error", err)
-    }
-  }()
+  // 验证 PEM 格式
+  if _, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM)); err != nil {
+    writeError(c, http.StatusBadRequest, fmt.Sprintf("证书格式无效: %s", err.Error()))
+    return
+  }
 
-  writeJSON(c, http.StatusOK, map[string]interface{}{
-    "success": true,
-    "message": "HTTPS 已关闭，服务重启中...",
-  })
+  // 保存到配置
+  raw := map[string]interface{}{
+    "web": map[string]interface{}{
+      "tls": map[string]interface{}{
+        "enabled":  true,
+        "cert_pem": certPEM,
+        "key_pem":  keyPEM,
+      },
+    },
+  }
+  if err := config.SaveRawToDB(raw, "system"); err != nil {
+    writeError(c, http.StatusInternalServerError, "保存证书失败")
+    return
+  }
+
+  // 重载配置
+  if newCfg, err := config.LoadFromDB(); err == nil {
+    s.cfg.Store(newCfg)
+  }
+
+  // 清除缓存的服务端 TLS server，下次 Serve 时自动重建
+  s.tlsSrv = nil
+
+  writeJSON(c, http.StatusOK, gin.H{"success": true, "message": "证书已保存，重启服务后生效"})
 }
 
-// validateCertKeyPair 验证证书和私钥是否匹配
-func validateCertKeyPair(certPEM, keyPEM []byte) error {
-  if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
-    return fmt.Errorf("证书和私钥不匹配: %w", err)
-  }
-  return nil
-}
-
-// validateCertDomain 验证证书域名是否匹配请求域名
-func validateCertDomain(certPEM []byte, host string) error {
-  block, _ := pem.Decode(certPEM)
-  if block == nil {
-    return fmt.Errorf("无法解析 PEM 格式证书")
-  }
-  cert, err := x509.ParseCertificate(block.Bytes)
-  if err != nil {
-    return fmt.Errorf("解析证书失败: %w", err)
+// handleAdminTLSClear 清除 TLS 证书配置
+func (s *Server) handleAdminTLSClear(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
+    return
   }
 
-  domains := []string{cert.Subject.CommonName}
-  domains = append(domains, cert.DNSNames...)
-
-  var validDomains []string
-  for _, d := range domains {
-    if strings.TrimSpace(d) != "" {
-      validDomains = append(validDomains, d)
-    }
+  raw := map[string]interface{}{
+    "web": map[string]interface{}{
+      "tls": map[string]interface{}{
+        "enabled":  false,
+        "cert_pem": "",
+        "key_pem":  "",
+      },
+    },
+  }
+  if err := config.SaveRawToDB(raw, "system"); err != nil {
+    writeError(c, http.StatusInternalServerError, "清除证书失败")
+    return
   }
 
-  for _, d := range validDomains {
-    if matchDomain(d, host) {
-      return nil
-    }
+  if newCfg, err := config.LoadFromDB(); err == nil {
+    s.cfg.Store(newCfg)
   }
+  s.tlsSrv = nil
 
-  return fmt.Errorf("证书域名 (%v) 与当前访问域名 (%s) 不匹配", validDomains, host)
-}
-
-// matchDomain 支持通配符域名匹配（如 *.example.com 匹配 sub.example.com，不匹配 sub.sub.example.com）
-func matchDomain(pattern, host string) bool {
-  if strings.EqualFold(pattern, host) {
-    return true
-  }
-  if strings.HasPrefix(pattern, "*.") {
-    suffix := pattern[1:]
-    lowerHost := strings.ToLower(host)
-    lowerSuffix := strings.ToLower(suffix)
-    if !strings.HasSuffix(lowerHost, lowerSuffix) {
-      return false
-    }
-    if len(lowerHost) == len(lowerSuffix) {
-      return false // host == suffix means no label before wildcard
-    }
-    label := lowerHost[:len(lowerHost)-len(lowerSuffix)]
-    return !strings.Contains(label, ".")
-  }
-  return false
-}
-
-// parseCertInfo 从 PEM 证书提取展示信息
-func parseCertInfo(certPEM []byte) (map[string]interface{}, error) {
-  block, _ := pem.Decode(certPEM)
-  if block == nil {
-    return nil, fmt.Errorf("无法解析 PEM 格式")
-  }
-  cert, err := x509.ParseCertificate(block.Bytes)
-  if err != nil {
-    return nil, err
-  }
-  return map[string]interface{}{
-    "subject":    cert.Subject.String(),
-    "sans":       cert.DNSNames,
-    "issuer":     cert.Issuer.String(),
-    "not_before": cert.NotBefore.Format(time.RFC3339),
-    "not_after":  cert.NotAfter.Format(time.RFC3339),
-  }, nil
+  writeJSON(c, http.StatusOK, gin.H{"success": true, "message": "证书已清除"})
 }

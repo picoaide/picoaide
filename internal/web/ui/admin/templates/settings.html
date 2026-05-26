@@ -2,56 +2,10 @@
   <div>
     <div class="page-kicker">平台配置</div>
     <h2>系统配置</h2>
-    <p>集中维护镜像、网关、用户目录和 Picoclaw 配置适配包。</p>
+    <p>集中维护平台配置项。</p>
   </div>
 </section>
 <div id="settings-msg" class="msg"></div>
-
-<div class="card">
-  <div class="card-header">容器镜像</div>
-  <div class="field"><label>镜像仓库</label>
-    <select data-path="image.registry">
-      <option value="github">GitHub (ghcr.io)</option>
-      <option value="tencent">腾讯云 (hkccr.ccs.tencentyun.com)</option>
-    </select>
-  </div>
-  <div class="field"><label>时区</label><input type="text" data-path="image.timezone" placeholder="Asia/Shanghai"></div>
-  <div class="form-section">
-    <div class="toolbar">
-      <div>
-        <div class="toolbar-title">Picoclaw 配置适配</div>
-        <div class="toolbar-subtitle">镜像升级和配置下发只读取本地适配包</div>
-      </div>
-    </div>
-    <div class="step-grid">
-      <div class="step-card">
-        <div class="step-card-header">
-          <div>
-            <div class="step-title">在线更新</div>
-            <div class="step-copy">从远端更新本地适配包，适合服务器可访问更新源的环境。</div>
-          </div>
-        </div>
-        <button class="btn btn-outline btn-sm" id="refresh-migration-rules-btn">远端更新</button>
-      </div>
-      <div class="step-card">
-        <div class="step-card-header">
-          <div>
-            <div class="step-title">离线导入</div>
-            <div class="step-copy">选择包含 index、hash、schemas、ui 和 migrations 的 zip 包后再导入。</div>
-          </div>
-        </div>
-        <div class="inline-file">
-          <div class="file-summary" id="migration-rules-file-name">未选择适配包</div>
-          <div class="btn-group">
-            <label class="btn btn-sm btn-outline" style="cursor:pointer">选择 zip<input type="file" id="migration-rules-file" accept="application/zip,.zip" class="hidden"></label>
-            <button class="btn btn-primary btn-sm" id="upload-migration-rules-btn" disabled>导入适配包</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div id="migration-rules-info" class="text-sm text-muted mt-1">配置适配信息加载中...</div>
-</div>
 
 <div class="card">
   <div class="card-header">目录配置</div>
@@ -64,6 +18,14 @@
 <div class="card">
   <div class="card-header">Web 服务</div>
   <p class="text-sm text-muted">HTTPS 证书配置已移至 <a href="/admin/tls">证书配置</a> 页面。</p>
+  <div class="field" style="margin-top:12px">
+    <label>调试模式</label>
+    <label class="toggle-switch">
+      <input type="checkbox" id="debug-mode-toggle">
+      <span class="toggle-switch-control"></span>
+    </label>
+  </div>
+  <p class="text-sm text-muted" style="margin-top:8px">开启后记录所有操作到 <code>logs/debug.log</code>，包括 Agent 请求/响应、Token 用量、工具调用、沙箱生命周期等。仅用于排查问题，日常请关闭。</p>
 </div>
 
 <div class="card">
@@ -78,16 +40,7 @@
   <p class="text-sm text-muted" style="margin-top:8px" id="skill-policy-desc">关闭时，用户仅可通过 PicoAide 技能中心安装技能；开启后，用户还可通过 AI 助手从 ClawHub、GitHub 等三方市场自行搜索和安装。</p>
 </div>
 
-<div class="card">
-  <div class="card-header">网关</div>
-  <div class="grid-2">
-    <div class="field"><label>监听地址</label><input type="text" data-path="picoclaw.gateway.host" placeholder="0.0.0.0"></div>
-    <div class="field"><label>端口</label><input type="number" data-path="picoclaw.gateway.port" placeholder="18790"></div>
-  </div>
-</div>
-
 <div class="btn-group mt-2" style="justify-content:flex-end">
   <button class="btn btn-ghost" id="reset-btn">重置</button>
   <button class="btn btn-primary" id="save-btn">保存配置</button>
-  <button class="btn btn-success" id="apply-all-btn">下发配置到全部用户</button>
 </div>

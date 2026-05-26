@@ -1,9 +1,5 @@
 package config
 
-import (
-  "os"
-)
-
 // ============================================================
 // 常量和模板
 // ============================================================
@@ -53,45 +49,6 @@ type OIDCConfig struct {
   SyncInterval     string
 }
 
-type ImageConfig struct {
-  Name     string
-  Tag      string
-  Timezone string
-  Registry string // "github" | "tencent"
-}
-
-// IsTencent 是否使用腾讯云镜像仓库
-func (i ImageConfig) IsTencent() bool {
-  return i.Registry == "tencent"
-}
-
-// IsDev 是否为开发模式（通过环境变量 PICOAIDE_DEV=1 启用）
-func (i ImageConfig) IsDev() bool {
-  return os.Getenv("PICOAIDE_DEV") == "1"
-}
-
-// RepoName 返回镜像仓库名
-func (i ImageConfig) RepoName() string {
-  if i.IsDev() {
-    return "picoaide/picoaide-dev"
-  }
-  return "picoaide/picoaide"
-}
-
-// PullRef 根据配置返回实际拉取地址
-func (i ImageConfig) PullRef(tag string) string {
-  repo := i.RepoName()
-  if i.IsTencent() {
-    return "hkccr.ccs.tencentyun.com/" + repo + ":" + tag
-  }
-  return "ghcr.io/" + repo + ":" + tag
-}
-
-// UnifiedRef 返回统一名称
-func (i ImageConfig) UnifiedRef(tag string) string {
-  return "ghcr.io/" + i.RepoName() + ":" + tag
-}
-
 type TLSConfig struct {
   Enabled bool
   CertPEM string // PEM 编码的证书内容
@@ -99,13 +56,13 @@ type TLSConfig struct {
 }
 
 type WebConfig struct {
-  Listen           string
-  ContainerBaseURL string
-  LDAPEnabled      *bool
-  AuthMode         string // "ldap" | "oidc" | "local"
-  LogRetention     string // "1m","3m","6m","1y","3y","5y","forever"
-  LogLevel         string // "debug","info","warn","error"
-  TLS              TLSConfig
+  Listen       string
+  LDAPEnabled  *bool
+  AuthMode     string // "ldap" | "oidc" | "local"
+  LogRetention string // "1m","3m","6m","1y","3y","5y","forever"
+  LogLevel     string // "debug","info","warn","error"
+  DebugMode    bool   // 调试模式：记录所有操作到 debug.log
+  TLS          TLSConfig
 }
 
 type SkillRepoCredential struct {
@@ -164,14 +121,11 @@ type SkillsConfig struct {
 }
 
 type GlobalConfig struct {
-  LDAP                         LDAPConfig
-  OIDC                         OIDCConfig
-  Image                        ImageConfig
-  UsersRoot                    string
-  ArchiveRoot                  string
-  PicoClawAdapterRemoteBaseURL string
-  Web                          WebConfig
-  PicoClaw                     interface{}
-  Security                     interface{}
-  Skills                       SkillsConfig
+  LDAP        LDAPConfig
+  OIDC        OIDCConfig
+  UsersRoot   string
+  ArchiveRoot string
+  Web         WebConfig
+  Security    interface{}
+  Skills      SkillsConfig
 }

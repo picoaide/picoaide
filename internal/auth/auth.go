@@ -27,9 +27,9 @@ var passwordHashParams = struct {
   keyLen  uint32
   saltLen int
 }{
-  memory:  64 * 1024,
-  time:    3,
-  threads: 4,
+  memory:  19 * 1024, // 19 MiB (19456 KiB) — OWASP 最低建议值
+  time:    2,
+  threads: 1,
   keyLen:  32,
   saltLen: 16,
 }
@@ -128,22 +128,6 @@ func syncSchema() error {
     role TEXT NOT NULL DEFAULT 'user',
     source TEXT NOT NULL DEFAULT 'local',
     created_at DATETIME NOT NULL DEFAULT (datetime('now', 'localtime'))
-  )`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS containers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    container_id TEXT,
-    image TEXT NOT NULL,
-    status TEXT DEFAULT 'stopped',
-    ip TEXT,
-    cpu_limit REAL DEFAULT 0,
-    memory_limit INTEGER DEFAULT 0,
-    mcp_token TEXT DEFAULT '',
-    created_at DATETIME DEFAULT (datetime('now','localtime')),
-    updated_at DATETIME DEFAULT (datetime('now','localtime'))
   )`)
   if err != nil {
     return err
@@ -342,24 +326,13 @@ func GenerateMCPToken(username string) (string, error) {
   }
   token := username + ":" + hex.EncodeToString(b)
 
-  // 先尝试 UPDATE，如果无匹配行则 INSERT
-  affected, err := engine.Where("username = ?", username).
-    Cols("mcp_token").
-    Update(&ContainerRecord{MCPToken: token})
+  _, err := engine.Exec(
+    `INSERT INTO mcp_tokens (username, token, updated_at) VALUES (?, ?, datetime('now','localtime'))
+     ON CONFLICT(username) DO UPDATE SET token = ?, updated_at = datetime('now','localtime')`,
+    username, token, token,
+  )
   if err != nil {
     return "", fmt.Errorf("保存 MCP token 失败: %w", err)
-  }
-  if affected == 0 {
-    // 无匹配行，执行 INSERT
-    _, err = engine.Insert(&ContainerRecord{
-      Username: username,
-      Image:    "",
-      Status:   "stopped",
-      MCPToken: token,
-    })
-    if err != nil {
-      return "", fmt.Errorf("创建容器记录失败: %w", err)
-    }
   }
   return token, nil
 }
@@ -369,15 +342,14 @@ func GetMCPToken(username string) (string, error) {
   if err := ensureDB(); err != nil {
     return "", err
   }
-  var rec ContainerRecord
-  has, err := engine.Where("username = ?", username).Get(&rec)
+  rows, err := engine.Query("SELECT token FROM mcp_tokens WHERE username = ? LIMIT 1", username)
   if err != nil {
     return "", err
   }
-  if !has {
+  if len(rows) == 0 {
     return "", nil
   }
-  return rec.MCPToken, nil
+  return string(rows[0]["token"]), nil
 }
 
 // ValidateMCPToken 验证 MCP token，返回用户名

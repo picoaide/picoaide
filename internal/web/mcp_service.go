@@ -9,10 +9,20 @@ import (
   "log/slog"
   "net/http"
   "strings"
+  "sync"
   "time"
 
   "github.com/gin-gonic/gin"
 )
+
+// toolToMap 将 ToolDef 转为 MCP 响应格式的 map
+func toolToMap(t ToolDef) map[string]interface{} {
+  return map[string]interface{}{
+    "name":        t.Name,
+    "description": t.Description,
+    "inputSchema": t.InputSchema,
+  }
+}
 
 // ServiceInfo 描述一个 MCP SSE 服务的完整配置
 type ServiceInfo struct {
@@ -23,27 +33,53 @@ type ServiceInfo struct {
 }
 
 // serviceRegistry 已注册的 MCP 服务
-var serviceRegistry = map[string]*ServiceInfo{}
+var (
+  serviceRegistry   = map[string]*ServiceInfo{}
+  serviceRegistryMu sync.RWMutex
+)
 
 func init() {
   RegisterService("browser", browserSvc, browserToolDefs, "picoaide-browser")
   RegisterService("computer", computerSvc, computerToolDefs, "picoaide-computer")
+  RegisterPicoaideService("agent", picoaideToolDefs, "picoaide-agent")
+}
+
+// getService 并发安全地获取已注册的 MCP 服务
+func getService(name string) (*ServiceInfo, bool) {
+  serviceRegistryMu.RLock()
+  info, ok := serviceRegistry[name]
+  serviceRegistryMu.RUnlock()
+  return info, ok
+}
+
+// RegisterPicoaideService 注册一个 MCP SSE 服务（服务端 handler，无需代理 Hub）
+func RegisterPicoaideService(name string, tools []ToolDef, serverName string) {
+  serviceRegistryMu.Lock()
+  serviceRegistry[name] = &ServiceInfo{
+    Hub:        nil,
+    Tools:      tools,
+    ServerName: serverName,
+    Version:    "1.0.0",
+  }
+  serviceRegistryMu.Unlock()
 }
 
 // RegisterService 注册一个 MCP SSE 服务
 func RegisterService(name string, hub *ServiceHub, tools []ToolDef, serverName string) {
+  serviceRegistryMu.Lock()
   serviceRegistry[name] = &ServiceInfo{
     Hub:        hub,
     Tools:      tools,
     ServerName: serverName,
     Version:    "1.0.0",
   }
+  serviceRegistryMu.Unlock()
 }
 
 // handleMCPSSEServiceGet 处理 MCP SSE GET 连接（建立 SSE 流）
 func (s *Server) handleMCPSSEServiceGet(c *gin.Context) {
   serviceName := c.Param("service")
-  _, ok := serviceRegistry[serviceName]
+  _, ok := getService(serviceName)
   if !ok {
     writeError(c, http.StatusNotFound, "未知的 MCP 服务: "+serviceName)
     return
@@ -63,7 +99,6 @@ func (s *Server) handleMCPSSEServiceGet(c *gin.Context) {
   c.Status(http.StatusOK)
 
   // 发送 endpoint 事件
-  token := extractToken(c.Request)
   // PicoClaw 0.2.8 uses the MCP Streamable HTTP transport for type=sse. Its
   // standalone GET stream must be empty until server-initiated messages exist.
   // Older SSE clients do not send Mcp-Protocol-Version and still expect the
@@ -85,7 +120,7 @@ func (s *Server) handleMCPSSEServiceGet(c *gin.Context) {
     } else {
       pathPrefix = "/api"
     }
-    postEndpoint := fmt.Sprintf("%s://%s%s/mcp/sse/%s?token=%s", scheme, host, pathPrefix, serviceName, token)
+    postEndpoint := fmt.Sprintf("%s://%s%s/mcp/sse/%s", scheme, host, pathPrefix, serviceName)
     fmt.Fprintf(c.Writer, "event: endpoint\ndata: %s\n\n", postEndpoint)
   } else {
     // Flush a comment frame so Streamable HTTP clients finish the standalone
@@ -146,7 +181,7 @@ func negotiatedMCPProtocolVersion(params json.RawMessage) string {
 // handleMCPSSEServicePost 处理 MCP SSE POST 请求（JSON-RPC 消息）
 func (s *Server) handleMCPSSEServicePost(c *gin.Context) {
   serviceName := c.Param("service")
-  info, ok := serviceRegistry[serviceName]
+  info, ok := getService(serviceName)
   if !ok {
     writeError(c, http.StatusNotFound, "未知的 MCP 服务: "+serviceName)
     return
@@ -157,9 +192,10 @@ func (s *Server) handleMCPSSEServicePost(c *gin.Context) {
     return
   }
 
+  c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20) // 1 MB
   body, err := io.ReadAll(c.Request.Body)
   if err != nil {
-    writeError(c, http.StatusBadRequest, "读取请求体失败")
+    writeError(c, http.StatusBadRequest, "请求体过大或读取失败")
     return
   }
   defer c.Request.Body.Close()
@@ -200,14 +236,37 @@ func (s *Server) handleMCPSSEServicePost(c *gin.Context) {
     c.Status(http.StatusAccepted)
 
   case "tools/list":
-    tools := make([]map[string]interface{}, len(info.Tools))
-    for i, t := range info.Tools {
-      tools[i] = map[string]interface{}{
-        "name":        t.Name,
-        "description": t.Description,
-        "inputSchema": t.InputSchema,
+    tools := make([]map[string]interface{}, 0)
+
+    if info.Hub == nil {
+      // 服务端服务：聚合所有来源的工具
+      // 1. PicoAide 平台工具
+      for _, t := range picoaideToolDefs {
+        tools = append(tools, toolToMap(t))
+      }
+      // 2. 浏览器工具（如果已连接）
+      if conn, ok := browserSvc.GetConnection(username); ok && conn != nil {
+        for _, t := range browserToolDefs {
+          tools = append(tools, toolToMap(t))
+        }
+      }
+      // 3. 桌面代理工具（如果已连接）
+      if conn, ok := computerSvc.GetConnection(username); ok && conn != nil {
+        for _, t := range computerToolDefs {
+          tools = append(tools, toolToMap(t))
+        }
+      }
+      // 4. 第三方 MCP 工具
+      mcpTools := globalMCPManager.GetTools(username)
+      for _, t := range mcpTools {
+        tools = append(tools, toolToMap(t))
+      }
+    } else {
+      for _, t := range info.Tools {
+        tools = append(tools, toolToMap(t))
       }
     }
+
     writeMCPResult(c.Writer, req.ID, map[string]interface{}{
       "tools": tools,
     })
@@ -241,6 +300,39 @@ func (s *Server) handleMCPToolCall(c *gin.Context, id json.Number, params json.R
     return
   }
 
+  // 服务端 handler（无 Hub 的服务）
+  if info.Hub == nil {
+    // 先检查 PicoAide 平台工具 handler
+    if _, ok := picoaideHandlers[p.Name]; ok {
+      picoaideHandleMCPToolCall(s, c, id, p.Name, p.Arguments, username)
+      return
+    }
+    // 再尝试第三方 MCP 工具
+    result, err := globalMCPManager.CallTool(c.Request.Context(), p.Name, p.Arguments)
+    if err == nil {
+      writeMCPResult(c.Writer, id, formatMCPResult(result))
+      return
+    }
+    // 转发到浏览器 Hub
+    if strings.HasPrefix(p.Name, "browser_") {
+      s.forwardToHub(c, id, p.Name, p.Arguments, username, browserSvc, "浏览器")
+      return
+    }
+    // 转发到桌面代理 Hub
+    if strings.HasPrefix(p.Name, "computer_") {
+      s.forwardToHub(c, id, p.Name, p.Arguments, username, computerSvc, "桌面代理")
+      return
+    }
+    // 都没找到，返回错误
+    writeMCPResult(c.Writer, id, map[string]interface{}{
+      "content": []map[string]interface{}{
+        {"type": "text", "text": "未知工具: " + p.Name},
+      },
+      "isError": true,
+    })
+    return
+  }
+
   // 查找代理连接
   conn, ok := info.Hub.GetConnection(username)
   if !ok {
@@ -266,6 +358,55 @@ func (s *Server) handleMCPToolCall(c *gin.Context, id json.Number, params json.R
   }
 
   // 解析代理返回的结果
+  var extResp struct {
+    Result interface{} `json:"result"`
+    Error  interface{} `json:"error"`
+  }
+  json.Unmarshal(result, &extResp)
+
+  if extResp.Error != nil {
+    errMsg := fmt.Sprintf("%v", extResp.Error)
+    if m, ok := extResp.Error.(map[string]interface{}); ok {
+      if msg, ok := m["message"].(string); ok {
+        errMsg = msg
+      }
+    }
+    writeMCPResult(c.Writer, id, map[string]interface{}{
+      "content": []map[string]interface{}{
+        {"type": "text", "text": errMsg},
+      },
+      "isError": true,
+    })
+    return
+  }
+
+  writeMCPResult(c.Writer, id, formatMCPResult(extResp.Result))
+}
+
+// forwardToHub 将 agent 服务收到的工具调用转发到对应 Hub（浏览器/桌面代理）
+func (s *Server) forwardToHub(c *gin.Context, id json.Number, toolName string, args map[string]interface{}, username string, hub *ServiceHub, displayName string) {
+  conn, ok := hub.GetConnection(username)
+  if !ok {
+    writeMCPResult(c.Writer, id, map[string]interface{}{
+      "content": []map[string]interface{}{
+        {"type": "text", "text": displayName + " 代理未连接"},
+      },
+      "isError": true,
+    })
+    return
+  }
+
+  result, err := conn.SendCommand(c.Request.Context(), toolName, args)
+  if err != nil {
+    writeMCPResult(c.Writer, id, map[string]interface{}{
+      "content": []map[string]interface{}{
+        {"type": "text", "text": "执行失败: " + err.Error()},
+      },
+      "isError": true,
+    })
+    return
+  }
+
   var extResp struct {
     Result interface{} `json:"result"`
     Error  interface{} `json:"error"`

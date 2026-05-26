@@ -76,7 +76,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
     serveHTML(c, "initializing.html")
   })
 
-  manageSections := []string{"welcome", "skills", "channels", "files", "teamspace", "authorization", "password"}
+  manageSections := []string{"welcome", "chat", "skills", "channels", "files", "teamspace", "authorization", "password", "cron"}
 
   // 新路径 /user/*
   r.GET("/user", func(c *gin.Context) {
@@ -86,11 +86,6 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
     sectionPath := "/user/" + section
     r.GET(sectionPath, func(c *gin.Context) {
       if !requireManageUser(c) {
-        return
-      }
-      username := s.getSessionUser(c)
-      if username != "" && auth.IsExternalUser(username) && !s.userEnvironmentReady(username) {
-        c.Redirect(http.StatusFound, "/initializing")
         return
       }
       serveHTML(c, "manage/index.html")
@@ -112,7 +107,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
   r.GET("/admin/", func(c *gin.Context) {
     c.Redirect(http.StatusMovedPermanently, "/admin/dashboard")
   })
-  adminSections := []string{"dashboard", "superadmins", "users", "groups", "images", "picoclaw", "models", "skills", "auth", "teamspace", "tls", "settings"}
+  adminSections := []string{"dashboard", "superadmins", "users", "groups", "channels", "models", "skills", "auth", "teamspace", "password", "mcpservers", "tls", "settings"}
   for _, section := range adminSections {
     sectionPath := "/admin/" + section
     r.GET(sectionPath, func(c *gin.Context) {
@@ -156,4 +151,14 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
   r.GET("/login.js", serveFile)
   r.GET("/initializing.js", serveFile)
   r.GET("/admin/admin.js", serveFile)
+
+  // Web 聊天页面
+  r.GET("/chat", func(c *gin.Context) {
+    username, ok := requireUIUser(c)
+    if !ok {
+      return
+    }
+    _ = username
+    serveHTML(c, "chat.html")
+  })
 }

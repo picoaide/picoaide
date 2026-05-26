@@ -227,10 +227,10 @@ func GetAllLocalUsers() ([]LocalUser, error) {
   if err != nil {
     return nil, err
   }
-  // 转换为只含 Username/Role 的结构（保持原返回类型）
+  // 转换为精简结构
   result := make([]LocalUser, 0, len(users))
   for _, u := range users {
-    result = append(result, LocalUser{Username: u.Username, Role: u.Role, Source: u.Source})
+    result = append(result, LocalUser{Username: u.Username, Role: u.Role, Source: u.Source, IP: u.IP})
   }
   return result, nil
 }
@@ -330,13 +330,28 @@ func GenerateRandomPassword(length int) string {
   return string(b)
 }
 
-// DeleteUser 删除本地用户（含技能绑定）
+// DeleteUser 删除本地用户（含所有关联数据）
 func DeleteUser(username string) error {
   if err := ensureDB(); err != nil {
     return err
   }
   if _, err := engine.Where("username = ?", username).Delete(&UserSkill{}); err != nil {
     return fmt.Errorf("删除技能绑定失败: %w", err)
+  }
+  if _, err := engine.Where("username = ?", username).Delete(&UserGroup{}); err != nil {
+    return fmt.Errorf("删除组成员关系失败: %w", err)
+  }
+  if _, err := engine.Exec("DELETE FROM mcp_tokens WHERE username = ?", username); err != nil {
+    return fmt.Errorf("删除 MCP token 失败: %w", err)
+  }
+  if _, err := engine.Where("username = ?", username).Delete(&UserCookie{}); err != nil {
+    return fmt.Errorf("删除 Cookie 授权失败: %w", err)
+  }
+  if _, err := engine.Where("username = ?", username).Delete(&UserChannel{}); err != nil {
+    return fmt.Errorf("删除渠道配置失败: %w", err)
+  }
+  if _, err := engine.Where("username = ?", username).Delete(&SharedFolderMount{}); err != nil {
+    return fmt.Errorf("删除共享文件夹挂载失败: %w", err)
   }
   affected, err := engine.Where("username = ?", username).Delete(&LocalUser{})
   if err != nil {
@@ -350,20 +365,21 @@ func DeleteUser(username string) error {
 
 // DeleteAllRegularUsers removes all non-superadmin user records and related
 // user-scoped database state. Local superadmin accounts are intentionally kept.
-func DeleteAllRegularUsers() (int64, error) {
+// Returns the list of deleted usernames and the count.
+func DeleteAllRegularUsers() ([]string, int64, error) {
   if err := ensureDB(); err != nil {
-    return 0, err
+    return nil, 0, err
   }
   session := engine.NewSession()
   defer session.Close()
   if err := session.Begin(); err != nil {
-    return 0, err
+    return nil, 0, err
   }
 
   users := make([]LocalUser, 0)
   if err := session.Where("role != ?", "superadmin").Find(&users); err != nil {
     _ = session.Rollback()
-    return 0, err
+    return nil, 0, err
   }
   usernames := make([]string, 0, len(users))
   for _, u := range users {
@@ -373,23 +389,39 @@ func DeleteAllRegularUsers() (int64, error) {
   for _, username := range usernames {
     if _, err := session.Where("username = ?", username).Delete(&UserGroup{}); err != nil {
       _ = session.Rollback()
-      return 0, err
+      return nil, 0, err
     }
     if _, err := session.Where("username = ?", username).Delete(&UserChannel{}); err != nil {
       _ = session.Rollback()
-      return 0, err
+      return nil, 0, err
     }
     if _, err := session.Where("username = ?", username).Delete(&UserSkill{}); err != nil {
       _ = session.Rollback()
-      return 0, err
+      return nil, 0, err
+    }
+    if _, err := session.Exec("DELETE FROM mcp_tokens WHERE username = ?", username); err != nil {
+      _ = session.Rollback()
+      return nil, 0, err
+    }
+    if _, err := session.Where("username = ?", username).Delete(&UserCookie{}); err != nil {
+      _ = session.Rollback()
+      return nil, 0, err
+    }
+    if _, err := session.Where("username = ?", username).Delete(&SharedFolderMount{}); err != nil {
+      _ = session.Rollback()
+      return nil, 0, err
+    }
+    if _, err := session.Exec("DELETE FROM mcp_server_grants WHERE grant_type='user' AND grant_value=?", username); err != nil {
+      _ = session.Rollback()
+      return nil, 0, err
     }
   }
   affected, err := session.Where("role != ?", "superadmin").Delete(&LocalUser{})
   if err != nil {
     _ = session.Rollback()
-    return 0, err
+    return nil, 0, err
   }
-  return affected, session.Commit()
+  return usernames, affected, session.Commit()
 }
 
 // ClearAllGroups removes all groups and their bindings. Group membership is
@@ -414,14 +446,4 @@ func ClearAllGroups() error {
   return session.Commit()
 }
 
-// ClearAllContainers removes all ordinary user container records.
-func ClearAllContainers() (int64, error) {
-  if err := ensureDB(); err != nil {
-    return 0, err
-  }
-  res, err := engine.Exec("DELETE FROM containers")
-  if err != nil {
-    return 0, err
-  }
-  return res.RowsAffected()
-}
+

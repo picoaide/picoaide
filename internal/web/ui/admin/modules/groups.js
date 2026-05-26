@@ -82,7 +82,7 @@ export async function init(ctx) {
         const subCount = (byParent[g.id] || []).length;
         const subInfo = subCount > 0 ? ' <small class="text-muted">(' + subCount + ' 个子组)</small>' : '';
         const deleteBtn = !unifiedAuth ? '<button class="btn btn-sm btn-danger" data-group-delete="' + esc(g.name) + '">删除</button>' : '';
-        tr.innerHTML = '<td><strong>' + indent + esc(g.name) + '</strong>' + subInfo + '</td><td>' + srcBadge + '</td><td>' + g.member_count + '</td><td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline" data-group-detail="' + esc(g.name) + '">详情</button><button class="btn btn-sm btn-outline" data-group-apply="' + esc(g.name) + '">下发配置</button>' + deleteBtn + '</div></td>';
+        tr.innerHTML = '<td><strong>' + indent + esc(g.name) + '</strong>' + subInfo + '</td><td>' + srcBadge + '</td><td>' + g.member_count + '</td><td class="actions-cell"><div class="btn-group"><button class="btn btn-sm btn-outline" data-group-detail="' + esc(g.name) + '">详情</button>' + deleteBtn + '</div></td>';
         tbody.appendChild(tr);
         renderTree(g.id, depth + 1);
       }
@@ -91,20 +91,6 @@ export async function init(ctx) {
 
     tbody.querySelectorAll('[data-group-detail]').forEach(btn => {
       btn.addEventListener('click', () => openGroupDetail(btn.dataset.groupDetail));
-    });
-    tbody.querySelectorAll('[data-group-apply]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (!await confirmModal('确定要下发配置到组 ' + btn.dataset.groupApply + ' 的所有成员（包含子组成员）并重启容器吗？')) return;
-        showMsg('#groups-msg', '提交中...', true);
-        try {
-          const res = await Api.post('/api/admin/config/apply', { group: btn.dataset.groupApply });
-          if (res.task_id) {
-            pollGroupsTask('#groups-msg', '下发配置到组 ' + btn.dataset.groupApply);
-          } else {
-            showMsg('#groups-msg', res.message || res.error, res.success);
-          }
-        } catch (e) { showMsg('#groups-msg', e.message, false); }
-      });
     });
     tbody.querySelectorAll('[data-group-delete]').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -121,8 +107,8 @@ export async function init(ctx) {
     const desc = ctx.$('#groups-page-desc');
     if (desc) {
       desc.textContent = unifiedAuth
-        ? '用户组来自当前认证源，可用于绑定 Skill、下发配置和管理容器策略。'
-        : '用户组由管理员本地维护，可用于绑定 Skill、下发配置和管理容器策略。';
+        ? '用户组来自当前认证源，可用于绑定 Skill 和管理策略。'
+        : '用户组由管理员本地维护，可用于绑定 Skill 和管理策略。';
     }
     const tip = ctx.$('#groups-mode-tip');
     if (!tip) return;
@@ -183,6 +169,7 @@ export async function init(ctx) {
           '</div>' +
           '</div>' +
           '<div id="gd-staging-info" class="mt-1"></div>' +
+          '<div class="field"><label>绑定技能</label><div id="gd-skills" class="mt-1"></div><div style="display:flex;gap:.35rem;margin-top:.35rem"><input type="text" id="gd-skill-name" placeholder="技能名称" style="flex:1;font-size:.82rem"><button class="btn btn-sm btn-outline" id="gd-skill-bind-btn">绑定</button></div></div>' +
           '<small class="text-muted">' + (unifiedAuth ? '成员由当前认证源同步' : '成员由管理员本地维护') + '</small>' +
         '</div>' +
         (!unifiedAuth ? '<div class="modal-footer" id="gd-modal-actions"><button class="btn btn-primary" id="gd-save-btn">保存</button><button class="btn btn-outline" id="gd-cancel-btn">取消</button></div>' : '') +
@@ -328,6 +315,57 @@ export async function init(ctx) {
 
     await loadMembers();
     await loadCandidates();
+    await loadGroupSkills();
+
+    // 技能管理
+    async function loadGroupSkills() {
+      try {
+        var data = await Api.get('/api/admin/groups/members?name=' + encodeURIComponent(groupName));
+        if (data.success && data.skills) {
+          renderGroupSkills(data.skills);
+        }
+      } catch(e) {}
+    }
+
+    function renderGroupSkills(skills) {
+      var el = overlay.querySelector('#gd-skills');
+      if (!el) return;
+      if (!skills || skills.length === 0) {
+        el.innerHTML = '<small class="text-muted">暂无绑定技能</small>';
+        return;
+      }
+      el.innerHTML = skills.map(function(sk) {
+        return '<span class="tag">' + esc(sk) + ' <button data-unbind-skill="' + esc(sk) + '" style="color:#dc2626">&times;</button></span>';
+      }).join(' ');
+      el.querySelectorAll('[data-unbind-skill]').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          if (!await confirmModal('确定从组解绑技能 ' + btn.dataset.unbindSkill + '？')) return;
+          var res = await Api.post('/api/admin/groups/skills/unbind', { group_name: groupName, skill_name: btn.dataset.unbindSkill });
+          if (res.success) {
+            showMsg('#groups-msg', res.message || '解绑成功', true);
+            await loadGroupSkills();
+          } else {
+            showMsg('#groups-msg', res.error || '解绑失败', false);
+          }
+        });
+      });
+    }
+
+    overlay.querySelector('#gd-skill-bind-btn')?.addEventListener('click', async function() {
+      var skillName = overlay.querySelector('#gd-skill-name').value.trim();
+      if (!skillName) { showMsg('#groups-msg', '请输入技能名称', false); return; }
+      var res = await Api.post('/api/admin/groups/skills/bind', { group_name: groupName, skill_name: skillName });
+      if (res.success) {
+        showMsg('#groups-msg', res.message || '绑定成功', true);
+        overlay.querySelector('#gd-skill-name').value = '';
+        await loadGroupSkills();
+      } else {
+        showMsg('#groups-msg', res.error || '绑定失败', false);
+      }
+    });
+    overlay.querySelector('#gd-skill-name')?.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { overlay.querySelector('#gd-skill-bind-btn')?.click(); }
+    });
 
     overlay.querySelector('#gd-save-btn')?.addEventListener('click', async () => {
       if (saving) return;
@@ -450,22 +488,4 @@ export async function init(ctx) {
     });
   }
 
-  function pollGroupsTask(selector, initialMsg) {
-    showMsg(selector, initialMsg + '...', true);
-    var poll = async function() {
-      try {
-        var st = await Api.get('/api/admin/task/status');
-        if (st.running) {
-          var pct = st.total > 0 ? Math.round((st.done + st.failed) / st.total * 100) : 0;
-          showMsg(selector, initialMsg + ' ' + (st.done + st.failed) + '/' + st.total + ' (' + pct + '%)', true);
-          setTimeout(poll, 2000);
-        } else {
-          showMsg(selector, st.message || '完成', st.failed === 0);
-        }
-      } catch (e) {
-        showMsg(selector, '查询进度失败: ' + e.message, false);
-      }
-    };
-    setTimeout(poll, 1500);
-  }
 }

@@ -10,7 +10,6 @@ func TestModelTableNames(t *testing.T) {
     expected string
   }{
     {LocalUser{}, "local_users"},
-    {ContainerRecord{}, "containers"},
     {Setting{}, "settings"},
     {SettingsHistory{}, "settings_history"},
     {WhitelistEntry{}, "whitelist"},
@@ -23,7 +22,6 @@ func TestModelTableNames(t *testing.T) {
     {SkillRecord{}, "skills"},
     {UserSkill{}, "user_skills"},
     {UserCookie{}, "user_cookies"},
-    {PicoclawAdapterPackage{}, "picoclaw_adapter_packages"},
   }
   for _, tc := range tests {
     if got := tc.model.TableName(); got != tc.expected {

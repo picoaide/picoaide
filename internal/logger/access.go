@@ -5,6 +5,7 @@ import (
   "log/slog"
   "net"
   "net/http"
+  "strings"
   "time"
 )
 
@@ -63,14 +64,14 @@ func AccessMiddleware(next http.Handler) http.Handler {
 func extractUser(r *http.Request) string {
   // 尝试从 query 获取 token 中的用户名
   if t := r.URL.Query().Get("token"); t != "" {
-    if idx := stringsIndex(t, ":"); idx > 0 {
+    if idx := strings.Index(t, ":"); idx > 0 {
       return t[:idx]
     }
   }
   // 尝试从 Authorization header 获取
   if auth := r.Header.Get("Authorization"); len(auth) > 7 && auth[:7] == "Bearer " {
     token := auth[7:]
-    if idx := stringsIndex(token, ":"); idx > 0 {
+    if idx := strings.Index(token, ":"); idx > 0 {
       return token[:idx]
     }
   }
@@ -87,11 +88,4 @@ func clientIP(r *http.Request) string {
   return r.RemoteAddr
 }
 
-func stringsIndex(s, substr string) int {
-  for i := 0; i <= len(s)-len(substr); i++ {
-    if s[i:i+len(substr)] == substr {
-      return i
-    }
-  }
-  return -1
-}
+

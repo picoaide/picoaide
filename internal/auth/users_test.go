@@ -100,18 +100,20 @@ func TestDeleteAllRegularUsers(t *testing.T) {
   CreateUser("regular", "pass", "user")
   CreateUser("regular2", "pass", "user")
 
-  // Add groups, channels, skills to verify cascade
+  // Add groups, skills to verify cascade
   CreateGroup("g1", "local", "", nil)
   AddUsersToGroup("g1", []string{"regular", "regular2"})
-  UpsertUserChannelStatus("regular", "web", true, true, false, 1)
   BindSkillToUser("regular", "skill1", "self")
 
-  count, err := DeleteAllRegularUsers()
+  names, count, err := DeleteAllRegularUsers()
   if err != nil {
     t.Fatalf("DeleteAllRegularUsers: %v", err)
   }
   if count != 2 {
     t.Errorf("deleted count = %d, want 2", count)
+  }
+  if len(names) != 2 {
+    t.Errorf("deleted usernames = %d, want 2", len(names))
   }
 
   // Superadmin should still exist
@@ -143,25 +145,6 @@ func TestClearAllGroups(t *testing.T) {
   list, _ := ListGroups()
   if len(list) != 0 {
     t.Errorf("groups after clear = %d, want 0", len(list))
-  }
-}
-
-func TestClearAllContainers(t *testing.T) {
-  testInitDB(t)
-  UpsertContainer(&ContainerRecord{Username: "u1", Image: "img", Status: "running"})
-  UpsertContainer(&ContainerRecord{Username: "u2", Image: "img", Status: "stopped"})
-
-  count, err := ClearAllContainers()
-  if err != nil {
-    t.Fatalf("ClearAllContainers: %v", err)
-  }
-  if count != 2 {
-    t.Errorf("deleted = %d, want 2", count)
-  }
-
-  list, _ := GetAllContainers()
-  if len(list) != 0 {
-    t.Error("containers should be empty after clear")
   }
 }
 

@@ -1,0 +1,56 @@
+<div class="surface-panel" id="chat-panel" style="display:flex;flex-direction:column">
+  <div class="toolbar" style="padding:.85rem 1rem;border-bottom:1px solid var(--border-light);flex-shrink:0">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div class="toolbar-title" style="font-size:1.05rem">AI 对话</div>
+        <div class="toolbar-subtitle">与你的 AI 助手对话</div>
+      </div>
+      <div id="chat-context-bar" style="display:none;min-width:160px;max-width:220px;margin-left:12px;padding-top:2px">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary,#999);margin-bottom:2px">
+          <span>上下文</span>
+          <span id="chat-context-label">0%</span>
+        </div>
+        <div style="height:4px;background:#e8e8e8;border-radius:2px;overflow:hidden">
+          <div id="chat-context-fill" style="width:0%;height:100%;background:#4a9eff;border-radius:2px;transition:width .3s ease"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="chat-box" style="flex:1;overflow-y:auto;padding:1rem;min-height:0">
+    <div id="chat-loading" style="text-align:center;padding:32px;color:var(--text-secondary)">加载中...</div>
+  </div>
+  <div style="padding:.75rem 1rem;border-top:1px solid var(--border-light);flex-shrink:0;background:var(--card-bg,#fff)">
+    <form id="chat-form" style="display:flex;gap:.5rem">
+      <input type="text" id="chat-input" placeholder="输入消息..." style="flex:1;padding:.6rem .8rem;border:1px solid var(--border,#d0d0d0);border-radius:6px;font-size:.93rem;outline:none">
+      <button type="submit" class="btn btn-primary" id="chat-send-btn" style="padding:.6rem 1.2rem">发送</button>
+      <button type="button" class="btn btn-danger" id="chat-stop-btn" style="padding:.6rem 1.2rem;display:none" disabled>停止</button>
+    </form>
+  </div>
+</div>
+<style>
+.chat-msg{margin-bottom:12px;padding:10px 14px;border-radius:8px;max-width:85%;min-width:0;word-break:break-word;overflow-wrap:break-word}
+.chat-msg.msg-user{background:#e3f2fd;margin-left:auto}
+.chat-msg.msg-assistant{background:var(--card-bg,#fff);border:1px solid var(--border-light,#e0e0e0)}
+.chat-meta{font-size:12px;color:var(--text-secondary,#999);margin-bottom:4px}
+.chat-content{line-height:1.6;font-size:.93rem;min-width:0}
+.chat-content p{margin:0 0 6px}
+.chat-content p:last-child{margin:0}
+.chat-content h2,.chat-content h3,.chat-content h4{margin:10px 0 4px;font-weight:600}
+.chat-content h2{font-size:1.05rem}
+.chat-content h3{font-size:1rem}
+.chat-content h4{font-size:.95rem}
+.chat-content ul,.chat-content ol{margin:4px 0 8px;padding-left:20px}
+.chat-content li{margin:2px 0}
+.chat-content blockquote{margin:6px 0;padding:4px 12px;border-left:3px solid #4a9eff;color:var(--text-secondary,#666);background:#f8f9fa;border-radius:0 4px 4px 0}
+.chat-content hr{border:none;border-top:1px solid var(--border-light,#e0e0e0);margin:12px 0}
+.chat-content a{color:#4a9eff;text-decoration:underline}
+.chat-content table{border-collapse:collapse;margin:8px 0;max-width:100%;overflow-x:auto;display:block;font-size:.88em}
+.chat-content th,.chat-content td{border:1px solid #ddd;padding:6px 10px;text-align:left}
+.chat-content th{background:#f5f5f5;font-weight:600}
+.chat-content tr:nth-child(even){background:#fafafa}
+.chat-content code{background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:.88em;word-break:break-word}
+.chat-content pre{background:#f5f5f5;padding:10px;border-radius:6px;overflow-x:auto;margin:6px 0;max-width:100%}
+.chat-content pre code{background:none;padding:0;word-break:normal}
+.chat-thinking-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--text-secondary,#999);animation:chatPulse 1.2s infinite}
+@keyframes chatPulse{0%,100%{opacity:.3}50%{opacity:1}}
+</style>

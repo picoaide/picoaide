@@ -23,20 +23,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return false;
   }
   if (msg.type === 'offscreen-status') {
-    sendResponse({
-      connected: ws !== null && ws.readyState === WebSocket.OPEN,
-    });
+    sendResponse({ connected: ws !== null && ws.readyState === WebSocket.OPEN });
     return false;
   }
 });
 
-// 保持 Service Worker 存活：建立长连接端口
 function connectSWKeepalive() {
   try {
     swPort = chrome.runtime.connect({ name: 'sw-keepalive' });
     swPort.onDisconnect.addListener(() => {
       swPort = null;
-      // Service Worker 被杀，尝试重连（会唤醒 SW）
       if (ws && ws.readyState === WebSocket.OPEN) {
         setTimeout(connectSWKeepalive, 1000);
       }
@@ -82,7 +78,12 @@ function connectWebSocket(url) {
   ws.onclose = (event) => {
     disconnectSWKeepalive();
     stopKeepalive();
-    chrome.runtime.sendMessage({ type: 'offscreen-close', code: event.code });
+    // 传递 wasClean 和 code 让 background 判断是否需要重连
+    chrome.runtime.sendMessage({
+      type: 'offscreen-close',
+      code: event.code,
+      wasClean: event.wasClean || event.code === 1000,
+    });
     ws = null;
   };
 
@@ -95,7 +96,7 @@ function disconnectWebSocket() {
   disconnectSWKeepalive();
   stopKeepalive();
   if (ws) {
-    try { ws.close(); } catch {}
+    try { ws.close(1000, 'user_disconnect'); } catch {}
     ws = null;
   }
 }

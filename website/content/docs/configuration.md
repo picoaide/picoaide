@@ -1,54 +1,59 @@
 ---
 title: "系统配置参考"
-description: "PicoAide 全局配置结构、字段说明和文件布局"
+description: "PicoAide 全局配置结构、字段说明、目录布局和 CLI 命令参考"
 weight: 6
 draft: false
 ---
 
 PicoAide 的配置主要存储在 SQLite 数据库中，通过展平键值对存储。超管可以通过管理后台或 API 修改配置。本文档是配置字段的完整参考。
 
-## 配置文件结构
+## 配置存储机制
 
-### 数据目录
+系统使用 `flattenConfig()` / `buildNested()` 机制实现 Go 结构体到点分隔键值对的双向转换：
+
+- 字符串、数字、布尔值直接存储为字符串
+- Map 递归展平为多级键（如 `ldap.host`、`ldap.bind_dn`）
+- 数组和复杂结构序列化为 JSON blob（`security`、`skills` 整体存储）
+- 配置变更记录在 `settings_history` 表中，包含旧值、新值和操作人
+
+## 数据目录结构
 
 初始化时默认数据目录是 `/data/picoaide`。典型结构：
 
 ```text
 /data/picoaide/
-├── picoaide.db              # SQLite 数据库
+├── picoaide.db              # SQLite 数据库（用户/组/配置/技能）
+├── picoaide.sock            # Unix socket（权限 0700，供本地通信）
 ├── users/                   # 用户工作目录
 │   └── <username>/
-│       └── .picoclaw/
-│           ├── config.json      # PicoClaw 配置
-│           ├── .security.yml    # 密钥配置
-│           └── workspace/
-│               ├── skills/      # 已部署的技能
-│               └── ...          # 用户工作文件
-├── archive/                 # 删除用户时的归档
-├── skill/                   # 已安装的技能
+│       ├── AGENT.md         # AI Agent 行为配置
+│       ├── SOUL.md          # 个性设定
+│       ├── USER.md          # 用户偏好
+│       ├── memory/          # 长期记忆存储
+│       │   └── MEMORY.md
+│       ├── skills/          # 已部署的技能（只读挂载）
+│       └── sessions/        # 对话历史
+├── archive/                 # 删除用户时的归档（带时间戳）
+├── skill/                   # 已安装的技能目录
 ├── skill-repos/             # Git 仓库克隆目录
-├── rules/                   # Picoclaw Adapter 缓存
-│   └── picoclaw/
-│       ├── index.json
-│       ├── hash
-│       ├── schemas/
-│       ├── ui/
-│       └── migrations/
-└── logs/
-    └── picoaide.log          # 结构化日志
+├── rules/                   # 规则缓存
+├── shared/                  # 团队空间共享文件夹
+├── logs/
+│   └── picoaide.log         # 结构化 JSON 日志
+└── server.key / server.crt  # TLS 证书（上传后生成）
 ```
 
 ## 全局配置字段
 
-全局配置存储在 SQLite `settings` 表中，以点分隔的键值对存储。以下是所有可用字段。
+全局配置存储在 SQLite `settings` 表中，以点分隔的键值对存储。
 
 ### Web 配置
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `web.listen` | string | `:80` | 服务监听地址（当前固定为 `:80`，配置项为预留） |
-
-当 TLS 启用时，服务端在 `:443` 提供 HTTPS 服务，并额外启动 `:80` 入口用于 Docker 内网兼容和外部 HTTP 重定向。
+| `web.auth_mode` | string | `local` | 认证模式：`local` / `ldap` / `oidc` |
+| `web.log_level` | string | `info` | 日志级别：`debug` / `info` / `warn` / `error` |
+| `web.log_retention` | string | `6m` | 日志保留周期 |
 
 ### LDAP 配置
 
@@ -60,12 +65,12 @@ PicoAide 的配置主要存储在 SQLite 数据库中，通过展平键值对存
 | `ldap.base_dn` | string | | 用户搜索根 DN |
 | `ldap.filter` | string | `(uid={{username}})` | 用户过滤器 |
 | `ldap.username_attribute` | string | `uid` | 用户名属性 |
-| `ldap.group_search_mode` | string | `member_of` | `member_of` 或 `group_search` |
+| `ldap.group_search_mode` | string | `member_of` | 组搜索模式：`member_of` 或 `group_search` |
 | `ldap.group_base_dn` | string | | 组搜索根 DN |
 | `ldap.group_filter` | string | | 组过滤器 |
 | `ldap.group_member_attribute` | string | `member` | 组成员属性 |
-| `ldap.whitelist_enabled` | bool | `false` | 是否使用白名单 |
-| `ldap.sync_interval` | string | `0` | 定时同步间隔，`0` 关闭 |
+| `ldap.whitelist_enabled` | bool | `false` | 是否启用白名单 |
+| `ldap.sync_interval` | string | `0` | 定时同步间隔（如 `30m`、`1h`），`0` 关闭 |
 
 ### OIDC 配置
 
@@ -76,122 +81,68 @@ PicoAide 的配置主要存储在 SQLite 数据库中，通过展平键值对存
 | `oidc.client_secret` | string | | 客户端密钥 |
 | `oidc.redirect_url` | string | | 回调地址 |
 | `oidc.username_claim` | string | `preferred_username` | 用户名声明字段 |
-
-### 镜像配置
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `image.name` | string | `ghcr.io/picoaide/picoaide` | 镜像名 |
-| `image.tag` | string | `latest` | 默认标签 |
-| `image.timezone` | string | `Asia/Shanghai` | 容器时区 |
-| `image.registry` | string | `github` | 仓库源：`github` 或 `tencent` |
-| `image.cpu_limit` | int64 | | CPU 限制（NanoCPUs） |
-| `image.memory_limit` | int64 | | 内存限制（字节） |
-
-拉取地址由代码生成：
-
-| registry | 拉取地址 |
-|----------|---------|
-| `github` | `ghcr.io/picoaide/picoaide:<tag>` |
-| `tencent` | `hkccr.ccs.tencentyun.com/picoaide/picoaide:<tag>` |
-
-腾讯云模式拉取后会 retag 成统一的 `ghcr.io/...` 引用，便于后续容器记录统一。
+| `oidc.whitelist_enabled` | bool | `false` | 是否启用白名单 |
 
 ### 技能仓库配置
 
-技能仓库写入 `skills.repos` 数组：
+技能仓库写入 `skills` 配置项（整体 JSON blob）：
 
-```yaml
-skills:
-  repos:
-    - name: company-skills
-      url: https://git.example.com/ai/company-skills.git
-      ref: main
-      ref_type: branch
-      public: false
-      credentials:
-        - name: gitlab-token
-          provider: gitlab
-          mode: https
-          username: oauth2
-          secret: <token>
+```json
+{
+  "repos": [
+    {
+      "name": "company-skills",
+      "url": "https://git.example.com/ai/company-skills.git",
+      "ref": "main",
+      "ref_type": "branch",
+      "public": false,
+      "credentials": [
+        {
+          "name": "gitlab-token",
+          "provider": "gitlab",
+          "mode": "https",
+          "username": "oauth2",
+          "secret": "<gitlab-personal-access-token>"
+        }
+      ]
+    }
+  ]
+}
 ```
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `name` | string | 仓库名称 |
-| `url` | string | Git 地址 |
-| `ref` | string | 分支或 tag |
-| `ref_type` | string | `branch` 或 `tag` |
-| `public` | bool | 是否公开仓库 |
-| `credentials` | array | 私有仓库凭据列表 |
+### 安全配置
 
-支持的 Git 地址协议：`https://`、`http://`、`git@`、`ssh://`。
+写入 `security` 配置项（整体 JSON blob）。包含 API Key 等敏感信息，不通过 `config` API 暴露。
 
-## Picoclaw Adapter 包
+### 工具/渠道配置
 
-Picoclaw Adapter 位于 `rules/picoclaw`，负责配置的版本管理和迁移。
+渠道相关配置项：
 
-### 目录结构
-
-```text
-rules/picoclaw/
-├── index.json               # 包元信息、支持的版本范围
-├── hash                     # SHA256 校验和
-├── schemas/
-│   ├── config-v1.json       # v1 配置 schema 定义
-│   ├── config-v2.json       # v2 配置 schema 定义
-│   └── config-v3.json       # v3 配置 schema 定义
-├── ui/
-│   ├── ui-v1.json           # v1 UI 表单定义
-│   ├── ui-v2.json
-│   └── ui-v3.json
-└── migrations/
-    ├── v1-to-v2.json        # v1→v2 迁移规则
-    └── v2-to-v3.json        # v2→v3 迁移规则
-```
-
-### 配置版本
-
-`PicoAideSupportedPicoClawConfigVersion = 3` 指定当前支持的 Picoclaw 配置版本。
-
-迁移引擎支持的操作规则：
-
-| 操作 | 说明 |
+| 字段 | 说明 |
 |------|------|
-| `move` | 移动字段到新位置 |
-| `rename` | 重命名字段 |
-| `delete` | 删除字段 |
-| `set` | 设置默认值 |
-
-### 刷新方式
-
-支持两种方式更新 Adapter 包：
-
-1. **远程 URL 拉取**：从 `picoclaw_adapter_remote_base_url` 拉取，自动校验 SHA256
-2. **ZIP 上传**：通过管理后台上传 zip 包。上传时 zip 内应直接包含 `index.json`、`hash`、`schemas/`、`ui/`、`migrations/` 等文件，不要包一层 `picoclaw/` 目录
-
-## 文件权限
-
-| 文件 | 推荐权限 | 说明 |
-|------|---------|------|
-| `picoaide.db` | `0600` | SQLite 数据库 |
-| `.security.yml` | `0600` | 用户密钥配置 |
-| `config.json` | `0644` | 用户 PicoClaw 配置 |
-
-## CLI 命令参考
-
-| 命令 | 说明 |
-|------|------|
-| `picoaide init` | 全自动初始化 |
-| `picoaide serve` | 启动服务（固定 :80，TLS 启用时同时监听 :443） |
-| `picoaide reset-password <username>` | 重置本地用户密码 |
+| `tools.install_skill.enabled` | 是否允许用户自主安装技能 |
 
 ## 环境变量
 
 | 变量 | 说明 |
 |------|------|
-| `PICOAIDE_DEV` | 设置为 `1` 使用开发镜像 |
+| `PICOAIDE_DEV` | 设置为 `1` 使用开发模式 |
 | `PICOAIDE_ALLOWED_EXTENSION_ORIGINS` | 限制浏览器扩展 CORS 来源 |
-| `PICOAIDE_RULE_CACHE_DIR` | 规则缓存目录 |
-| `PICOAIDE_PICOCLAW_ADAPTER_URL` | Adapter 远程 URL |
+
+## CLI 命令参考
+
+| 命令 | 说明 |
+|------|------|
+| `picoaide init` | 全自动初始化（创建目录、数据库、超管、systemd 服务） |
+| `picoaide serve` | 启动服务（固定 :80，TLS 启用时同时监听 :443） |
+| `picoaide reset-password <username>` | 重置本地用户密码 |
+
+## 文件与密钥管理
+
+| 文件 | 推荐权限 | 说明 |
+|------|---------|------|
+| `picoaide.db` | `0600` | SQLite 数据库 |
+| `picoaide.sock` | `0700` | Unix socket（仅本机 root 可访问） |
+| `secret` | `0600` | 初始化超管密码（首次登录后自动删除） |
+| `server.key` | `0600` | TLS 私钥 |
+| `server.crt` | `0644` | TLS 证书 |

@@ -13,23 +13,32 @@ import (
 // LDAP 客户端
 // ============================================================
 
-func FetchUsers(cfg *config.GlobalConfig) ([]string, error) {
-  l, err := ldap.DialURL(cfg.LDAP.Host)
+// dialAndBind 连接并绑定 LDAP 服务器，绑定失败时自动关闭连接
+func dialAndBind(host, bindDN, bindPassword string) (*ldap.Conn, error) {
+  l, err := ldap.DialURL(host)
   if err != nil {
     return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
   }
-  defer l.Close()
-
-  err = l.Bind(cfg.LDAP.BindDN, cfg.LDAP.BindPassword)
-  if err != nil {
+  if err := l.Bind(bindDN, bindPassword); err != nil {
+    l.Close()
     return nil, fmt.Errorf("LDAP 认证失败: %w", err)
   }
+  return l, nil
+}
+
+// ldapSearchUsers 搜索 LDAP 用户并返回排序后的用户名列表
+func ldapSearchUsers(host, bindDN, bindPassword, baseDN, filter, usernameAttr string) ([]string, error) {
+  l, err := dialAndBind(host, bindDN, bindPassword)
+  if err != nil {
+    return nil, err
+  }
+  defer l.Close()
 
   searchRequest := ldap.NewSearchRequest(
-    cfg.LDAP.BaseDN,
+    baseDN,
     ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
-    cfg.LDAP.Filter,
-    []string{cfg.LDAP.UsernameAttribute},
+    filter,
+    []string{usernameAttr},
     nil,
   )
 
@@ -37,14 +46,14 @@ func FetchUsers(cfg *config.GlobalConfig) ([]string, error) {
   if err != nil {
     errStr := err.Error()
     if strings.Contains(errStr, "32") || strings.Contains(errStr, "No Such Object") {
-      return nil, fmt.Errorf("base DN '%s' 不存在或无权访问，请检查 LDAP 配置", cfg.LDAP.BaseDN)
+      return nil, fmt.Errorf("base DN '%s' 不存在或无权访问，请检查 LDAP 配置", baseDN)
     }
     return nil, fmt.Errorf("LDAP 搜索失败: %w", err)
   }
 
   var users []string
   for _, entry := range sr.Entries {
-    username := entry.GetAttributeValue(cfg.LDAP.UsernameAttribute)
+    username := entry.GetAttributeValue(usernameAttr)
     if username != "" {
       users = append(users, username)
     }
@@ -52,6 +61,13 @@ func FetchUsers(cfg *config.GlobalConfig) ([]string, error) {
 
   sort.Strings(users)
   return users, nil
+}
+
+func FetchUsers(cfg *config.GlobalConfig) ([]string, error) {
+  return ldapSearchUsers(
+    cfg.LDAP.Host, cfg.LDAP.BindDN, cfg.LDAP.BindPassword,
+    cfg.LDAP.BaseDN, cfg.LDAP.Filter, cfg.LDAP.UsernameAttribute,
+  )
 }
 
 // FetchUserGroups 获取单个用户所属的 LDAP 组名列表
@@ -64,15 +80,11 @@ func FetchUserGroups(cfg *config.GlobalConfig, username string) ([]string, error
 
 // fetchGroupsByMemberOf 从用户条目的 memberOf 属性读取组（AD 风格）
 func fetchGroupsByMemberOf(cfg *config.GlobalConfig, username string) ([]string, error) {
-  l, err := ldap.DialURL(cfg.LDAP.Host)
+  l, err := dialAndBind(cfg.LDAP.Host, cfg.LDAP.BindDN, cfg.LDAP.BindPassword)
   if err != nil {
-    return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
+    return nil, err
   }
   defer l.Close()
-
-  if err := l.Bind(cfg.LDAP.BindDN, cfg.LDAP.BindPassword); err != nil {
-    return nil, fmt.Errorf("LDAP 认证失败: %w", err)
-  }
 
   searchRequest := ldap.NewSearchRequest(
     cfg.LDAP.BaseDN,
@@ -99,15 +111,11 @@ func fetchGroupsByMemberOf(cfg *config.GlobalConfig, username string) ([]string,
 
 // fetchGroupsBySearch 搜索 groupOfNames 条目查找包含用户的组（OpenLDAP 风格）
 func fetchGroupsBySearch(cfg *config.GlobalConfig, username string) ([]string, error) {
-  l, err := ldap.DialURL(cfg.LDAP.Host)
+  l, err := dialAndBind(cfg.LDAP.Host, cfg.LDAP.BindDN, cfg.LDAP.BindPassword)
   if err != nil {
-    return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
+    return nil, err
   }
   defer l.Close()
-
-  if err := l.Bind(cfg.LDAP.BindDN, cfg.LDAP.BindPassword); err != nil {
-    return nil, fmt.Errorf("LDAP 认证失败: %w", err)
-  }
 
   // 先获取用户 DN
   userSearch := ldap.NewSearchRequest(
@@ -203,15 +211,11 @@ func fetchAllGroupsByMemberOf(cfg *config.GlobalConfig) (map[string][]string, er
 
 // fetchAllGroupsHierarchyBySearch 搜索所有组条目并读取成员和嵌套组。
 func fetchAllGroupsHierarchyBySearch(cfg *config.GlobalConfig) (map[string]GroupHierarchy, error) {
-  l, err := ldap.DialURL(cfg.LDAP.Host)
+  l, err := dialAndBind(cfg.LDAP.Host, cfg.LDAP.BindDN, cfg.LDAP.BindPassword)
   if err != nil {
-    return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
+    return nil, err
   }
   defer l.Close()
-
-  if err := l.Bind(cfg.LDAP.BindDN, cfg.LDAP.BindPassword); err != nil {
-    return nil, fmt.Errorf("LDAP 认证失败: %w", err)
-  }
 
   groupBaseDN := cfg.LDAP.GroupBaseDN
   if groupBaseDN == "" {
@@ -293,59 +297,16 @@ func extractAttrValue(dn, attrType string) string {
 
 // TestConnection 使用指定参数测试 LDAP 连接，返回用户数量
 func TestConnection(host, bindDN, bindPassword, baseDN, filter, usernameAttr string) ([]string, error) {
-  l, err := ldap.DialURL(host)
-  if err != nil {
-    return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
-  }
-  defer l.Close()
-
-  err = l.Bind(bindDN, bindPassword)
-  if err != nil {
-    return nil, fmt.Errorf("LDAP 认证失败: %w", err)
-  }
-
-  searchRequest := ldap.NewSearchRequest(
-    baseDN,
-    ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
-    filter,
-    []string{usernameAttr},
-    nil,
-  )
-
-  sr, err := l.Search(searchRequest)
-  if err != nil {
-    errStr := err.Error()
-    if strings.Contains(errStr, "32") || strings.Contains(errStr, "No Such Object") {
-      return nil, fmt.Errorf("base DN '%s' 不存在或无权访问，请检查 Base DN 配置", baseDN)
-    }
-    return nil, fmt.Errorf("LDAP 搜索失败（Base DN: %s, Filter: %s）: %w", baseDN, filter, err)
-  }
-
-  var users []string
-  for _, entry := range sr.Entries {
-    username := entry.GetAttributeValue(usernameAttr)
-    if username != "" {
-      users = append(users, username)
-    }
-  }
-
-  sort.Strings(users)
-  return users, nil
+  return ldapSearchUsers(host, bindDN, bindPassword, baseDN, filter, usernameAttr)
 }
 
 // Authenticate 先以管理员身份搜索用户 DN，再用用户 DN 绑定验证密码
 func Authenticate(cfg *config.GlobalConfig, username, password string) bool {
-  // 1. 以管理员身份连接并搜索用户 DN
-  l, err := ldap.DialURL(cfg.LDAP.Host)
+  l, err := dialAndBind(cfg.LDAP.Host, cfg.LDAP.BindDN, cfg.LDAP.BindPassword)
   if err != nil {
     return false
   }
   defer l.Close()
-
-  err = l.Bind(cfg.LDAP.BindDN, cfg.LDAP.BindPassword)
-  if err != nil {
-    return false
-  }
 
   searchRequest := ldap.NewSearchRequest(
     cfg.LDAP.BaseDN,
@@ -362,15 +323,13 @@ func Authenticate(cfg *config.GlobalConfig, username, password string) bool {
 
   userDN := sr.Entries[0].DN
 
-  // 2. 用用户 DN 和密码验证
-  l2, err := ldap.DialURL(cfg.LDAP.Host)
+  l2, err := dialAndBind(cfg.LDAP.Host, userDN, password)
   if err != nil {
     return false
   }
   defer l2.Close()
 
-  err = l2.Bind(userDN, password)
-  return err == nil
+  return true
 }
 
 // GroupPreview LDAP 组预览信息
@@ -388,15 +347,11 @@ func TestGroups(host, bindDN, bindPassword, baseDN, groupSearchMode, groupBaseDN
     return nil, nil
   }
 
-  l, err := ldap.DialURL(host)
+  l, err := dialAndBind(host, bindDN, bindPassword)
   if err != nil {
-    return nil, fmt.Errorf("连接 LDAP 失败: %w", err)
+    return nil, err
   }
   defer l.Close()
-
-  if err := l.Bind(bindDN, bindPassword); err != nil {
-    return nil, fmt.Errorf("LDAP 认证失败: %w", err)
-  }
 
   if groupBaseDN == "" {
     groupBaseDN = baseDN

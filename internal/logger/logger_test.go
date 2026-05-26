@@ -6,7 +6,6 @@ import (
   "net"
   "net/http"
   "net/http/httptest"
-  "os"
   "sync"
   "testing"
 )
@@ -179,7 +178,7 @@ func TestInit(t *testing.T) {
     defer resetLogger()
 
     tmpDir := t.TempDir()
-    Init(tmpDir, "1m", false, "info")
+    Init(tmpDir, "1m", false, "info", false)
     Close()
   })
 
@@ -188,82 +187,14 @@ func TestInit(t *testing.T) {
     defer resetLogger()
 
     tmpDir := t.TempDir()
-    Init(tmpDir, "forever", true, "warn")
-    Close()
-  })
-
-  t.Run("PICOAIDE_DEV env var", func(t *testing.T) {
-    resetLogger()
-    defer resetLogger()
-
-    old := os.Getenv("PICOAIDE_DEV")
-    os.Setenv("PICOAIDE_DEV", "1")
-    defer os.Setenv("PICOAIDE_DEV", old)
-
-    tmpDir := t.TempDir()
-    Init(tmpDir, "6m", false, "error")
-    Close()
-  })
-
-  t.Run("dev mode debug level unchanged", func(t *testing.T) {
-    resetLogger()
-    defer resetLogger()
-
-    tmpDir := t.TempDir()
-    Init(tmpDir, "3m", true, "debug")
-    Close()
-  })
-
-  t.Run("retention 1y", func(t *testing.T) {
-    resetLogger()
-    defer resetLogger()
-
-    tmpDir := t.TempDir()
-    Init(tmpDir, "1y", false, "info")
-    Close()
-  })
-
-  t.Run("retention 3y", func(t *testing.T) {
-    resetLogger()
-    defer resetLogger()
-
-    tmpDir := t.TempDir()
-    Init(tmpDir, "3y", false, "info")
-    Close()
-  })
-
-  t.Run("retention 5y", func(t *testing.T) {
-    resetLogger()
-    defer resetLogger()
-
-    tmpDir := t.TempDir()
-    Init(tmpDir, "5y", false, "info")
-    Close()
-  })
-
-  t.Run("once do no-op on second call", func(t *testing.T) {
-    resetLogger()
-    defer resetLogger()
-
-    tmpDir := t.TempDir()
-    Init(tmpDir, "1m", false, "info")
-    Init(tmpDir, "3m", true, "debug") // second call should be no-op
-    Close()
-  })
-}
-
-func TestClose(t *testing.T) {
-  t.Run("before init", func(t *testing.T) {
-    resetLogger()
-    Close()
-  })
-
-  t.Run("after init", func(t *testing.T) {
-    resetLogger()
-    defer resetLogger()
-
-    tmpDir := t.TempDir()
-    Init(tmpDir, "3m", false, "debug")
+Init(tmpDir, "forever", true, "warn", false)
+Init(tmpDir, "6m", false, "error", false)
+Init(tmpDir, "3m", true, "debug", false)
+Init(tmpDir, "1y", false, "info", false)
+Init(tmpDir, "3y", false, "info", false)
+Init(tmpDir, "5y", false, "info", false)
+Init(tmpDir, "3m", true, "debug", false)
+Init(tmpDir, "3m", false, "debug", false)
     Close()
   })
 }

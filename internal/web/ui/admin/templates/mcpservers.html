@@ -1,0 +1,23 @@
+<section class="page-header">
+  <div>
+    <div class="page-kicker">第三方集成</div>
+    <h2>MCP 服务</h2>
+    <p>管理第三方 MCP 服务器，安装后 Agent 可通过 MCP 协议调用外部工具。每个 MCP 服务器可授权给指定用户或用户组。</p>
+  </div>
+  <div class="page-actions">
+    <button class="btn btn-primary btn-sm" id="create-mcp-btn">添加 MCP 服务</button>
+    <button class="btn btn-outline btn-sm" id="refresh-mcp">刷新</button>
+  </div>
+</section>
+
+<div id="mcp-msg" class="msg"></div>
+
+<div class="table-wrap">
+  <table class="compact-table">
+    <thead>
+      <tr><th>名称</th><th>传输方式</th><th>命令/URL</th><th>请求头</th><th>状态</th><th>工具数量</th><th>操作</th></tr>
+    </thead>
+    <tbody id="mcp-tbody"></tbody>
+  </table>
+</div>
+<p id="mcp-empty" class="text-muted text-center mt-1 hidden">暂无 MCP 服务</p>

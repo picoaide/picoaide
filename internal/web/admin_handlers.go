@@ -1,16 +1,14 @@
 package web
 
 import (
-  "context"
   "fmt"
   "net/http"
-  "strings"
 
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/config"
-  dockerpkg "github.com/picoaide/picoaide/internal/docker"
+  "github.com/picoaide/picoaide/internal/im"
   "github.com/picoaide/picoaide/internal/user"
 )
 
@@ -19,10 +17,7 @@ import (
 // ============================================================
 
 type authProviderSwitchCleanupResult struct {
-  ContainersRemoved int   `json:"containers_removed"`
-  ContainerRecords  int64 `json:"container_records"`
   UsersRemoved      int64 `json:"users_removed"`
-  UsersScanned      int   `json:"users_scanned"`
   GroupsCleared     bool  `json:"groups_cleared"`
   DirectoriesPurged bool  `json:"directories_purged"`
 }
@@ -44,47 +39,20 @@ func (s *Server) requireSuperadmin(c *gin.Context) string {
 }
 
 // ============================================================
-// 默认镜像标签
+// 统一用户初始化（本地/LDAP/OIDC/未来认证源共用）
 // ============================================================
 
-func (s *Server) defaultUserImageTag(ctx context.Context) (string, error) {
-  if s.dockerAvailable {
-    localTags, err := dockerpkg.ListLocalTags(ctx, s.cfg.Image.Name)
-    if err != nil {
-      return "", err
-    }
-    if len(localTags) > 0 {
-      sortTagsForDisplay(localTags)
-      return localTags[0], nil
-    }
-  }
-  return strings.TrimSpace(s.cfg.Image.Tag), nil
-}
-
-// ============================================================
-// 外部用户初始化 & LDAP 用户初始化
-// ============================================================
-
-func (s *Server) initExternalUser(username string) error {
+func (s *Server) initializeUser(username string) error {
   if err := user.ValidateUsername(username); err != nil {
     return err
   }
-  ctx, cancel := contextWithTimeout(10)
-  defer cancel()
-  imageTag, err := s.defaultUserImageTag(ctx)
-  if err != nil {
-    return fmt.Errorf("获取默认镜像失败: %w", err)
+  if err := user.InitUser(s.loadConfig(), username); err != nil {
+    return err
   }
-  if imageTag == "" {
-    return fmt.Errorf("未找到可用镜像，请先在镜像管理中拉取镜像")
-  }
-  if err := user.InitUser(s.cfg, username, imageTag); err != nil {
+  if _, err := auth.AllocateIP(username); err != nil {
     return err
   }
   s.applyDefaultSkillsToUser(username)
-  if s.dockerAvailable {
-    go s.autoStartUserContainer(username)
-  }
   return nil
 }
 
@@ -95,28 +63,7 @@ func (s *Server) initExternalUser(username string) error {
 func (s *Server) purgeOrdinaryAuthProviderStateForConfig(cfg *config.GlobalConfig) (*authProviderSwitchCleanupResult, error) {
   result := &authProviderSwitchCleanupResult{}
 
-  containers, err := auth.GetAllContainers()
-  if err != nil {
-    return result, err
-  }
-  result.UsersScanned = len(containers)
-  if s.dockerAvailable {
-    ctx := context.Background()
-    for _, rec := range containers {
-      if rec.ContainerID != "" {
-        _ = dockerpkg.Remove(ctx, rec.ContainerID)
-        result.ContainersRemoved++
-      }
-      _ = dockerpkg.RemoveByUsername(ctx, rec.Username)
-    }
-  }
-  records, err := auth.ClearAllContainers()
-  if err != nil {
-    return result, err
-  }
-  result.ContainerRecords = records
-
-  usersRemoved, err := auth.DeleteAllRegularUsers()
+  deletedUsers, usersRemoved, err := auth.DeleteAllRegularUsers()
   if err != nil {
     return result, err
   }
@@ -132,6 +79,21 @@ func (s *Server) purgeOrdinaryAuthProviderStateForConfig(cfg *config.GlobalConfi
   }
   result.DirectoriesPurged = true
 
+  // 断开已删除用户的 IM 连接
+  if s.agentIntegration != nil {
+    for _, name := range deletedUsers {
+      if dt, ok := s.agentIntegration.imGateway.GetProvider("dingtalk").(*im.DingTalkProvider); ok {
+        dt.RemoveUser(name)
+      }
+      if fs, ok := s.agentIntegration.imGateway.GetProvider("feishu").(*im.FeishuProvider); ok {
+        fs.RemoveUser(name)
+      }
+      if wc, ok := s.agentIntegration.imGateway.GetProvider("wecom").(*im.WeComProvider); ok {
+        wc.RemoveUser(name)
+      }
+    }
+  }
+
   return result, nil
 }
 
@@ -144,7 +106,6 @@ type userSyncResult struct {
   AllowedUserCount     int
   LocalUserSynced      int
   InitializedCount     int
-  ImageUpdatedCount    int
   DeletedLocalAuth     int
   ArchivedStaleUsers   int
   InvalidUsernameCount int
@@ -152,12 +113,12 @@ type userSyncResult struct {
 }
 
 func (s *Server) syncUsersFromDirectory(cleanupStaleUsers bool) (*userSyncResult, error) {
-  if !authsource.HasDirectoryProvider(s.cfg) {
+  if !authsource.HasDirectoryProvider(s.loadConfig()) {
     return nil, fmt.Errorf("当前认证方式不支持目录同步")
   }
 
-  authMode := s.cfg.AuthMode()
-  userResult, err := authsource.SyncUserDirectory(authMode, s.cfg)
+  authMode := s.loadConfig().AuthMode()
+  userResult, err := authsource.SyncUserDirectory(authMode, s.loadConfig())
   if err != nil {
     return nil, err
   }
@@ -170,65 +131,16 @@ func (s *Server) syncUsersFromDirectory(cleanupStaleUsers bool) (*userSyncResult
     GroupMemberCount:     userResult.GroupMemberCount,
   }
 
-  ctx, cancel := contextWithTimeout(10)
-  defer cancel()
-  imageTag, err := s.defaultUserImageTag(ctx)
-  if err != nil {
-    return nil, fmt.Errorf("获取默认镜像失败: %w", err)
-  }
-  defaultImageRef := ""
-  if imageTag != "" {
-    defaultImageRef = s.cfg.Image.Name + ":" + imageTag
-  }
-
   for _, username := range userResult.AllowedUsers {
-    rec, err := auth.GetContainerByUsername(username)
-    if err != nil {
-      return nil, err
+    if !auth.UserExists(username) {
+      continue
     }
-    if rec == nil {
-      if imageTag == "" {
-        return nil, fmt.Errorf("用户 %s 需要初始化，但未找到可用镜像，请先在镜像管理中拉取镜像", username)
-      }
-      if err := user.InitUser(s.cfg, username, imageTag); err != nil {
-        return nil, err
-      }
+    if err := s.initializeUser(username); err == nil {
       result.InitializedCount++
-      if s.dockerAvailable {
-        go s.autoStartUserContainer(username)
-      }
-    } else if rec.Image == "" && defaultImageRef != "" {
-      if err := auth.UpdateContainerImage(username, defaultImageRef); err != nil {
-        return nil, err
-      }
-      result.ImageUpdatedCount++
-      if s.dockerAvailable && rec.ContainerID == "" {
-        go s.autoStartUserContainer(username)
-      }
-    } else if rec.Image == "" {
-      return nil, fmt.Errorf("用户 %s 缺少镜像，但未找到可用镜像，请先在镜像管理中拉取镜像", username)
     }
   }
 
   if cleanupStaleUsers {
-    containers, err := auth.GetAllContainers()
-    if err != nil {
-      return nil, err
-    }
-    for _, rec := range containers {
-      if userResult.AllowedSet[rec.Username] || auth.IsSuperadmin(rec.Username) {
-        continue
-      }
-      if rec.ContainerID != "" && s.dockerAvailable {
-        _ = dockerpkg.Remove(context.Background(), rec.ContainerID)
-      }
-      _ = auth.DeleteContainer(rec.Username)
-      if err := user.ArchiveUser(s.cfg, rec.Username); err == nil {
-        result.ArchivedStaleUsers++
-      }
-    }
-
-    // 清理仅存在于 local_users 表但没有容器记录的外部用户
     localUsers, err := auth.GetAllLocalUsers()
     if err != nil {
       return nil, err
@@ -243,8 +155,7 @@ func (s *Server) syncUsersFromDirectory(cleanupStaleUsers bool) (*userSyncResult
       if userResult.AllowedSet[u.Username] {
         continue
       }
-      _ = auth.DeleteContainer(u.Username)
-      if err := user.ArchiveUser(s.cfg, u.Username); err == nil {
+      if err := user.ArchiveUser(s.loadConfig(), u.Username); err == nil {
         result.ArchivedStaleUsers++
       }
       _ = auth.DeleteUser(u.Username)
@@ -253,3 +164,5 @@ func (s *Server) syncUsersFromDirectory(cleanupStaleUsers bool) (*userSyncResult
 
   return result, nil
 }
+
+

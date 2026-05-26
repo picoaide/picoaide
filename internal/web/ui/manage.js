@@ -105,7 +105,7 @@ $$('.tab').forEach(function(btn) {
 // 通讯渠道
 async function loadChannels() {
   try {
-    var data = await apiJSON('GET', '/api/picoclaw/channels');
+    var data = await apiJSON('GET', '/api/channels');
     if (!data.success) {
       showMsg('#channel-msg', data.error || '加载失败', false);
       return;
@@ -160,14 +160,14 @@ async function loadChannelFields() {
   }
   if (!currentChannel) return;
   try {
-    var data = await apiJSON('GET', '/api/picoclaw/config-fields?section=' + encodeURIComponent(currentChannel));
+    var data = await apiJSON('GET', '/api/channels/config-fields?section=' + encodeURIComponent(currentChannel));
     if (!data.success) {
       showMsg('#channel-msg', data.error || '加载失败', false);
       return;
     }
     var ch = currentChannels.find(function(item) { return item.key === currentChannel; }) || {};
     $('#channel-title').textContent = ch.label || currentChannel || '渠道配置';
-    $('#channel-subtitle').textContent = (ch.enabled ? '当前渠道已启用' : (ch.configured ? '当前渠道已配置但未启用' : '当前渠道尚未配置')) + '，保存后会重启容器';
+    $('#channel-subtitle').textContent = (ch.enabled ? '当前渠道已启用' : (ch.configured ? '当前渠道已配置但未启用' : '当前渠道尚未配置')) + '，保存后生效';
     renderChannelFields(data.fields || []);
   } catch (e) {
     showMsg('#channel-msg', e.message, false);
@@ -220,7 +220,7 @@ $('#channel-save-btn').addEventListener('click', async function() {
     $('#channel-fields').querySelectorAll('[data-channel-field]').forEach(function(input) {
       values[input.dataset.channelField] = readFieldInputValue(input);
     });
-    var res = await apiJSON('POST', '/api/picoclaw/config-fields', {
+    var res = await apiJSON('POST', '/api/channels/config-fields', {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formBody({ section: currentChannel, values: JSON.stringify(values), csrf_token: csrf }),
     });

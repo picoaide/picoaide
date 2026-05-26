@@ -45,7 +45,7 @@ export async function init(ctx) {
 
   async function loadUsers() {
     const tbody = ctx.$('#users-tbody');
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center">加载中...</td></tr>';
     ctx.$('#users-empty').classList.add('hidden');
 
     const params = new URLSearchParams({
@@ -69,39 +69,23 @@ export async function init(ctx) {
     tbody.innerHTML = '';
     for (const u of users) {
       if (u.role === 'superadmin') continue;
-      const statusCls = u.status === 'running' ? 'badge-ok' : 'badge-muted';
-      const hasImage = !!u.image_tag;
-      const imgBadge = u.image_ready
-        ? '<span class="badge badge-ok">就绪</span>'
-        : '<span class="badge badge-danger">' + (hasImage ? '未拉取' : '未绑定') + '</span>';
-      const noImg = !u.image_ready ? ' disabled title="' + (hasImage ? '镜像未拉取' : '未绑定镜像，请先在认证配置中同步 LDAP 账号') + '"' : '';
-      const imageText = hasImage ? esc(u.image_tag) : '<small class="text-muted">未绑定镜像</small>';
       const groups = u.groups || [];
       const groupTags = renderGroupTags(groups);
       const tr = document.createElement('tr');
       let actions = '<div class="btn-group">';
-      actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="start" data-user="' + esc(u.username) + '">启动</button>';
-      actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="restart" data-user="' + esc(u.username) + '">重启</button>';
-      actions += '<button class="btn btn-sm btn-outline" data-action="apply" data-user="' + esc(u.username) + '">下发配置</button>';
-      actions += '<button class="btn btn-sm btn-outline" data-action="logs" data-user="' + esc(u.username) + '">日志</button>';
       actions += '<span class="action-menu"><button class="btn btn-sm btn-outline" data-menu-toggle type="button">更多</button><span class="action-menu-panel">';
-      actions += '<button class="btn btn-sm btn-outline"' + noImg + ' data-action="debug" data-user="' + esc(u.username) + '">调试重启</button>';
-      actions += '<button class="btn btn-sm btn-outline" data-action="stop" data-user="' + esc(u.username) + '">停止</button>';
       if (!unifiedAuth) {
         actions += '<button class="btn btn-sm btn-danger" data-action="delete-user" data-user="' + esc(u.username) + '">删除用户</button>';
       }
       actions += '</span></span>';
       actions += '</div>';
-      tr.innerHTML = '<td><strong>' + esc(u.username) + '</strong></td><td>' + renderSource(u.source) + '</td><td>' + (groupTags || '<small class="text-muted">-</small>') + '</td><td><span class="badge ' + statusCls + '">' + esc(u.status) + '</span></td><td>' + imageText + ' ' + imgBadge + '</td><td>' + esc(u.ip || '-') + '</td><td class="actions-cell">' + actions + '</td>';
+      var ipDisplay = u.ip && u.ip !== '' ? u.ip : '-';
+      tr.innerHTML = '<td><strong>' + esc(u.username) + '</strong></td><td>' + renderSource(u.source) + '</td><td style="font-family:monospace">' + ipDisplay + '</td><td>' + (groupTags || '<small class="text-muted">-</small>') + '</td><td class="actions-cell">' + actions + '</td>';
       tbody.appendChild(tr);
     }
 
     tbody.querySelectorAll('[data-action]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (btn.dataset.action === 'logs') {
-          openLogModal(btn.dataset.user);
-          return;
-        }
         if (btn.dataset.action === 'delete-user') {
           if (!await confirmModal('确定删除普通用户 ' + btn.dataset.user + '？用户目录会被归档。')) return;
           const res = await Api.post('/api/admin/users/delete', { username: btn.dataset.user });
@@ -109,17 +93,7 @@ export async function init(ctx) {
           if (res.success) loadUsers();
           return;
         }
-        if (btn.dataset.action === 'apply') {
-          const res = await Api.post('/api/admin/config/apply', { username: btn.dataset.user });
-          showMsg('#users-msg', res.message || res.error, res.success);
-          return;
-        }
-        if (btn.dataset.action === 'debug') {
-          if (!await confirmModal('确定要以 Picoclaw debug 模式重启用户 ' + btn.dataset.user + ' 的容器吗？日志会更详细。')) return;
-        }
-        const res = await Api.post('/api/admin/container/' + btn.dataset.action, { username: btn.dataset.user });
-        showMsg('#users-msg', res.message || res.error, res.success);
-        if (res.success) setTimeout(loadUsers, 1500);
+        showMsg('#users-msg', '操作已提交', true);
       });
     });
     tbody.querySelectorAll('[data-menu-toggle]').forEach(btn => {
@@ -152,8 +126,8 @@ export async function init(ctx) {
     if (createBtn) createBtn.classList.toggle('hidden', unifiedAuth);
     if (desc) {
       desc.textContent = unifiedAuth
-        ? '普通用户来自当前认证源，管理员负责容器、镜像和配置下发。'
-        : '普通用户由管理员本地创建，管理员负责容器、镜像和配置下发。';
+        ? '普通用户来自当前认证源，管理员负责配置下发。'
+        : '普通用户由管理员本地创建，管理员负责配置下发。';
     }
     if (!tip) return;
     tip.classList.remove('hidden');
@@ -208,7 +182,6 @@ export async function init(ctx) {
         '<div class="modal-header">批量新建普通用户<button id="modal-close">&times;</button></div>' +
         '<div class="modal-body">' +
           '<div class="field"><label>用户名</label><textarea id="user-create-names" rows="8" placeholder="user01&#10;user02&#10;user03"></textarea></div>' +
-          '<div class="field"><label>镜像标签</label><select id="user-create-image"><option value="">加载中...</option></select></div>' +
           '<div id="user-create-msg" class="msg"></div>' +
           '<pre id="user-create-result" class="hidden" style="max-height:220px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:10px;border-radius:4px;font-size:12px;white-space:pre-wrap;word-break:break-all;margin:0"></pre>' +
         '</div>' +
@@ -217,15 +190,11 @@ export async function init(ctx) {
     ctx.$('#content-area').appendChild(overlay);
     overlay.querySelector('#modal-close').addEventListener('click', () => overlay.remove());
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-    loadImageTagOptions(overlay);
     overlay.querySelector('#user-create-submit').addEventListener('click', async () => {
       const names = overlay.querySelector('#user-create-names').value.trim();
-      const imageTag = overlay.querySelector('#user-create-image').value;
       if (!names) { showMsg('#user-create-msg', '请至少输入一个用户名', false); return; }
       showMsg('#user-create-msg', '创建中...', true);
-      const params = { usernames: names };
-      if (imageTag) params.image_tag = imageTag;
-      const res = await Api.post('/api/admin/users/batch-create', params);
+      const res = await Api.post('/api/admin/users/batch-create', { usernames: names });
       if (res.results) {
         renderBatchCreateResult(overlay, res);
         loadUsers();
@@ -233,21 +202,6 @@ export async function init(ctx) {
         showMsg('#user-create-msg', res.error || '创建失败', false);
       }
     });
-  }
-
-  async function loadImageTagOptions(overlay) {
-    const select = overlay.querySelector('#user-create-image');
-    try {
-      const data = await Api.get('/api/admin/images/local-tags');
-      const tags = data.success ? (data.tags || []) : [];
-      if (tags.length === 0) {
-        select.innerHTML = '<option value="">无可用本地镜像标签</option>';
-        return;
-      }
-      select.innerHTML = tags.map(tag => '<option value="' + esc(tag) + '">' + esc(tag) + '</option>').join('');
-    } catch (e) {
-      select.innerHTML = '<option value="">无法读取本地镜像标签</option>';
-    }
   }
 
   function renderBatchCreateResult(overlay, res) {
@@ -284,51 +238,5 @@ export async function init(ctx) {
     panel.style.top = (rect.bottom + 4) + 'px';
   }
 
-  async function openLogModal(username) {
-    ctx.$('#log-modal')?.remove();
-    const overlay = document.createElement('div');
-    overlay.id = 'log-modal';
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML =
-      '<div class="modal" style="max-width:800px">' +
-        '<div class="modal-header">容器日志: ' + esc(username) + '<button id="modal-close">&times;</button></div>' +
-        '<div class="modal-body">' +
-          '<div class="row mb-1">' +
-            '<label style="white-space:nowrap">行数</label>' +
-            '<select id="log-tail" style="width:auto">' +
-              '<option value="50">50</option>' +
-              '<option value="100" selected>100</option>' +
-              '<option value="200">200</option>' +
-              '<option value="500">500</option>' +
-              '<option value="1000">1000</option>' +
-            '</select>' +
-            '<button class="btn btn-sm btn-primary" id="log-refresh">刷新</button>' +
-          '</div>' +
-          '<pre id="log-content" style="max-height:500px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:12px;font-size:12px;border-radius:4px;white-space:pre-wrap;word-break:break-all;margin:0">加载中...</pre>' +
-        '</div>' +
-      '</div>';
-    ctx.$('#content-area').appendChild(overlay);
-    overlay.querySelector('#modal-close').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 
-    async function fetchLogs() {
-      const tail = overlay.querySelector('#log-tail').value;
-      const pre = overlay.querySelector('#log-content');
-      pre.textContent = '加载中...';
-      try {
-        const data = await Api.get('/api/admin/container/logs?username=' + encodeURIComponent(username) + '&tail=' + tail);
-        if (data.success) {
-          pre.textContent = data.logs || '（无日志）';
-          pre.scrollTop = pre.scrollHeight;
-        } else {
-          pre.textContent = data.error || '获取日志失败';
-        }
-      } catch (e) {
-        pre.textContent = e.message;
-      }
-    }
-
-    overlay.querySelector('#log-refresh').addEventListener('click', fetchLogs);
-    fetchLogs();
-  }
 }

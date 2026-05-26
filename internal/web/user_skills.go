@@ -86,8 +86,7 @@ func (s *Server) handleUserSkillsInstall(c *gin.Context) {
     return
   }
 
-  source := findSkillSource(skillName)
-  if source == "" {
+  if findSkillSource(skillName) == "" {
     writeError(c, http.StatusBadRequest, "技能不存在")
     return
   }
@@ -98,13 +97,10 @@ func (s *Server) handleUserSkillsInstall(c *gin.Context) {
     return
   }
 
-  if err := s.deploySkillToUser(skillName, username); err != nil {
+  if err := auth.BindSkillToUser(username, skillName, "self"); err != nil {
+    slog.Error("绑定记录写入失败", "skill", skillName, "username", username, "error", err)
     writeError(c, http.StatusInternalServerError, "安装失败: "+err.Error())
     return
-  }
-
-  if err := auth.BindSkillToUser(username, skillName, "self"); err != nil {
-    slog.Error("绑定记录写入失败（文件已部署）", "skill", skillName, "username", username, "error", err)
   }
 
   writeJSON(c, http.StatusOK, map[string]interface{}{
@@ -152,7 +148,7 @@ func (s *Server) handleUserSkillsUninstall(c *gin.Context) {
     return
   }
 
-  removeUserSkillDir(s.cfg, username, skillName)
+  removeUserSkillDir(s.loadConfig(), username, skillName)
 
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success": true,
@@ -165,8 +161,8 @@ func removeUserSkillDir(cfg *config.GlobalConfig, username, skillName string) {
     slog.Error("删除技能目录时校验失败", "skill", skillName, "error", err)
     return
   }
-  targetDir := filepath.Clean(filepath.Join(user.UserDir(cfg, username), ".picoclaw", "workspace", "skills", skillName))
-  skillsBase := filepath.Clean(filepath.Join(user.UserDir(cfg, username), ".picoclaw", "workspace", "skills"))
+  targetDir := filepath.Clean(filepath.Join(user.UserDir(cfg, username), "skills", skillName))
+  skillsBase := filepath.Clean(filepath.Join(user.UserDir(cfg, username), "skills"))
   if !strings.HasPrefix(targetDir, skillsBase+string(os.PathSeparator)) {
     slog.Error("非法技能路径", "target", targetDir)
     return
