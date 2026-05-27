@@ -100,6 +100,10 @@ func buildNested(flat map[string]string) map[string]interface{} {
       }
     } else if iv, err := strconv.ParseInt(value, 10, 64); err == nil && strconv.FormatInt(iv, 10) == value {
       typedVal = iv
+    } else if strings.HasSuffix(key, ".enabled") {
+      if b, err := strconv.ParseBool(value); err == nil {
+        typedVal = b
+      }
     }
 
     // 按点分隔逐层构建嵌套 map

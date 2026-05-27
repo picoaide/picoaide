@@ -30,7 +30,7 @@ export async function init(ctx) {
     }
     box.className = 'channel-policy-grid';
     box.innerHTML = channels.map(function(ch) {
-      var enabled = !!deepGet(rawConfig, 'channel.' + ch.key + '.enabled');
+      var enabled = deepGet(rawConfig, 'channel.' + ch.key + '.enabled') === true || deepGet(rawConfig, 'channel.' + ch.key + '.enabled') === 'true';
       return '<label class="channel-policy-card' + (enabled ? ' is-enabled' : '') + '">' +
         '<input type="checkbox" data-channel="' + esc(ch.key) + '"' + (enabled ? ' checked' : '') + '>' +
         '<span class="channel-policy-main">' +
