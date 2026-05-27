@@ -146,6 +146,12 @@ func (r *chatRun) unsubscribe(ch chan struct{}) {
 
 // startChatSandbox 创建聊天运行并启动沙箱，Web 和 IM 共用
 func (s *Server) startChatSandbox(username, message string, inputJSON []byte) *chatRun {
+  // 同一用户发新消息时，取消上一个正在运行的沙箱（通过 context 优雅退出）
+  // 上一个沙箱退出后会 releaseUser，当前消息的 acquireUser 再获取 token 启动
+  if v, ok := userRun.Load(username); ok {
+    v.(*chatRun).cancel()
+  }
+
   runCtx, runCancel := context.WithCancel(context.Background())
   run := newChatRun(username)
   run.cancel = runCancel

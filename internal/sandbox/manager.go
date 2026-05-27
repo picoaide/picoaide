@@ -64,12 +64,12 @@ func (m *Manager) releaseUser(username string) {
 
 // getOrCreateCh 返回该用户的 token channel
 func (m *Manager) getOrCreateCh(username string) chan struct{} {
-  v, _ := m.userChs.LoadOrStore(username, make(chan struct{}, 1))
+  v, loaded := m.userChs.LoadOrStore(username, make(chan struct{}, 1))
   ch := v.(chan struct{})
-  // 首次创建时放入 token
-  select {
-  case ch <- struct{}{}:
-  default:
+  // 仅在首次创建时放入 token，已有旧 channel 时不再重复放
+  // 防止同一用户在沙箱运行时通过重复获取 token 绕过串行锁
+  if !loaded {
+    ch <- struct{}{}
   }
   m.usersMu.Lock()
   ref, _ := m.userRefs.LoadOrStore(username, 0)
