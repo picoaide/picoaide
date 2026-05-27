@@ -11,8 +11,10 @@ import (
   "net"
   "net/http"
   "os"
+  "os/signal"
   "path/filepath"
   "strings"
+  "syscall"
   "time"
 
   "github.com/picoaide/picoaide/internal/agent"
@@ -48,7 +50,7 @@ func main() {
 
   // 1. 获取配置
   slog.Debug("picoagent.fetching_config")
-  cfg, err := fetchConfig(sock, token)
+  cfg, err := fetchConfigWithRetry(sock, token)
   if err != nil {
     slog.Debug("picoagent.config_fetch_failed", "error", err.Error())
     errorExit("获取配置失败: " + err.Error())
@@ -197,7 +199,21 @@ func main() {
   }
   defer cancel()
 
-  // 10a. 启动心跳
+  // 10a. 注册信号处理 — SIGTERM/SIGINT 触发优雅关闭
+  sigCh := make(chan os.Signal, 1)
+  signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+  go func() {
+    select {
+    case <-sigCh:
+      slog.Debug("picoagent.signal_received")
+      cancel()
+      time.Sleep(2 * time.Second)
+      os.Exit(1)
+    case <-ctx.Done():
+    }
+  }()
+
+  // 10b. 启动心跳
   heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
   defer heartbeatCancel()
   agent.StartHeartbeat(heartbeatCtx, 15*time.Second, func(event agent.StreamEvent) {
@@ -318,6 +334,38 @@ func fetchConfig(sock, token string) (*agent.AgentConfig, error) {
     return nil, fmt.Errorf("解析配置失败: %w", err)
   }
   return &cfg, nil
+}
+
+// fetchConfigWithRetry 获取配置，连接类错误自动重试 3 次
+func fetchConfigWithRetry(sock, token string) (*agent.AgentConfig, error) {
+  var lastErr error
+  for attempt := 0; attempt < 3; attempt++ {
+    if attempt > 0 {
+      slog.Debug("picoagent.config_retry", "attempt", attempt+1)
+      time.Sleep(time.Second)
+    }
+    cfg, err := fetchConfig(sock, token)
+    if err == nil {
+      return cfg, nil
+    }
+    if !isConfigRetryable(err) {
+      return nil, err
+    }
+    lastErr = err
+  }
+  return nil, fmt.Errorf("获取配置重试 3 次失败: %w", lastErr)
+}
+
+func isConfigRetryable(err error) bool {
+  if err == nil {
+    return false
+  }
+  msg := err.Error()
+  return strings.Contains(msg, "connection") ||
+    strings.Contains(msg, "dial") ||
+    strings.Contains(msg, "refused") ||
+    strings.Contains(msg, "timeout") ||
+    strings.Contains(msg, "reset")
 }
 
 func readInput() (*agent.Message, error) {
