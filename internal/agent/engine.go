@@ -233,6 +233,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     perIterTimeout = 120
   }
 
+  emptyRespRetries := 0
   for iter := 0; iter < maxIter; iter++ {
     // 每轮独立超时：LLM 调用 + 工具执行共享一条超时线
     iterCtx, iterCancel := context.WithTimeout(cancelCtx, time.Duration(perIterTimeout)*time.Second)
@@ -387,6 +388,20 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     )
 
     if len(pendingTools) == 0 {
+      if len(currentResp) == 0 {
+        // LLM 返回空响应（无文字、无工具调用），可能是临时问题
+        // 重试最多 3 次避免死循环，超过 3 次才视为真正完成
+        if emptyRespRetries >= 3 {
+          fullResponse = currentResp
+          slog.Debug("agent.no_tool_calls", "response_length", len(fullResponse), "empty_retries", emptyRespRetries)
+          iterCancel()
+          break
+        }
+        emptyRespRetries++
+        slog.Debug("agent.empty_response_retry", "retry", emptyRespRetries)
+        iterCancel()
+        continue
+      }
       fullResponse = currentResp
       slog.Debug("agent.no_tool_calls", "response_length", len(fullResponse))
       iterCancel()
