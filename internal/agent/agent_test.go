@@ -1059,3 +1059,39 @@ func TestEstimateTokensEdgeCases(t *testing.T) {
     }
   })
 }
+
+// ============================================================
+// 定期 fsync — Engine 应定期持久化中间状态
+// ============================================================
+
+func TestEngine_PeriodicFSync(t *testing.T) {
+  workspace := t.TempDir()
+  store := NewSessionStore(workspace)
+  provider := &mockProvider{
+    toolCalls: []ToolCallData{
+      {ID: "tc1", Name: "tool_a", Input: json.RawMessage(`{}`)},
+    },
+    responseText: "final answer",
+  }
+  tools := NewToolRegistry()
+  tools.Register(&dummyTool{name: "tool_a"})
+  cfg := testConfig()
+  cfg.MaxIter = 3
+  engine := NewEngine(cfg, provider, tools, store)
+  engine.fsyncInterval = 1
+  engine.SetSessionKey("fsync_test")
+
+  msg := &Message{Role: RoleUser, Content: "test periodic fsync"}
+  err := engine.Process(context.Background(), "be helpful", nil, msg, func(_ StreamEvent) {})
+  if err != nil {
+    t.Fatalf("Process failed: %v", err)
+  }
+
+  live, err := store.LoadLive("fsync_test")
+  if err != nil {
+    t.Fatal(err)
+  }
+  if len(live) == 0 {
+    t.Error("expected live messages to be saved via periodic fsync")
+  }
+}
