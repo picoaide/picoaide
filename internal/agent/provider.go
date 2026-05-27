@@ -8,6 +8,7 @@ import (
   "io"
   "log/slog"
   "net/http"
+  "strings"
   "time"
 
   "github.com/openai/openai-go/v3"
@@ -61,6 +62,61 @@ func doHTTP(ctx context.Context, url, method string, headers map[string]string, 
   }
   client := &http.Client{Timeout: 120 * time.Second}
   return client.Do(req)
+}
+
+// retryableErrorPrefixes 可重试的网络/服务端错误前缀匹配
+var retryableErrorPrefixes = []string{
+  "connection refused",
+  "connection reset",
+  "no such host",
+  "TLS handshake",
+  "i/o timeout",
+  "dial tcp",
+  "HTTP 429",
+  "HTTP 5",
+  "HTTP 50",
+  "HTTP 51",
+  "HTTP 52",
+  "HTTP 53",
+}
+
+func isRetryable(err error) bool {
+  msg := err.Error()
+  for _, prefix := range retryableErrorPrefixes {
+    if strings.Contains(msg, prefix) {
+      return true
+    }
+  }
+  return false
+}
+
+// retryStream 包装流式 LLM 调用，自动重试可恢复的网络和服务端错误。
+// 不重试：4xx(除429)、context overflow、context canceled/deadline exceeded。
+func retryStream(ctx context.Context, name string, fn func(context.Context) error) error {
+  var lastErr error
+  policy := DefaultRetryPolicy()
+  for attempt := 0; attempt < policy.MaxAttempts; attempt++ {
+    if ctx.Err() != nil {
+      return ctx.Err()
+    }
+    if attempt > 0 {
+      slog.Debug("provider.retry", "name", name, "attempt", attempt+1, "max", policy.MaxAttempts, "delay_ms", policy.Delay(attempt-1).Milliseconds())
+      select {
+      case <-time.After(policy.Delay(attempt - 1)):
+      case <-ctx.Done():
+        return ctx.Err()
+      }
+    }
+    err := fn(ctx)
+    if err == nil {
+      return nil
+    }
+    if !isRetryable(err) {
+      return err
+    }
+    lastErr = err
+  }
+  return fmt.Errorf("%s 重试 %d 次后仍然失败: %w", name, policy.MaxAttempts, lastErr)
 }
 
 // ============================================================
@@ -178,14 +234,28 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req *ChatRequest, cb
     "content-type":      "application/json",
   }
 
-  resp, err := doHTTP(ctx, p.baseURL+"/messages", "POST", headers, bodyJSON)
-  if err != nil {
-    slog.Error("anthropic.request_error", "error", err.Error())
-    return fmt.Errorf("anthropic 请求失败: %w", err)
-  }
-  defer resp.Body.Close()
+  return retryStream(ctx, "anthropic", func(innerCtx context.Context) error {
+    select {
+    case <-innerCtx.Done():
+      return innerCtx.Err()
+    default:
+    }
 
-  return parseAnthropicSSE(ctx, resp.Body, cb)
+    resp, err := doHTTP(innerCtx, p.baseURL+"/messages", "POST", headers, bodyJSON)
+    if err != nil {
+      return err
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode == http.StatusTooManyRequests {
+      return fmt.Errorf("HTTP 429 Too Many Requests")
+    }
+    if resp.StatusCode >= 500 {
+      return fmt.Errorf("HTTP %d %s", resp.StatusCode, resp.Status)
+    }
+
+    return parseAnthropicSSE(innerCtx, resp.Body, cb)
+  })
 }
 
 func parseAnthropicSSE(ctx context.Context, r io.Reader, cb func(event StreamEvent)) error {
@@ -331,73 +401,80 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb fu
     "estimated_input_tokens", inputTokens,
   )
 
-  stream := client.Chat.Completions.NewStreaming(ctx, params)
-  defer stream.Close()
-
-  var acc openai.ChatCompletionAccumulator
-  var chunkCount int
-  var textDeltaCount int
-
-  for stream.Next() {
-    chunk := stream.Current()
-    acc.AddChunk(chunk)
-    chunkCount++
-
-    if len(chunk.Choices) == 0 {
-      continue
-    }
-    choice := chunk.Choices[0]
-
-    // 内容增量
-    if choice.Delta.Content != "" {
-      textDeltaCount++
-      cb(TextDelta(choice.Delta.Content))
+  return retryStream(ctx, "openai", func(innerCtx context.Context) error {
+    select {
+    case <-innerCtx.Done():
+      return innerCtx.Err()
+    default:
     }
 
-    // 完成事件（tool_calls 不做完成处理，等后续积累）
-    if choice.FinishReason != "" && choice.FinishReason != "tool_calls" {
-      slog.Debug("openai.stream_finish", "finish_reason", string(choice.FinishReason), "chunk_count", chunkCount)
-      cb(FinishEvent("", map[string]int{}))
+    stream := client.Chat.Completions.NewStreaming(innerCtx, params)
+    defer stream.Close()
+
+    var acc openai.ChatCompletionAccumulator
+    var chunkCount int
+    var textDeltaCount int
+
+    for stream.Next() {
+      chunk := stream.Current()
+      acc.AddChunk(chunk)
+      chunkCount++
+
+      if len(chunk.Choices) == 0 {
+        continue
+      }
+      choice := chunk.Choices[0]
+
+      // 内容增量
+      if choice.Delta.Content != "" {
+        textDeltaCount++
+        cb(TextDelta(choice.Delta.Content))
+      }
+
+      // 完成事件（tool_calls 不做完成处理，等后续积累）
+      if choice.FinishReason != "" && choice.FinishReason != "tool_calls" {
+        slog.Debug("openai.stream_finish", "finish_reason", string(choice.FinishReason), "chunk_count", chunkCount)
+        cb(FinishEvent("", map[string]int{}))
+      }
     }
-  }
 
-  if err := stream.Err(); err != nil {
-    slog.Error("openai.stream_error", "error", err.Error(), "chunk_count", chunkCount)
-    return fmt.Errorf("OpenAI 流式请求失败: %w", err)
-  }
-
-  // 积累完成后检查是否有工具调用
-  toolCallCount := 0
-  if len(acc.Choices) > 0 {
-    for _, tc := range acc.Choices[0].Message.ToolCalls {
-      toolCallCount++
-      cb(StreamEvent{
-        Type: "tool_call_start",
-        Data: mustJSON(ToolCallData{
-          ID:    tc.ID,
-          Name:  tc.Function.Name,
-          Input: json.RawMessage(tc.Function.Arguments),
-        }),
-      })
+    if err := stream.Err(); err != nil {
+      return err
     }
-  }
 
-  // 估算输出 token
-  outputTokens := 0
-  if len(acc.Choices) > 0 {
-    outputTokens = estimateStringTokens(acc.Choices[0].Message.Content)
-  }
+    // 积累完成后检查是否有工具调用
+    toolCallCount := 0
+    if len(acc.Choices) > 0 {
+      for _, tc := range acc.Choices[0].Message.ToolCalls {
+        toolCallCount++
+        cb(StreamEvent{
+          Type: "tool_call_start",
+          Data: mustJSON(ToolCallData{
+            ID:    tc.ID,
+            Name:  tc.Function.Name,
+            Input: json.RawMessage(tc.Function.Arguments),
+          }),
+        })
+      }
+    }
 
-  slog.Debug("openai.request_complete",
-    "model", p.model,
-    "chunk_count", chunkCount,
-    "text_deltas", textDeltaCount,
-    "tool_calls", toolCallCount,
-    "estimated_output_tokens", outputTokens,
-    "total_estimated_tokens", inputTokens+outputTokens,
-  )
+    // 估算输出 token
+    outputTokens := 0
+    if len(acc.Choices) > 0 {
+      outputTokens = estimateStringTokens(acc.Choices[0].Message.Content)
+    }
 
-  return nil
+    slog.Debug("openai.request_complete",
+      "model", p.model,
+      "chunk_count", chunkCount,
+      "text_deltas", textDeltaCount,
+      "tool_calls", toolCallCount,
+      "estimated_output_tokens", outputTokens,
+      "total_estimated_tokens", inputTokens+outputTokens,
+    )
+
+    return nil
+  })
 }
 
 func buildOpenAIMessagesV2(system string, messages []LLMMessage) []openai.ChatCompletionMessageParamUnion {
