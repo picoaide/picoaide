@@ -39,6 +39,23 @@ type Manager struct {
   userChs  sync.Map // map[string]chan struct{}
   userRefs sync.Map // map[string]int
   usersMu  sync.Mutex
+
+  // 活跃沙箱的 stdin pipe，用于多轮消息追加（聊天场景）
+  activeInputs sync.Map // map[string]*io.PipeWriter
+}
+
+// SendInput 向该用户的活跃沙箱发送一条 JSON 消息（多轮追加）
+func (m *Manager) SendInput(username string, inputJSON []byte) error {
+  v, ok := m.activeInputs.Load(username)
+  if !ok {
+    return fmt.Errorf("用户 %s 没有活跃沙箱", username)
+  }
+  pw := v.(*io.PipeWriter)
+  _, err := pw.Write(inputJSON)
+  if err != nil {
+    return fmt.Errorf("发送消息到沙箱失败: %w", err)
+  }
+  return nil
 }
 
 // acquireUser 获取用户串行锁，阻塞直到轮到该用户或 ctx 取消
@@ -170,6 +187,10 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
   var cleanupOnce sync.Once
   localCleanup := func() {
     cleanupOnce.Do(func() {
+      // 关闭 stdin 并移除活跃记录，通知 picoagent 退出 stdin 读取循环
+      if v, ok := m.activeInputs.LoadAndDelete(username); ok {
+        v.(*io.PipeWriter).Close()
+      }
       if netCleanup != nil {
         netCleanup()
       }
@@ -272,7 +293,9 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
   }
 
   stdin.Write(inputJSON)
-  stdin.Close()
+  // 不关闭 stdin — 聊天场景支持多轮追加，picoagent 循环读取 stdin
+  // 在 cleanup 中关闭和移除
+  m.activeInputs.Store(username, stdin)
 
   released = true
   return localCleanup, stdout, cmd, nil

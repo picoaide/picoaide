@@ -5,6 +5,7 @@ import (
   "crypto/rand"
   "encoding/hex"
   "encoding/json"
+  "errors"
   "fmt"
   "log/slog"
   "net/http"
@@ -175,8 +176,12 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte) *c
       buildSkillMounts(username), username,
     )
     if err != nil {
-      slog.Debug("chat.sandbox_error", "run_id", run.runID, "error", err.Error())
-      run.append(streamEvent{Type: "error", Data: mustMarshal(err.Error())})
+      if errors.Is(err, context.Canceled) {
+        slog.Debug("chat.sandbox_cancelled", "run_id", run.runID)
+      } else {
+        slog.Debug("chat.sandbox_error", "run_id", run.runID, "error", err.Error())
+        run.append(streamEvent{Type: "error", Data: mustMarshal(err.Error())})
+      }
       run.finish()
       return
     }

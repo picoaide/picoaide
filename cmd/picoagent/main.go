@@ -5,6 +5,7 @@ import (
   "bytes"
   "context"
   "encoding/json"
+  "errors"
   "fmt"
   "io"
   "log/slog"
@@ -172,48 +173,11 @@ func main() {
     "user_id", cfg.UserID,
   )
 
-  // 8. 读取输入消息
+  // 8. 多轮消息循环 — 每轮从 stdin 读取一条消息并处理，
+  //    完成后等待下一条消息（沙箱可追加），stdin 关闭（EOF）或空闲超时退出
   slog.Debug("picoagent.reading_input")
-  inputMsg, err := readInput()
-  if err != nil {
-    slog.Debug("picoagent.no_input", "error", err.Error())
-    errorExit("读取输入消息失败: " + err.Error())
-  }
-  slog.Debug("picoagent.input_received",
-    "role", inputMsg.Role,
-    "content_length", len(inputMsg.Content),
-    "content_preview", truncateString(inputMsg.Content, 100),
-  )
-
-  // 9. 保存用户消息
-  store.AppendMessage(sessionKey, inputMsg)
-
-  // 10. 处理消息（超时时间从配置读取，默认 120 秒）
   timeout := cfg.RequestTimeout
-  var ctx context.Context
-  var cancel context.CancelFunc
-  if timeout > 0 {
-    ctx, cancel = context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-  } else {
-    ctx, cancel = context.WithCancel(context.Background())
-  }
-  defer cancel()
-
-  // 10a. 注册信号处理 — SIGTERM/SIGINT 触发优雅关闭
-  sigCh := make(chan os.Signal, 1)
-  signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-  go func() {
-    select {
-    case <-sigCh:
-      slog.Debug("picoagent.signal_received")
-      cancel()
-      time.Sleep(2 * time.Second)
-      os.Exit(1)
-    case <-ctx.Done():
-    }
-  }()
-
-  // 10b. 启动心跳
+  engine.SetSessionKey(sessionKey)
   heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
   defer heartbeatCancel()
   agent.StartHeartbeat(heartbeatCtx, 15*time.Second, func(event agent.StreamEvent) {
@@ -221,56 +185,125 @@ func main() {
     fmt.Println(string(data))
   })
 
-  slog.Debug("picoagent.engine_process_start",
-    "model_id", cfg.Model.ModelID,
-    "timeout", timeout,
-    "history_count", len(history),
-    "input_length", len(inputMsg.Content),
-  )
-  engine.SetSessionKey(sessionKey)
-  var fullResponse string
-  err = engine.Process(ctx, sysPrompt, history, inputMsg, func(event agent.StreamEvent) {
-    data, _ := json.Marshal(event)
-    fmt.Println(string(data))
-    if event.Type == "text_delta" {
-      var text string
-      if json.Unmarshal(event.Data, &text) == nil {
-        fullResponse += text
-      }
+  // 信号处理（只需注册一次，作用所有消息）
+  signalCtx, signalCancel := context.WithCancel(context.Background())
+  defer signalCancel()
+  sigCh := make(chan os.Signal, 1)
+  signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+  defer signal.Stop(sigCh)
+  go func() {
+    select {
+    case <-sigCh:
+      slog.Debug("picoagent.signal_received")
+      signalCancel()
+      time.Sleep(2 * time.Second)
+      os.Exit(1)
+    case <-signalCtx.Done():
     }
-  })
+  }()
 
-  heartbeatCancel()
+  stdinReader := bufio.NewReader(os.Stdin)
+  idleTimeout := 1 * time.Minute
+msgLoop:
+  for {
+    // 异步读取 stdin，支持空闲超时
+    resultCh := make(chan inputResult, 1)
+    go func() {
+      msg, err := readInputFrom(stdinReader)
+      resultCh <- inputResult{msg, err}
+    }()
 
-  if err != nil {
-    slog.Debug("picoagent.engine_error", "error", err.Error(), "response_length", len(fullResponse))
-    errorEvent := agent.ErrorEvent(err.Error())
-    data, _ := json.Marshal(errorEvent)
-    fmt.Println(string(data))
+    var inputMsg *agent.Message
+    select {
+    case result := <-resultCh:
+      if result.err != nil {
+        if errors.Is(result.err, io.EOF) {
+          slog.Debug("picoagent.stdin_closed")
+        } else {
+          slog.Debug("picoagent.no_input", "error", result.err.Error())
+        }
+        break msgLoop
+      }
+      inputMsg = result.msg
+    case <-time.After(idleTimeout):
+      slog.Debug("picoagent.idle_timeout")
+      break msgLoop
+    case <-signalCtx.Done():
+      slog.Debug("picoagent.signal_exit")
+      break msgLoop
+    }
 
-    // 保存部分响应（即使出错也保存已累积的内容）
+    slog.Debug("picoagent.input_received",
+      "role", inputMsg.Role,
+      "content_length", len(inputMsg.Content),
+      "content_preview", truncateString(inputMsg.Content, 100),
+    )
+
+    // 保存用户消息
+    store.AppendMessage(sessionKey, inputMsg)
+
+    // 处理消息（超时时间从配置读取，默认 120 秒）
+    var ctx context.Context
+    var cancel context.CancelFunc
+    if timeout > 0 {
+      ctx, cancel = context.WithTimeout(signalCtx, time.Duration(timeout)*time.Second)
+    } else {
+      ctx, cancel = context.WithCancel(signalCtx)
+    }
+
+    slog.Debug("picoagent.engine_process_start",
+      "model_id", cfg.Model.ModelID,
+      "timeout", timeout,
+      "history_count", len(history),
+      "input_length", len(inputMsg.Content),
+    )
+
+    var fullResponse string
+    err = engine.Process(ctx, sysPrompt, history, inputMsg, func(event agent.StreamEvent) {
+      data, _ := json.Marshal(event)
+      fmt.Println(string(data))
+      if event.Type == "text_delta" {
+        var text string
+        if json.Unmarshal(event.Data, &text) == nil {
+          fullResponse += text
+        }
+      }
+    })
+    cancel()
+
+    if err != nil {
+      slog.Debug("picoagent.engine_error", "error", err.Error(), "response_length", len(fullResponse))
+      errorEvent := agent.ErrorEvent(err.Error())
+      data, _ := json.Marshal(errorEvent)
+      fmt.Println(string(data))
+
+      if fullResponse != "" {
+        partialMsg := &agent.Message{
+          Role:    agent.RoleAssistant,
+          Content: fullResponse + "\n\n[响应中断: " + err.Error() + "]",
+        }
+        store.AppendMessage(sessionKey, partialMsg)
+      }
+      // 继续读取下一条消息，不退出
+      continue
+    }
+
+    slog.Debug("picoagent.engine_complete",
+      "response_length", len(fullResponse),
+      "response_preview", truncateString(fullResponse, 100),
+    )
+
+    // 保存助手响应到会话
     if fullResponse != "" {
-      partialMsg := &agent.Message{
+      assistantMsg := &agent.Message{
         Role:    agent.RoleAssistant,
-        Content: fullResponse + "\n\n[响应中断: " + err.Error() + "]",
+        Content: fullResponse,
       }
-      store.AppendMessage(sessionKey, partialMsg)
+      store.AppendMessage(sessionKey, assistantMsg)
     }
-    os.Exit(1)
-  }
 
-  slog.Debug("picoagent.engine_complete",
-    "response_length", len(fullResponse),
-    "response_preview", truncateString(fullResponse, 100),
-  )
-
-  // 11. 保存助手响应到会话
-  if fullResponse != "" {
-    assistantMsg := &agent.Message{
-      Role:    agent.RoleAssistant,
-      Content: fullResponse,
-    }
-    store.AppendMessage(sessionKey, assistantMsg)
+    // 从 store 重新加载 history，确保下一轮包含本轮完整上下文
+    history, _ = store.LoadLive(sessionKey)
   }
 
   fmt.Fprintf(os.Stderr, "[PICOAGENT] done\n")
@@ -368,9 +401,14 @@ func isConfigRetryable(err error) bool {
     strings.Contains(msg, "reset")
 }
 
-func readInput() (*agent.Message, error) {
+type inputResult struct {
+  msg *agent.Message
+  err error
+}
+
+func readInputFrom(r *bufio.Reader) (*agent.Message, error) {
   var msg agent.Message
-  decoder := json.NewDecoder(bufio.NewReader(os.Stdin))
+  decoder := json.NewDecoder(r)
   if err := decoder.Decode(&msg); err != nil {
     return nil, fmt.Errorf("stdin JSON 解析失败: %w", err)
   }
@@ -378,6 +416,10 @@ func readInput() (*agent.Message, error) {
     return nil, fmt.Errorf("消息缺少 role 字段")
   }
   return &msg, nil
+}
+
+func readInput() (*agent.Message, error) {
+  return readInputFrom(bufio.NewReader(os.Stdin))
 }
 
 func buildSystemPrompt(workspace string) string {
