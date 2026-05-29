@@ -1,10 +1,12 @@
 package auth
 
 import (
+  "context"
   "crypto/rand"
   "database/sql"
   "encoding/hex"
   "fmt"
+  "log/slog"
   "os"
   "path/filepath"
   "strings"
@@ -303,6 +305,27 @@ func syncSchema() error {
     return err
   }
 
+  // 记忆进化审计日志表
+  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS memory_evolution_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    changes_summary TEXT NOT NULL DEFAULT '',
+    files_modified TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
+  )`)
+  if err != nil {
+    return err
+  }
+  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_mel_username ON memory_evolution_log(username)`)
+  if err != nil {
+    return err
+  }
+  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_mel_session_key ON memory_evolution_log(session_key)`)
+  if err != nil {
+    return err
+  }
+
   // 执行数据库迁移（新增列、改名、数据迁移等）
   if err := migrations.RunAll(engine); err != nil {
     return err
@@ -367,6 +390,58 @@ func ValidateMCPToken(token string) (string, bool) {
     return "", false
   }
   return username, true
+}
+
+// StartAuditLogCleaner 定时清理 90 天前的审计日志（ctx 取消时停止）
+// 每 6 小时执行一次，分批删除避免长锁，每次最多 1000 条，间隔 100ms
+func StartAuditLogCleaner(ctx context.Context) {
+  go func() {
+    // 启动后 5s 首次执行
+    select {
+    case <-time.After(5 * time.Second):
+    case <-ctx.Done():
+      return
+    }
+    ticker := time.NewTicker(6 * time.Hour)
+    defer ticker.Stop()
+    for {
+      runCleanBatch(ctx)
+      select {
+      case <-ticker.C:
+      case <-ctx.Done():
+        return
+      }
+    }
+  }()
+}
+
+// runCleanBatch 执行一批清理，最多 200 批，每批 1000 条
+func runCleanBatch(ctx context.Context) {
+  for i := 0; i < 200; i++ {
+    select {
+    case <-ctx.Done():
+      return
+    default:
+    }
+    eng, err := GetEngine()
+    if err != nil {
+      slog.Warn("clean_memory_evolution_log_db_error", "error", err.Error())
+      return
+    }
+    result, err := eng.Exec(`DELETE FROM memory_evolution_log WHERE id IN (
+      SELECT id FROM memory_evolution_log WHERE created_at < datetime('now', '-90 days') LIMIT 1000
+    )`)
+    if err != nil {
+      slog.Warn("clean_memory_evolution_log_error", "error", err.Error())
+      return
+    }
+    affected, _ := result.RowsAffected()
+    if affected == 0 {
+      return
+    }
+    slog.Debug("clean_memory_evolution_log", "batch_deleted", affected)
+    time.Sleep(100 * time.Millisecond)
+  }
 }
 
 // ensure interface compatibility: core.DB embeds *sql.DB

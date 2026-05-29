@@ -34,13 +34,6 @@ func safePath(path string) string {
   return filepath.Join(sandboxWorkspace, cleaned)
 }
 
-// recoverPanic 工具函数的 panic recovery，记录日志并返回友好错误
-func recoverPanic(toolName string) {
-  if r := recover(); r != nil {
-    slog.Error("tool.panic_recovered", "tool", toolName, "panic", r)
-  }
-}
-
 // ============================================================
 // 工具注册和执行
 // ============================================================
@@ -120,6 +113,10 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, args json.RawMe
 
   start := time.Now()
   result, err = entry.executor.Execute(ctx, args)
+  // 工具 Execute 内部若 panic 且未设置返回值，result 可能为 nil
+  if result == nil && err == nil {
+    result = &ToolResult{Success: false, Data: fmt.Sprintf("工具 %s 执行返回空结果（可能发生 panic 已被捕获）", name)}
+  }
   duration := time.Since(start)
 
   slog.Debug("tool.execute_complete",
@@ -160,8 +157,6 @@ func (t *CommandTool) Schema() map[string]interface{} {
 }
 
 func (t *CommandTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
-  defer recoverPanic("command")
-
   var params struct {
     Command string `json:"command"`
   }
@@ -255,8 +250,6 @@ func (t *ReadFileTool) Schema() map[string]interface{} {
 }
 
 func (t *ReadFileTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
-  defer recoverPanic("read_file")
-
   var params struct {
     Path string `json:"path"`
   }
@@ -395,8 +388,6 @@ func (t *WriteFileTool) Schema() map[string]interface{} {
 }
 
 func (t *WriteFileTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
-  defer recoverPanic("write_file")
-
   var params struct {
     Path      string `json:"path"`
     Content   string `json:"content"`
@@ -472,8 +463,6 @@ func (t *EditFileTool) Schema() map[string]interface{} {
 }
 
 func (t *EditFileTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
-  defer recoverPanic("edit_file")
-
   var params struct {
     Path    string `json:"path"`
     OldText string `json:"old_text"`
@@ -544,8 +533,6 @@ func (t *AppendFileTool) Schema() map[string]interface{} {
 }
 
 func (t *AppendFileTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
-  defer recoverPanic("append_file")
-
   var params struct {
     Path    string `json:"path"`
     Content string `json:"content"`
@@ -743,8 +730,6 @@ func (t *DeleteFileTool) Schema() map[string]interface{} {
 }
 
 func (t *DeleteFileTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
-  defer recoverPanic("delete_file")
-
   var params struct {
     Path string `json:"path"`
   }

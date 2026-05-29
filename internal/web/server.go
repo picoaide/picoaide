@@ -43,9 +43,12 @@ type Server struct {
   secret           string
   csrfKey          string
   loginLimiter     *rateLimiter
-  syncCancel       context.CancelFunc
-  syncMu           sync.Mutex
-  agentIntegration *AgentIntegration
+  auditLimiter     *rateLimiter
+  syncCancel        context.CancelFunc
+  syncMu            sync.Mutex
+  auditCleanerCtx   context.Context
+  auditCleanerCancel context.CancelFunc
+  agentIntegration  *AgentIntegration
   tlsSrv           *http.Server // TLS 服务器，用于优雅关闭
   extSrv           *http.Server // HTTP 服务器（:80），用于热加载时更新 handler
 }
@@ -335,6 +338,7 @@ func (s *Server) registerInternalAPIRoutes(g *gin.RouterGroup) {
 
   // PicoAgent 沙箱配置 API（token 认证，无需 session）
   g.GET("/picoagent/me", s.handlePicoAgentConfig)
+  g.POST("/picoagent/audit", s.handlePicoAgentAudit)
   // 文件管理
   g.GET("/files", s.handleFiles)
   g.POST("/files/upload", s.handleFileUpload)
@@ -669,8 +673,13 @@ func Serve() error {
     secret:       secret,
     csrfKey:      csrfKey,
     loginLimiter: newLoginRateLimiter(),
+    auditLimiter:  newAuditRateLimiter(),
   }
   s.cfg.Store(cfg)
+
+  // 启动审计日志清理（停止由 gracefulShutdown 管理）
+  s.auditCleanerCtx, s.auditCleanerCancel = context.WithCancel(context.Background())
+  auth.StartAuditLogCleaner(s.auditCleanerCtx)
 
   // 定时同步（实时响应配置变更）
   s.restartSyncTimer()
@@ -765,9 +774,17 @@ func (s *Server) gracefulShutdown(sockPath string) error {
     s.syncCancel()
   }
 
+  // 停止审计日志清理
+  if s.auditCleanerCancel != nil {
+    s.auditCleanerCancel()
+  }
+
   // 停止速率限制器 goroutine
   if s.loginLimiter != nil {
     s.loginLimiter.Stop()
+  }
+  if s.auditLimiter != nil {
+    s.auditLimiter.Stop()
   }
 
   // 停止 IM 网关和 Cron 调度器

@@ -50,7 +50,10 @@ func (m *Manager) SendInput(username string, inputJSON []byte) error {
   if !ok {
     return fmt.Errorf("用户 %s 没有活跃沙箱", username)
   }
-  pw := v.(*io.PipeWriter)
+  pw, ok := v.(io.WriteCloser)
+  if !ok {
+    return fmt.Errorf("用户 %s 的沙箱 stdin 类型异常", username)
+  }
   _, err := pw.Write(inputJSON)
   if err != nil {
     return fmt.Errorf("发送消息到沙箱失败: %w", err)
@@ -189,7 +192,9 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
     cleanupOnce.Do(func() {
       // 关闭 stdin 并移除活跃记录，通知 picoagent 退出 stdin 读取循环
       if v, ok := m.activeInputs.LoadAndDelete(username); ok {
-        v.(*io.PipeWriter).Close()
+        if pw, ok := v.(io.WriteCloser); ok {
+          pw.Close()
+        }
       }
       if netCleanup != nil {
         netCleanup()
@@ -254,9 +259,8 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
   }
 
   // 注入 API key 为环境变量
-  for _, v := range apiKeys {
-    env = append(env, fmt.Sprintf("PICOAGENT_API_KEY=%s", v))
-    break
+  if key, ok := apiKeys["default"]; ok {
+    env = append(env, fmt.Sprintf("PICOAGENT_API_KEY=%s", key))
   }
   cmd.Env = env
 
@@ -287,7 +291,7 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
   // 网络隔离：picoaide-br 大内网 + 固定 IP + ICC=false
   m.initBridge()
   if err := setupNetNS(cmd.Process.Pid, username); err != nil {
-    slog.Warn("sandbox.netns_setup_failed", "error", err, "username", username)
+    slog.Error("sandbox.netns_setup_failed", "error", err, "username", username)
   } else {
     netCleanup = func() { teardownNetNS(username) }
   }
@@ -321,11 +325,6 @@ func (m *Manager) RunAndWait(ctx context.Context, token string, inputJSON []byte
 
   killOnCancel(runCtx, cmd)
 
-  var stderrBuf bytes.Buffer
-  stderrReader, stderrWriter := io.Pipe()
-  cmd.Stderr = io.MultiWriter(&stderrBuf, stderrWriter)
-  go parsePicoagentStderr(stderrReader, username)
-
   result := &RunResult{}
   scanner := bufio.NewScanner(stdout)
   scanBuf := make([]byte, 32*1024*1024)
@@ -354,21 +353,12 @@ func (m *Manager) RunAndWait(ctx context.Context, token string, inputJSON []byte
   }
 
   cmd.Wait()
-  stderrWriter.Close()
 
   slog.Debug("sandbox.picoagent_exited",
     "pid", cmd.Process.Pid,
     "exit_code", cmd.ProcessState.ExitCode(),
     "event_count", eventCount,
-    "stderr_length", stderrBuf.Len(),
   )
-
-  if stderrBuf.Len() > 0 {
-    result.Events = append(result.Events, StreamEvent{
-      Type: "stderr",
-      Data: mustJSON(stderrBuf.String()),
-    })
-  }
 
   slog.Debug("sandbox.run_complete",
     "username", username,

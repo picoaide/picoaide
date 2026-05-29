@@ -75,7 +75,10 @@ func cleanStaleRuns() {
 
 func generateRunID() string {
   b := make([]byte, 16)
-  rand.Read(b)
+  if _, err := rand.Read(b); err != nil {
+    slog.Error("chat.generate_run_id_failed", "error", err.Error())
+    return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
+  }
   return hex.EncodeToString(b)
 }
 

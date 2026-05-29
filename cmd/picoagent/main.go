@@ -40,7 +40,7 @@ func main() {
     slog.Debug("picoagent.no_token")
     errorExit("PICOAGENT_TOKEN 环境变量未设置")
   }
-  slog.Debug("picoagent.token_ok", "token_prefix", token[:20])
+  slog.Debug("picoagent.token_ok", "token_length", len(token))
 
   sock := os.Getenv("PICOAGENT_SOCKET")
   if sock == "" {
@@ -114,7 +114,8 @@ func main() {
   tools.Register(&agent.DeleteFileTool{})
   tools.Register(&agent.WebSearchTool{})
   tools.Register(&agent.WebFetchTool{})
-  slog.Debug("picoagent.tools_registered", "count", 11)
+  tools.Register(&agent.UpdateMemoryTool{Workspace: cfg.Workspace})
+  slog.Debug("picoagent.tools_registered", "count", 12)
 
   // 连接 MCP 服务器（使用独立 context，不影响主流程超时）
   mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -204,18 +205,23 @@ func main() {
 
   stdinReader := bufio.NewReader(os.Stdin)
   idleTimeout := 1 * time.Minute
+  inputCh := make(chan inputResult, 1)
+  // 单 goroutine 循环读取 stdin，避免 per-iteration 泄漏
+  go func() {
+    for {
+      msg, err := readInputFrom(stdinReader)
+      inputCh <- inputResult{msg, err}
+      if err != nil {
+        return
+      }
+    }
+  }()
+
+  var inputMsg *agent.Message
 msgLoop:
   for {
-    // 异步读取 stdin，支持空闲超时
-    resultCh := make(chan inputResult, 1)
-    go func() {
-      msg, err := readInputFrom(stdinReader)
-      resultCh <- inputResult{msg, err}
-    }()
-
-    var inputMsg *agent.Message
     select {
-    case result := <-resultCh:
+    case result := <-inputCh:
       if result.err != nil {
         if errors.Is(result.err, io.EOF) {
           slog.Debug("picoagent.stdin_closed")
@@ -284,6 +290,8 @@ msgLoop:
         }
         store.AppendMessage(sessionKey, partialMsg)
       }
+      // 从 store 重新加载 history，确保下一轮包含当前轮已保存的内容
+      history, _ = store.LoadLive(sessionKey)
       // 继续读取下一条消息，不退出
       continue
     }
@@ -304,6 +312,38 @@ msgLoop:
 
     // 从 store 重新加载 history，确保下一轮包含本轮完整上下文
     history, _ = store.LoadLive(sessionKey)
+  }
+
+  // 会话结束，触发记忆进化
+  slog.Debug("picoagent.evolving_memory")
+  evolver := agent.NewMemoryEvolution(cfg.Workspace, store)
+  if summarizer != nil {
+    evolver.SetSummarizer(summarizer)
+  }
+  evolveCtx, evolveCancel := context.WithTimeout(context.Background(), 30*time.Second)
+  result, evolveErr := evolver.Evolve(evolveCtx, sessionKey)
+  evolveCancel()
+  if evolveErr != nil {
+    slog.Debug("picoagent.evolve_error", "error", evolveErr.Error())
+  } else if result.HasChanges {
+    slog.Info("memory_evolution",
+      "user", cfg.UserID,
+      "session", sessionKey,
+      "decisions", len(result.Decisions),
+      "knowledge", len(result.Knowledge),
+      "preferences", len(result.Preferences),
+    )
+    // 通过审计端点写入 DB
+    summary := fmt.Sprintf("decisions=%d,knowledge=%d,preferences=%d,progress_completed=%d,progress_inprogress=%d,progress_blocked=%d",
+      len(result.Decisions), len(result.Knowledge), len(result.Preferences),
+      len(result.Progress.Completed), len(result.Progress.InProgress), len(result.Progress.Blocked))
+    files := "MEMORY.md"
+    if len(result.Preferences) > 0 {
+      files += ",USER.md"
+    }
+    if err := postAuditLog(evolveCtx, sock, token, cfg.UserID, sessionKey, summary, files); err != nil {
+      slog.Debug("picoagent.audit_post_error", "error", err.Error())
+    }
   }
 
   fmt.Fprintf(os.Stderr, "[PICOAGENT] done\n")
@@ -404,6 +444,60 @@ func isConfigRetryable(err error) bool {
 type inputResult struct {
   msg *agent.Message
   err error
+}
+
+// postAuditLog POST 记忆进化审计记录到服务端，失败时重试 1 次
+// ctx 用于控制 HTTP 请求超时和取消，避免阻塞演进流程
+func postAuditLog(ctx context.Context, sock, token, username, sessionKey, changesSummary, filesModified string) error {
+  doPost := func() error {
+    body := map[string]string{
+      "username":        username,
+      "session_key":     sessionKey,
+      "changes_summary": changesSummary,
+      "files_modified":  filesModified,
+    }
+    bodyJSON, _ := json.Marshal(body)
+
+    client := &http.Client{
+      Timeout: 10 * time.Second,
+      Transport: &http.Transport{
+        DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+          return net.Dial("unix", sock)
+        },
+      },
+    }
+
+    req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost/api/picoagent/audit", bytes.NewReader(bodyJSON))
+    if err != nil {
+      return fmt.Errorf("创建审计请求失败: %w", err)
+    }
+    req.Header.Set("Authorization", "Bearer "+token)
+    req.Header.Set("Content-Type", "application/json")
+
+    resp, err := client.Do(req)
+    if err != nil {
+      return fmt.Errorf("审计请求失败: %w", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+      respBody, _ := io.ReadAll(resp.Body)
+      return fmt.Errorf("审计请求 HTTP %d: %s", resp.StatusCode, string(respBody))
+    }
+    return nil
+  }
+
+  err := doPost()
+  if err != nil {
+    slog.Debug("picoagent.audit_retry", "error", err.Error())
+    select {
+    case <-time.After(time.Second):
+    case <-ctx.Done():
+      return ctx.Err()
+    }
+    return doPost()
+  }
+  return nil
 }
 
 func readInputFrom(r *bufio.Reader) (*agent.Message, error) {

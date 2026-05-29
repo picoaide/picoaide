@@ -71,7 +71,7 @@ func (m *MCPToolManager) Connect(ctx context.Context, name string, server *MCPSe
   return fmt.Errorf("MCP %s 连接失败(重试2次): %w", name, lastErr)
 }
 
-// connectOnce 单次 MCP 连接尝试
+// connectOnce 单次 MCP 连接尝试（未持锁，内部会获取锁）
 func (m *MCPToolManager) connectOnce(ctx context.Context, name string, server *MCPServer, token string) error {
   mcpClient := mcp.NewClient(&mcp.Implementation{
     Name:    "picoagent",
@@ -154,28 +154,36 @@ func (m *MCPToolManager) RegisterAll(registry *ToolRegistry) {
 }
 
 func (m *MCPToolManager) CallTool(ctx context.Context, serverName, toolName string, args map[string]interface{}) (*mcp.CallToolResult, error) {
-  session := m.getSession(serverName)
+  // 持锁获取 session 并保持锁在 CallTool 期间不被释放，
+  // 防止并发 connectOnce 关闭正在使用的 session
+  m.mu.Lock()
+  session := m.sessions[serverName]
   if session == nil {
-    // 尝试自动重连
+    m.mu.Unlock()
     if err := m.tryReconnect(ctx, serverName); err != nil {
       return nil, err
     }
-    session = m.getSession(serverName)
+    m.mu.Lock()
+    session = m.sessions[serverName]
     if session == nil {
+      m.mu.Unlock()
       return nil, fmt.Errorf("MCP 服务器 %s 重连后仍然不可用", serverName)
     }
   }
-
   result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: args})
+  m.mu.Unlock()
   if err != nil && isConnError(err) {
-    // 连接断开，尝试重连后重试一次
     slog.Debug("mcp.calltool_reconnecting", "server", serverName, "tool", toolName)
+    // 先解锁再重连：tryReconnect 内部自行管理锁
     if reconnectErr := m.tryReconnect(ctx, serverName); reconnectErr == nil {
-      if newSession := m.getSession(serverName); newSession != nil {
-        return newSession.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: args})
+      m.mu.Lock()
+      if newSession := m.sessions[serverName]; newSession != nil {
+        result, err = newSession.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: args})
+        m.mu.Unlock()
+        return result, err
       }
+      m.mu.Unlock()
     }
-    return nil, err
   }
   return result, nil
 }
