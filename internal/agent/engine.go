@@ -14,7 +14,8 @@ import (
 // ============================================================
 
 const (
-  maxOverflowRetries = 3      // 上下文溢出最大重试次数
+    maxOverflowRetries = 3      // 上下文溢出最大重试次数
+    maxLLMRetries      = 5      // LLM 调用失败最大重试次数（超时/网络错误等）
   reservedTokens     = 20000  // 为模型回复预留的 token
 )
 
@@ -328,6 +329,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     // LLM 调用（含上下文溢出重试）
     var llmErr error
     overflowRetry := 0
+    llmRetry := 0
     for {
       slog.Debug("agent.llm_request",
         "model", modelID,
@@ -392,6 +394,18 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         currentResp = ""
         continue
       }
+
+      // 其他 LLM 错误（超时/网络故障等）→ 重建上下文重试
+      if llmRetry < maxLLMRetries {
+        llmRetry++
+        slog.Warn("agent.llm_retry", "retry", llmRetry, "max", maxLLMRetries, "error", llmErr.Error())
+        iterCancel()
+        iterCtx, iterCancel = context.WithTimeout(cancelCtx, time.Duration(perIterTimeout)*time.Second)
+        pendingTools = nil
+        currentResp = ""
+        continue
+      }
+
       break
     }
 
