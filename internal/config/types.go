@@ -120,6 +120,10 @@ type SkillsConfig struct {
   Sources []SkillsSourceWrapper `json:"sources"`
 }
 
+type TimeoutConfig struct {
+  CronJob string // cron 任务超时，如 "60m", "30m"，空值则用默认 60 分钟
+}
+
 type GlobalConfig struct {
   LDAP        LDAPConfig
   OIDC        OIDCConfig
@@ -128,4 +132,5 @@ type GlobalConfig struct {
   Web         WebConfig
   Security    interface{}
   Skills      SkillsConfig
+  Timeout     TimeoutConfig
 }

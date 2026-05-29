@@ -371,6 +371,11 @@ func (m *Manager) RunAndWait(ctx context.Context, token string, inputJSON []byte
 // killOnCancel 等待 ctx 取消后先 SIGTERM 再 SIGKILL 终止沙箱进程
 func killOnCancel(ctx context.Context, cmd *exec.Cmd) {
   go func() {
+    defer func() {
+      if r := recover(); r != nil {
+        slog.Error("sandbox.kill_on_cancel_panic", "panic", r)
+      }
+    }()
     <-ctx.Done()
     pid := cmd.Process.Pid
     slog.Debug("sandbox.kill_on_cancel", "pid", pid)
@@ -410,6 +415,11 @@ func (m *Manager) Run(ctx context.Context, token string, inputJSON []byte, works
   done := make(chan struct{})
   exitTime := make(chan time.Time, 1)
   go func() {
+    defer func() {
+      if r := recover(); r != nil {
+        slog.Error("sandbox.wait_panic", "panic", r)
+      }
+    }()
     start := time.Now()
     err := cmd.Wait()
     waited := time.Since(start)
@@ -425,6 +435,11 @@ func (m *Manager) Run(ctx context.Context, token string, inputJSON []byte, works
 
   events := make(chan StreamEvent, 100)
   go func() {
+    defer func() {
+      if r := recover(); r != nil {
+        slog.Error("sandbox.scanner_panic", "panic", r)
+      }
+    }()
     defer close(events)
     defer cleanup()
     defer cancel() // Run 退出后才清理，不影响 scanner 的 select 竞争

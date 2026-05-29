@@ -3,6 +3,7 @@ package web
 import (
   "context"
   "encoding/json"
+  "fmt"
   "log/slog"
   "path/filepath"
 
@@ -106,7 +107,8 @@ func (s *Server) initAgentIntegration() (*AgentIntegration, error) {
     slog.Warn("初始化 cron 表失败", "error", err)
   }
 
-  cronScheduler := scheduler.NewCronScheduler(cronStore, func(ctx context.Context, job *scheduler.CronJob) error {
+  cronTimeout := s.loadConfig().CronJobTimeout()
+  cronScheduler := scheduler.NewCronScheduler(cronStore, cronTimeout, func(ctx context.Context, job *scheduler.CronJob) error {
     return s.executeCronJob(ctx, sb, cronStore, job)
   })
 
@@ -278,6 +280,7 @@ func (s *Server) executeCronJob(ctx context.Context, sb *sandbox.Manager, store 
 
   events, err := sb.Run(ctx, mcpToken, inputJSON, workspace, apiKeys, buildSkillMounts(job.UserID), job.UserID)
   if err != nil {
+    s.notifyCronFailure(ctx, job, err)
     return err
   }
 
@@ -290,21 +293,52 @@ func (s *Server) executeCronJob(ctx context.Context, sb *sandbox.Manager, store 
     }
   }
 
-  if response != "" && s.agentIntegration != nil {
-    channels, err := auth.ListUserChannelByUsername(job.UserID)
-    if err == nil {
-      for _, ch := range channels {
-        if ch.Enabled && ch.Configured {
-          platform := ch.Channel
-          if err := s.agentIntegration.imGateway.SendToUser(ctx, platform, job.UserID, response); err != nil {
-            slog.Warn("定时任务通知发送失败", "platform", platform, "error", err)
-          }
-        }
-      }
+  if s.agentIntegration != nil {
+    if response != "" {
+      s.sendCronResult(ctx, job, response)
+    } else {
+      s.notifyCronFailure(ctx, job, fmt.Errorf("任务未生成有效输出"))
     }
   }
 
   return nil
+}
+
+// sendCronResult 向用户推送定时任务执行结果
+func (s *Server) sendCronResult(ctx context.Context, job *scheduler.CronJob, result string) {
+  channels, err := auth.ListUserChannelByUsername(job.UserID)
+  if err != nil {
+    return
+  }
+  for _, ch := range channels {
+    if ch.Enabled && ch.Configured {
+      if err := s.agentIntegration.imGateway.SendToUser(ctx, ch.Channel, job.UserID, result); err != nil {
+        slog.Warn("定时任务结果发送失败", "platform", ch.Channel, "error", err)
+      }
+    }
+  }
+}
+
+// notifyCronFailure 向用户推送定时任务执行失败通知
+func (s *Server) notifyCronFailure(ctx context.Context, job *scheduler.CronJob, jobErr error) {
+  if s.agentIntegration == nil {
+    return
+  }
+  channels, err := auth.ListUserChannelByUsername(job.UserID)
+  if err != nil {
+    return
+  }
+  msg := fmt.Sprintf("⚠️ 定时任务执行失败\n任务: %s\n错误: %v", job.Prompt, jobErr)
+  if len(msg) > 500 {
+    msg = msg[:500] + "..."
+  }
+  for _, ch := range channels {
+    if ch.Enabled && ch.Configured {
+      if err := s.agentIntegration.imGateway.SendToUser(ctx, ch.Channel, job.UserID, msg); err != nil {
+        slog.Warn("定时任务失败通知发送失败", "platform", ch.Channel, "error", err)
+      }
+    }
+  }
 }
 
 // loadAPIKeys 从 settings 表加载 API 密钥

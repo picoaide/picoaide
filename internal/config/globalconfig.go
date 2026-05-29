@@ -94,6 +94,22 @@ func (cfg *GlobalConfig) SyncIntervalDuration() time.Duration {
   return d
 }
 
+// CronJobTimeout 返回 cron 任务超时时间，默认 60 分钟
+func (cfg *GlobalConfig) CronJobTimeout() time.Duration {
+  s := cfg.Timeout.CronJob
+  if s == "" {
+    return 60 * time.Minute
+  }
+  if d, err := strconv.ParseInt(s, 10, 64); err == nil {
+    return time.Duration(d) * time.Minute
+  }
+  d, err := time.ParseDuration(s)
+  if err != nil {
+    return 60 * time.Minute
+  }
+  return d
+}
+
 // SkillsDirPath 返回技能目录路径
 func SkillsDirPath() string {
   return filepath.Join(WorkDir(), "skills")
