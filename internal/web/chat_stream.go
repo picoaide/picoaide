@@ -5,6 +5,7 @@ import (
   "crypto/rand"
   "encoding/hex"
   "encoding/json"
+  "errors"
   "fmt"
   "log/slog"
   "net/http"
@@ -74,7 +75,10 @@ func cleanStaleRuns() {
 
 func generateRunID() string {
   b := make([]byte, 16)
-  rand.Read(b)
+  if _, err := rand.Read(b); err != nil {
+    slog.Error("chat.generate_run_id_failed", "error", err.Error())
+    return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
+  }
   return hex.EncodeToString(b)
 }
 
@@ -175,8 +179,12 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte) *c
       buildSkillMounts(username), username,
     )
     if err != nil {
-      slog.Debug("chat.sandbox_error", "run_id", run.runID, "error", err.Error())
-      run.append(streamEvent{Type: "error", Data: mustMarshal(err.Error())})
+      if errors.Is(err, context.Canceled) {
+        slog.Debug("chat.sandbox_cancelled", "run_id", run.runID)
+      } else {
+        slog.Debug("chat.sandbox_error", "run_id", run.runID, "error", err.Error())
+        run.append(streamEvent{Type: "error", Data: mustMarshal(err.Error())})
+      }
       run.finish()
       return
     }

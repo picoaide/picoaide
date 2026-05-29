@@ -22,6 +22,7 @@ func TestModelTableNames(t *testing.T) {
     {SkillRecord{}, "skills"},
     {UserSkill{}, "user_skills"},
     {UserCookie{}, "user_cookies"},
+    {MemoryEvolutionLog{}, "memory_evolution_log"},
   }
   for _, tc := range tests {
     if got := tc.model.TableName(); got != tc.expected {

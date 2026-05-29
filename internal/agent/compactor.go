@@ -51,6 +51,14 @@ func (c *Compactor) SetSummarizer(llm Summarizer) {
   c.llm = llm
 }
 
+// SummarizeText 使用摘要 LLM 对任意文本生成摘要（工具结果自动压缩用）
+func (c *Compactor) SummarizeText(ctx context.Context, prompt string) (string, error) {
+  if c.llm == nil {
+    return "", fmt.Errorf("summarizer not set")
+  }
+  return c.llm.Summarize(ctx, prompt)
+}
+
 // IsOverflow 判断 live 是否溢出
 func (c *Compactor) IsOverflow(tokenCount int) bool {
   return c.IsOverflowWithLimit(tokenCount, 200000)
@@ -258,21 +266,29 @@ func extractSummary(msgs []*Message) string {
 
 // Summarize 实现 Summarizer 接口（通过 LLM provider）
 type LLMSummarizer struct {
-  provider Provider
-  model    string
+  provider  Provider
+  model     string
+  maxTokens int // 管理员配置的 max_tokens，用于 prompt 指导 AI 控制输出长度
 }
 
-func NewLLMSummarizer(provider Provider, model string) *LLMSummarizer {
-  return &LLMSummarizer{provider: provider, model: model}
+func NewLLMSummarizer(provider Provider, model string, maxTokens int) *LLMSummarizer {
+  return &LLMSummarizer{provider: provider, model: model, maxTokens: maxTokens}
 }
 
 func (l *LLMSummarizer) Summarize(ctx context.Context, prompt string) (string, error) {
+  // API max_tokens 设为一个较大的值，避免硬截断；
+  // 实际输出长度由 prompt 中的约束指导 AI 自行控制
+  apiMaxTokens := 100000
+  guideline := ""
+  if l.maxTokens > 0 {
+    guideline = fmt.Sprintf("，控制在 %d tokens 以内", l.maxTokens)
+  }
   var summary string
   err := l.provider.StreamChat(ctx, &ChatRequest{
     Model:       l.model,
-    System:      "你是一个高效的摘要助手。请用中文简洁地总结对话要点。",
+    System:      fmt.Sprintf("你是一个高效的摘要助手。请用中文简洁地总结%s。", guideline),
     Messages:    []LLMMessage{{Role: "user", Content: prompt}},
-    MaxTokens:   1024,
+    MaxTokens:   apiMaxTokens,
     Temperature: 0.3,
   }, func(event StreamEvent) {
     if event.Type == "text_delta" {

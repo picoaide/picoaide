@@ -39,6 +39,26 @@ type Manager struct {
   userChs  sync.Map // map[string]chan struct{}
   userRefs sync.Map // map[string]int
   usersMu  sync.Mutex
+
+  // 活跃沙箱的 stdin pipe，用于多轮消息追加（聊天场景）
+  activeInputs sync.Map // map[string]*io.PipeWriter
+}
+
+// SendInput 向该用户的活跃沙箱发送一条 JSON 消息（多轮追加）
+func (m *Manager) SendInput(username string, inputJSON []byte) error {
+  v, ok := m.activeInputs.Load(username)
+  if !ok {
+    return fmt.Errorf("用户 %s 没有活跃沙箱", username)
+  }
+  pw, ok := v.(io.WriteCloser)
+  if !ok {
+    return fmt.Errorf("用户 %s 的沙箱 stdin 类型异常", username)
+  }
+  _, err := pw.Write(inputJSON)
+  if err != nil {
+    return fmt.Errorf("发送消息到沙箱失败: %w", err)
+  }
+  return nil
 }
 
 // acquireUser 获取用户串行锁，阻塞直到轮到该用户或 ctx 取消
@@ -170,6 +190,12 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
   var cleanupOnce sync.Once
   localCleanup := func() {
     cleanupOnce.Do(func() {
+      // 关闭 stdin 并移除活跃记录，通知 picoagent 退出 stdin 读取循环
+      if v, ok := m.activeInputs.LoadAndDelete(username); ok {
+        if pw, ok := v.(io.WriteCloser); ok {
+          pw.Close()
+        }
+      }
       if netCleanup != nil {
         netCleanup()
       }
@@ -213,9 +239,12 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
     os.MkdirAll(target, 0755)
     syscall.Unmount(target, syscall.MNT_DETACH)
     if err := syscall.Mount(mnt.Source, target, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+      slog.Warn("sandbox.skill_mount_failed", "source", mnt.Source, "target", target, "error", err)
       continue
     }
-    syscall.Mount("", target, "", syscall.MS_REMOUNT|syscall.MS_BIND|syscall.MS_RDONLY, "")
+    if err := syscall.Mount("", target, "", syscall.MS_REMOUNT|syscall.MS_BIND|syscall.MS_RDONLY, ""); err != nil {
+      slog.Warn("sandbox.skill_remount_ro_failed", "target", target, "error", err)
+    }
   }
 
   cmd := exec.Command("/bin/picoagent")
@@ -232,10 +261,13 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
     "PATH=/bin:/usr/bin:/usr/local/bin",
   }
 
-  // 注入 API key 为环境变量
-  for _, v := range apiKeys {
-    env = append(env, fmt.Sprintf("PICOAGENT_API_KEY=%s", v))
-    break
+  // 注入环境变量：API key + 其他额外环境变量
+  for k, v := range apiKeys {
+    if k == "default" {
+      env = append(env, fmt.Sprintf("PICOAGENT_API_KEY=%s", v))
+    } else {
+      env = append(env, fmt.Sprintf("%s=%s", k, v))
+    }
   }
   cmd.Env = env
 
@@ -266,13 +298,15 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
   // 网络隔离：picoaide-br 大内网 + 固定 IP + ICC=false
   m.initBridge()
   if err := setupNetNS(cmd.Process.Pid, username); err != nil {
-    slog.Warn("sandbox.netns_setup_failed", "error", err, "username", username)
+    slog.Error("sandbox.netns_setup_failed", "error", err, "username", username)
   } else {
     netCleanup = func() { teardownNetNS(username) }
   }
 
   stdin.Write(inputJSON)
-  stdin.Close()
+  // 不关闭 stdin — 聊天场景支持多轮追加，picoagent 循环读取 stdin
+  // 在 cleanup 中关闭和移除
+  m.activeInputs.Store(username, stdin)
 
   released = true
   return localCleanup, stdout, cmd, nil
@@ -297,11 +331,6 @@ func (m *Manager) RunAndWait(ctx context.Context, token string, inputJSON []byte
   defer cleanup()
 
   killOnCancel(runCtx, cmd)
-
-  var stderrBuf bytes.Buffer
-  stderrReader, stderrWriter := io.Pipe()
-  cmd.Stderr = io.MultiWriter(&stderrBuf, stderrWriter)
-  go parsePicoagentStderr(stderrReader, username)
 
   result := &RunResult{}
   scanner := bufio.NewScanner(stdout)
@@ -331,21 +360,12 @@ func (m *Manager) RunAndWait(ctx context.Context, token string, inputJSON []byte
   }
 
   cmd.Wait()
-  stderrWriter.Close()
 
   slog.Debug("sandbox.picoagent_exited",
     "pid", cmd.Process.Pid,
     "exit_code", cmd.ProcessState.ExitCode(),
     "event_count", eventCount,
-    "stderr_length", stderrBuf.Len(),
   )
-
-  if stderrBuf.Len() > 0 {
-    result.Events = append(result.Events, StreamEvent{
-      Type: "stderr",
-      Data: mustJSON(stderrBuf.String()),
-    })
-  }
 
   slog.Debug("sandbox.run_complete",
     "username", username,
@@ -358,6 +378,11 @@ func (m *Manager) RunAndWait(ctx context.Context, token string, inputJSON []byte
 // killOnCancel 等待 ctx 取消后先 SIGTERM 再 SIGKILL 终止沙箱进程
 func killOnCancel(ctx context.Context, cmd *exec.Cmd) {
   go func() {
+    defer func() {
+      if r := recover(); r != nil {
+        slog.Error("sandbox.kill_on_cancel_panic", "panic", r)
+      }
+    }()
     <-ctx.Done()
     pid := cmd.Process.Pid
     slog.Debug("sandbox.kill_on_cancel", "pid", pid)
@@ -397,6 +422,11 @@ func (m *Manager) Run(ctx context.Context, token string, inputJSON []byte, works
   done := make(chan struct{})
   exitTime := make(chan time.Time, 1)
   go func() {
+    defer func() {
+      if r := recover(); r != nil {
+        slog.Error("sandbox.wait_panic", "panic", r)
+      }
+    }()
     start := time.Now()
     err := cmd.Wait()
     waited := time.Since(start)
@@ -412,6 +442,11 @@ func (m *Manager) Run(ctx context.Context, token string, inputJSON []byte, works
 
   events := make(chan StreamEvent, 100)
   go func() {
+    defer func() {
+      if r := recover(); r != nil {
+        slog.Error("sandbox.scanner_panic", "panic", r)
+      }
+    }()
     defer close(events)
     defer cleanup()
     defer cancel() // Run 退出后才清理，不影响 scanner 的 select 竞争

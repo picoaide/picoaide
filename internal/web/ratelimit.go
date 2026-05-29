@@ -12,6 +12,8 @@ import (
 const (
   loginRateLimitAttempts = 10
   loginRateLimitWindow   = 5 * time.Minute
+  auditRateLimitAttempts = 500
+  auditRateLimitWindow   = 1 * time.Minute
 )
 
 type rateLimiter struct {
@@ -45,6 +47,10 @@ func (rl *rateLimiter) Stop() {
 
 func newLoginRateLimiter() *rateLimiter {
   return newRateLimiter(loginRateLimitAttempts, loginRateLimitWindow)
+}
+
+func newAuditRateLimiter() *rateLimiter {
+  return newRateLimiter(auditRateLimitAttempts, auditRateLimitWindow)
 }
 
 func (rl *rateLimiter) cleanup() {

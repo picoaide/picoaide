@@ -6,10 +6,13 @@ import (
   "log/slog"
   "strings"
   "sync"
+  "time"
 
   dingo "github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
   "github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
 )
+
+const msgDedupTTL = 5 * time.Minute
 
 // ============================================================
 // DingTalk 实现（Stream Mode WebSocket）— 支持每用户独立连接
@@ -26,11 +29,12 @@ type userConn struct {
 }
 
 type DingTalkProvider struct {
-  mu        sync.Mutex
-  conns     map[string]*userConn // username -> connection
-  rootCtx   context.Context
-  rootCancel context.CancelFunc
-  onMessage func(ctx context.Context, msg Message)
+  mu              sync.Mutex
+  conns           map[string]*userConn // username -> connection
+  rootCtx          context.Context
+  rootCancel       context.CancelFunc
+  onMessage       func(ctx context.Context, msg Message)
+  processedMsgIds sync.Map // msgId -> time.Time，用于 5 分钟内的消息去重
 }
 
 func NewDingTalkProvider() *DingTalkProvider {
@@ -149,6 +153,16 @@ func (d *DingTalkProvider) onUserMessage(uc *userConn, ctx context.Context, data
     return nil, nil
   }
 
+  // 消息去重：钉钉可能因回调超时重推同一条消息，用 MsgId 去重
+  if msgID := strings.TrimSpace(data.MsgId); msgID != "" {
+    if _, loaded := d.processedMsgIds.LoadOrStore(msgID, time.Now()); loaded {
+      slog.Debug("钉钉消息去重", "msg_id", msgID)
+      return nil, nil
+    }
+    // 清理过期记录（每收到 1000 条消息清理一次，避免无限增长）
+    d.pruneOldMsgIDs()
+  }
+
   content := strings.TrimSpace(data.Text.Content)
   if content == "" {
     if contentMap, ok := data.Content.(map[string]any); ok {
@@ -211,7 +225,7 @@ func (d *DingTalkProvider) Send(ctx context.Context, msg SendMsg) error {
       d.mu.Unlock()
       webhook, _ := webhookRaw.(string)
       if webhook == "" {
-        break
+        return fmt.Errorf("会话 webhook 为空")
       }
       replier := dingo.NewChatbotReplier()
       err := replier.SimpleReplyMarkdown(
@@ -221,13 +235,16 @@ func (d *DingTalkProvider) Send(ctx context.Context, msg SendMsg) error {
         []byte(msg.Text),
       )
       if err != nil {
+        slog.Warn("钉钉发送失败", "chat_id", msg.ChatID, "text_length", len(msg.Text), "error", err)
         return fmt.Errorf("钉钉发送失败: %w", err)
       }
+      slog.Debug("钉钉发送成功", "chat_id", msg.ChatID, "text_length", len(msg.Text))
       return nil
     }
   }
   d.mu.Unlock()
 
+  slog.Warn("未找到会话 webhook", "chat_id", msg.ChatID, "text_length", len(msg.Text))
   return fmt.Errorf("未找到会话 webhook，无法回复")
 }
 
@@ -261,6 +278,26 @@ func (d *DingTalkProvider) SendToUser(ctx context.Context, username string, text
   }
   replier := dingo.NewChatbotReplier()
   return replier.SimpleReplyMarkdown(ctx, webhook, []byte("PicoAgent"), []byte(text))
+}
+
+// pruneOldMsgIDs 清理超过 msgDedupTTL 的已处理消息 ID，避免 processedMsgIds 无限增长
+func (d *DingTalkProvider) pruneOldMsgIDs() {
+  count := 0
+  d.processedMsgIds.Range(func(key, value interface{}) bool {
+    count++
+    return true
+  })
+  if count < 1000 {
+    return
+  }
+
+  cutoff := time.Now().Add(-msgDedupTTL)
+  d.processedMsgIds.Range(func(key, value interface{}) bool {
+    if ts, ok := value.(time.Time); ok && ts.Before(cutoff) {
+      d.processedMsgIds.Delete(key)
+    }
+    return true
+  })
 }
 
 func stripLeadingAtMentions(content string) string {

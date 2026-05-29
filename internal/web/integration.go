@@ -3,6 +3,7 @@ package web
 import (
   "context"
   "encoding/json"
+  "fmt"
   "log/slog"
   "path/filepath"
 
@@ -106,7 +107,8 @@ func (s *Server) initAgentIntegration() (*AgentIntegration, error) {
     slog.Warn("初始化 cron 表失败", "error", err)
   }
 
-  cronScheduler := scheduler.NewCronScheduler(cronStore, func(ctx context.Context, job *scheduler.CronJob) error {
+  cronTimeout := s.loadConfig().CronJobTimeout()
+  cronScheduler := scheduler.NewCronScheduler(cronStore, cronTimeout, func(ctx context.Context, job *scheduler.CronJob) error {
     return s.executeCronJob(ctx, sb, cronStore, job)
   })
 
@@ -164,9 +166,19 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
     }
   }
 
-  // 通过 chatRun 启动沙箱（Web 端可同时查看实时内容）
+  // 构造输入消息
   input := agent.Message{Role: agent.RoleUser, Content: msg.Text}
   inputJSON, _ := json.Marshal(input)
+
+  // 如果用户已有活跃沙箱，追加消息到现有会话
+  if s.agentIntegration != nil && s.agentIntegration.sandbox != nil {
+    if err := s.agentIntegration.sandbox.SendInput(username, inputJSON); err == nil {
+      slog.Debug("chat.sandbox_appended", "username", username, "text_length", len(msg.Text))
+      return
+    }
+  }
+
+  // 没有活跃沙箱，创建新沙箱
   run := s.startChatSandbox(username, msg.Text, inputJSON)
 
   // 订阅 chatRun 事件，转发到 IM
@@ -265,9 +277,13 @@ func (s *Server) executeCronJob(ctx context.Context, sb *sandbox.Manager, store 
   }
   inputJSON, _ := json.Marshal(input)
   apiKeys := s.loadAPIKeys()
+  apiKeys["PICOAGENT_CHANNEL"] = "cron"
 
-  events, err := sb.Run(ctx, mcpToken, inputJSON, workspace, apiKeys, buildSkillMounts(job.UserID), job.UserID)
+  // 沙箱使用 Background 上下文，不设累计超时；picoagent 内部通过 perIterTimeout 控制每轮 LLM 调用
+  sandboxCtx := context.Background()
+  events, err := sb.Run(sandboxCtx, mcpToken, inputJSON, workspace, apiKeys, buildSkillMounts(job.UserID), job.UserID)
   if err != nil {
+    s.notifyCronFailure(ctx, job, err)
     return err
   }
 
@@ -280,21 +296,52 @@ func (s *Server) executeCronJob(ctx context.Context, sb *sandbox.Manager, store 
     }
   }
 
-  if response != "" && s.agentIntegration != nil {
-    channels, err := auth.ListUserChannelByUsername(job.UserID)
-    if err == nil {
-      for _, ch := range channels {
-        if ch.Enabled && ch.Configured {
-          platform := ch.Channel
-          if err := s.agentIntegration.imGateway.SendToUser(ctx, platform, job.UserID, response); err != nil {
-            slog.Warn("定时任务通知发送失败", "platform", platform, "error", err)
-          }
-        }
-      }
+  if s.agentIntegration != nil {
+    if response != "" {
+      s.sendCronResult(ctx, job, response)
+    } else {
+      s.notifyCronFailure(ctx, job, fmt.Errorf("任务未生成有效输出"))
     }
   }
 
   return nil
+}
+
+// sendCronResult 向用户推送定时任务执行结果
+func (s *Server) sendCronResult(ctx context.Context, job *scheduler.CronJob, result string) {
+  channels, err := auth.ListUserChannelByUsername(job.UserID)
+  if err != nil {
+    return
+  }
+  for _, ch := range channels {
+    if ch.Enabled && ch.Configured {
+      if err := s.agentIntegration.imGateway.SendToUser(ctx, ch.Channel, job.UserID, result); err != nil {
+        slog.Warn("定时任务结果发送失败", "platform", ch.Channel, "error", err)
+      }
+    }
+  }
+}
+
+// notifyCronFailure 向用户推送定时任务执行失败通知
+func (s *Server) notifyCronFailure(ctx context.Context, job *scheduler.CronJob, jobErr error) {
+  if s.agentIntegration == nil {
+    return
+  }
+  channels, err := auth.ListUserChannelByUsername(job.UserID)
+  if err != nil {
+    return
+  }
+  msg := fmt.Sprintf("⚠️ 定时任务执行失败\n任务: %s\n错误: %v", job.Prompt, jobErr)
+  if len(msg) > 500 {
+    msg = msg[:500] + "..."
+  }
+  for _, ch := range channels {
+    if ch.Enabled && ch.Configured {
+      if err := s.agentIntegration.imGateway.SendToUser(ctx, ch.Channel, job.UserID, msg); err != nil {
+        slog.Warn("定时任务失败通知发送失败", "platform", ch.Channel, "error", err)
+      }
+    }
+  }
 }
 
 // loadAPIKeys 从 settings 表加载 API 密钥

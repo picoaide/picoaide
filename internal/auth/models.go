@@ -1,5 +1,7 @@
 package auth
 
+import "time"
+
 // ============================================================
 // ORM 模型定义
 // ============================================================
@@ -186,6 +188,21 @@ type CookieEntry struct {
   Domain    string `json:"domain"`
   Cookies   string `json:"-"` // 不暴露给前端
   UpdatedAt string `json:"updated_at"`
+}
+
+// MemoryEvolutionLog 记忆进化审计日志表
+// picoagent 在每次会话结束后记录记忆变更，通过 API 写入此表
+type MemoryEvolutionLog struct {
+  ID             int64     `xorm:"pk autoincr 'id'"`
+  Username       string    `xorm:"notnull 'username'"`
+  SessionKey     string    `xorm:"notnull 'session_key'"`
+  ChangesSummary string    `xorm:"notnull 'changes_summary'"`
+  FilesModified  string    `xorm:"notnull 'files_modified'"`
+  CreatedAt      time.Time `xorm:"created 'created_at'"`
+}
+
+func (MemoryEvolutionLog) TableName() string {
+  return "memory_evolution_log"
 }
 
 // GroupInfo 组信息（包含成员数），非数据库模型，仅用于查询结果

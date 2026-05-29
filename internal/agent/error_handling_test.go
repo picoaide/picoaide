@@ -264,8 +264,12 @@ func TestEngine_EmitsTextDeltaBeforeError(t *testing.T) {
   if err == nil {
     t.Fatal("expected error for failed provider")
   }
-  if partialText != "I'm about to " {
-    t.Errorf("expected partial text %q, got %q", "I'm about to ", partialText)
+  expected := ""
+  for i := 0; i <= maxLLMRetries; i++ {
+    expected += "I'm about to "
+  }
+  if partialText != expected {
+    t.Errorf("expected partial text %q (retried %d times), got %q", "I'm about to ", maxLLMRetries+1, partialText)
   }
 }
 

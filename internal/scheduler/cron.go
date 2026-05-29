@@ -115,23 +115,33 @@ type CronStore interface {
 // ============================================================
 
 type CronScheduler struct {
-  store  CronStore
-  execFn func(ctx context.Context, job *CronJob) error
-  ticker *time.Ticker
-  stopCh chan struct{}
-  wg     sync.WaitGroup
+  store      CronStore
+  execFn     func(ctx context.Context, job *CronJob) error
+  jobTimeout time.Duration
+  ticker     *time.Ticker
+  stopCh     chan struct{}
+  wg         sync.WaitGroup
 }
 
-func NewCronScheduler(store CronStore, execFn func(ctx context.Context, job *CronJob) error) *CronScheduler {
+func NewCronScheduler(store CronStore, jobTimeout time.Duration, execFn func(ctx context.Context, job *CronJob) error) *CronScheduler {
+  if jobTimeout <= 0 {
+    jobTimeout = 60 * time.Minute
+  }
   return &CronScheduler{
-    store:  store,
-    execFn: execFn,
-    ticker: time.NewTicker(10 * time.Second),
-    stopCh: make(chan struct{}),
+    store:      store,
+    execFn:     execFn,
+    jobTimeout: jobTimeout,
+    ticker:     time.NewTicker(10 * time.Second),
+    stopCh:     make(chan struct{}),
   }
 }
 
 func (s *CronScheduler) Start(ctx context.Context) {
+  // 启动时恢复因进程崩溃卡住的 sentinel 任务
+  if err := s.RecoverStaleJobs(ctx); err != nil {
+    log.Printf("[cron] 恢复卡住任务失败: %v", err)
+  }
+
   s.wg.Add(1)
   go func() {
     defer s.wg.Done()
@@ -148,6 +158,41 @@ func (s *CronScheduler) Start(ctx context.Context) {
     }
   }()
   log.Println("[cron] 定时任务调度器已启动")
+}
+
+// RecoverStaleJobs 检测因进程崩溃卡在 far-future sentinel 的任务，恢复下次执行时间
+func (s *CronScheduler) RecoverStaleJobs(ctx context.Context) error {
+  jobs, err := s.store.ListActiveJobs(ctx)
+  if err != nil {
+    return err
+  }
+  now := time.Now()
+  // 如果 next_run_at 超过当前时间 2 天以上，且从未执行过（last_run_at 为空），说明被 sentinel 卡住了
+  twoDays := 48 * time.Hour
+  for _, job := range jobs {
+    if job.LastRunAt != "" {
+      continue
+    }
+    nextRun, err := util.ParseTime(job.NextRunAt)
+    if err != nil {
+      continue
+    }
+    if nextRun.Sub(now) > twoDays {
+      next, err := NextRunTime(job.Schedule, now)
+      if err != nil {
+        log.Printf("[cron] 任务 #%d 恢复计算下次时间失败: %v", job.ID, err)
+        continue
+      }
+      if next != nil {
+        if err := s.store.UpdateNextRun(ctx, job, *next); err != nil {
+          log.Printf("[cron] 任务 #%d 恢复更新 next_run_at 失败: %v", job.ID, err)
+        } else {
+          log.Printf("[cron] 任务 #%d (用户: %s) 已从 sentinel 恢复，下次执行: %s", job.ID, job.UserID, next.Format(time.RFC3339))
+        }
+      }
+    }
+  }
+  return nil
 }
 
 func (s *CronScheduler) Stop() {
@@ -181,7 +226,12 @@ func (s *CronScheduler) poll(ctx context.Context) {
     s.wg.Add(1)
     go func() {
       defer s.wg.Done()
-      runCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+      defer func() {
+        if r := recover(); r != nil {
+          log.Printf("[cron] 任务 #%d panic: %v", j.ID, r)
+        }
+      }()
+      runCtx, cancel := context.WithTimeout(ctx, s.jobTimeout)
       defer cancel()
 
       log.Printf("[cron] 执行任务 %d (用户: %s)", j.ID, j.UserID)

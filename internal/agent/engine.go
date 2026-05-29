@@ -14,7 +14,8 @@ import (
 // ============================================================
 
 const (
-  maxOverflowRetries = 3      // 上下文溢出最大重试次数
+    maxOverflowRetries = 3      // 上下文溢出最大重试次数
+    maxLLMRetries      = 5      // LLM 调用失败最大重试次数（超时/网络错误等）
   reservedTokens     = 20000  // 为模型回复预留的 token
 )
 
@@ -55,6 +56,14 @@ const AgentProtocol = `# Agent Protocol
 - 子代理适合文件搜索、数据处理、批量操作等后台任务
 - 子代理命名应当清晰描述其任务（如 file-search、data-transform）
 - 主代理负责等待子代理完成并整合其结果
+- **批量任务必须使用 subagent 并行处理**：当需要处理 N 个同类条目时，立即创建多个 subagent 并行执行，每个负责一批。**禁止逐个串行处理**
+
+## 大规模数据处理
+
+- **批量任务直接用 subagent 拆分**：将 N 个条目均分为多个批次，每个批次启动一个 subagent。例如 20 个客户查舆情 → 拆 4 个 subagent 各查 5 家
+- **主 agent 不做具体查询工作**：只负责拆分任务、分发批次、等所有 subagent 完成后汇总结果
+- 每个 subagent 完成后返回关键摘要，主 agent 不保留原始数据
+- 如果某个 subagent 失败，主 agent 重新分发该批次即可
 
 ## 技能使用规范
 
@@ -72,7 +81,17 @@ const AgentProtocol = `# Agent Protocol
 
 - 禁止输出与当前任务无关的问候语（如"你好"、"有什么我可以帮你的吗"等），直接执行任务
 - 禁止输出闲聊内容，不要在回复中询问用户是否需要帮助，直接给出结果
-- 每轮要么调用工具，要么输出任务相关的结论信息`
+- 每轮要么调用工具，要么输出任务相关的结论信息
+
+## 记忆管理
+
+本工作区具备自动记忆进化能力：
+- 每次对话结束后，系统会自动提取关键决策、知识点、进度状态到 MEMORY.md
+- 系统会自动学习你的工作偏好并更新 USER.md
+- 你也可以使用 update_memory 工具主动更新记忆
+- AGENT.md 和 SOUL.md 由管理员管理，请勿手动修改
+- 所有记忆修改都会备份，可追溯最近 90 天的变更历史
+- 使用 update_memory 更新优于直接 write_file，可确保格式一致性和去重`
 
 // ============================================================
 // Agent 引擎 — 主循环
@@ -200,8 +219,11 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       maxIter = 20
     }
   }
-  // 不限制输出长度，让模型自行决定何时停止
-  maxTokens := 100000
+  // 使用管理员配置的 max_tokens，未设置时默认为 100000（不硬截断，通过 prompt 控制）
+  maxTokens := m.MaxTokens
+  if maxTokens <= 0 {
+    maxTokens = 100000
+  }
   temperature := m.Temperature
   if temperature <= 0 {
     temperature = 0.7
@@ -307,6 +329,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     // LLM 调用（含上下文溢出重试）
     var llmErr error
     overflowRetry := 0
+    llmRetry := 0
     for {
       slog.Debug("agent.llm_request",
         "model", modelID,
@@ -371,6 +394,18 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         currentResp = ""
         continue
       }
+
+      // 其他 LLM 错误（超时/网络故障等）→ 重建上下文重试
+      if llmRetry < maxLLMRetries {
+        llmRetry++
+        slog.Warn("agent.llm_retry", "retry", llmRetry, "max", maxLLMRetries, "error", llmErr.Error())
+        iterCancel()
+        iterCtx, iterCancel = context.WithTimeout(cancelCtx, time.Duration(perIterTimeout)*time.Second)
+        pendingTools = nil
+        currentResp = ""
+        continue
+      }
+
       break
     }
 
@@ -440,6 +475,16 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         result = &ToolResult{Success: false, Data: fmt.Sprintf("工具执行失败: %s", execErr)}
         slog.Debug("agent.tool_execute_error", "tool", tc.Name, "error", execErr.Error())
       } else {
+        // 工具结果太大时自动压缩摘要，避免撑爆上下文
+        autoCompact := len(result.Data) > 2000 && e.compactor != nil
+        if autoCompact {
+          compactPrompt := fmt.Sprintf("用一句话概括以下工具返回结果的核心信息（保持关键数据）：\n%s", result.Data)
+          compacted, compactErr := e.compactor.SummarizeText(iterCtx, compactPrompt)
+          if compactErr == nil && len(compacted) > 0 && len(compacted) < len(result.Data) {
+            slog.Debug("agent.tool_result_compacted", "tool", tc.Name, "before", len(result.Data), "after", len(compacted))
+            result.Data = "[自动摘要] " + compacted
+          }
+        }
         resultPreview := result.Data
         if len(resultPreview) > 200 {
           resultPreview = resultPreview[:200] + "..."

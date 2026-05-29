@@ -139,7 +139,7 @@ type AgentConfig struct {
   MCPServers map[string]MCPServer   `json:"mcp_servers"`
 
   MaxIter        int `json:"max_iter,omitempty"`        // ReAct 最大迭代次数，默认 20
-  MaxTokens      int `json:"max_tokens,omitempty"`      // 每次 LLM 调用的最大 token 数，默认 4096
+  MaxTokens      int `json:"max_tokens,omitempty"`      // 每次 LLM 调用的最大 token 数（0 表示引擎内置 100000，不硬截断）
   RequestTimeout int `json:"request_timeout,omitempty"` // LLM API 请求超时秒数，默认 120
 }
 
@@ -147,7 +147,7 @@ type ModelConfig struct {
   Provider       string  `json:"provider"`
   ModelID        string  `json:"model_id"`
   BaseURL        string  `json:"base_url,omitempty"`
-  MaxTokens      int     `json:"max_tokens,omitempty"`      // 每次 LLM 调用最大 token，默认 4096
+  MaxTokens      int     `json:"max_tokens,omitempty"`      // 每次 LLM 调用最大 token 数（0 表示引擎内置 100000，不硬截断）
   MaxIter        int     `json:"max_iter,omitempty"`        // ReAct 最大迭代次数，默认 20
   Temperature    float64 `json:"temperature,omitempty"`     // LLM 温度，默认 0.7
   ContextWindow  int     `json:"context_window,omitempty"`  // 上下文窗口大小，默认 200000
