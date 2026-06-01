@@ -50,20 +50,17 @@ const AgentProtocol = `# Agent Protocol
 - 禁止读取或泄露敏感文件（/etc/shadow、.env、密钥文件、配置文件中的密码等）
 - 禁止向外部发送敏感数据
 
-## 子代理使用规范
+## 子代理（独立 AI）使用规范
 
-- 使用 subagent_task 工具启动子代理执行并行任务
-- 子代理适合文件搜索、数据处理、批量操作等后台任务
-- 子代理命名应当清晰描述其任务（如 file-search、data-transform）
-- 主代理负责等待子代理完成并整合其结果
-- **批量任务必须使用 subagent 并行处理**：当需要处理 N 个同类条目时，立即创建多个 subagent 并行执行，每个负责一批。**禁止逐个串行处理**
-
-## 大规模数据处理
-
-- **批量任务直接用 subagent 拆分**：将 N 个条目均分为多个批次，每个批次启动一个 subagent。例如 20 个客户查舆情 → 拆 4 个 subagent 各查 5 家
-- **主 agent 不做具体查询工作**：只负责拆分任务、分发批次、等所有 subagent 完成后汇总结果
-- 每个 subagent 完成后返回关键摘要，主 agent 不保留原始数据
-- 如果某个 subagent 失败，主 agent 重新分发该批次即可
+- 使用 subagent_spawn 工具创建子代理（独立 AI 实例），使用 subagent_collect 工具收集结果
+- 每个子代理拥有独立的 LLM 上下文、会话历史和全部工具调用能力（含 MCP 工具）
+- 子代理与主 agent 使用相同的模型和超时配置
+- 适合：批量客户查舆情、多文件并行处理、数据提取等需要 AI 判断的复杂任务
+- **批量任务必须使用子代理并行处理**：先 spawn 所有子代理，再逐一 collect，实现真正的并行执行
+  例如 50 个客户查舆情 → 拆 5 个子代理各查 10 家：
+  1. 依次调用 subagent_spawn(name="batch1", task="查前 10 家"), subagent_spawn(name="batch2", task="查下 10 家")...
+  2. 然后逐一调用 subagent_collect(name="batch1"), subagent_collect(name="batch2")... 获取结果
+- 如果某个子代理失败，主 agent 重新分发该批次即可
 
 ## 技能使用规范
 
@@ -117,7 +114,6 @@ func NewEngine(cfg *AgentConfig, provider Provider, tools *ToolRegistry, store *
     store:         store,
     compactor:     NewCompactor(DefaultCompactionConfig()),
     config:        cfg,
-    subAgentMgr:   NewSubAgentManager(),
     fsyncInterval: 5,
   }
 }
@@ -136,6 +132,10 @@ func (e *Engine) SetSkills(skills []*Skill) {
 
 func (e *Engine) SubAgentManager() *SubAgentManager {
   return e.subAgentMgr
+}
+
+func (e *Engine) SetSubAgentManager(mgr *SubAgentManager) {
+  e.subAgentMgr = mgr
 }
 
 // fsyncSession 持久化当前消息列表到 live.jsonl
@@ -219,11 +219,8 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       maxIter = 20
     }
   }
-  // 使用管理员配置的 max_tokens，未设置时默认为 100000（不硬截断，通过 prompt 控制）
+  // 使用管理员配置的 max_tokens。为 0 时不传参，由模型服务端自行决定输出上限
   maxTokens := m.MaxTokens
-  if maxTokens <= 0 {
-    maxTokens = 100000
-  }
   temperature := m.Temperature
   if temperature <= 0 {
     temperature = 0.7

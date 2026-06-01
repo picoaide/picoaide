@@ -143,9 +143,11 @@ func main() {
   summarizer := agent.NewLLMSummarizer(provider, cfg.Model.ModelID, cfg.Model.MaxTokens)
   engine.SetSummarizer(summarizer)
 
-  // 6a. 注册子代理工具
-  subAgentTool := &agent.SubAgentTool{Manager: engine.SubAgentManager()}
-  tools.Register(subAgentTool)
+  // 6a. 创建子代理管理器 + 注册子代理工具（spawn + collect 分离以实现并行）
+  subAgentMgr := agent.NewSubAgentManager(cfg, provider, tools)
+  engine.SetSubAgentManager(subAgentMgr)
+  tools.Register(&agent.SubAgentSpawnTool{Manager: subAgentMgr})
+  tools.Register(&agent.SubAgentCollectTool{Manager: subAgentMgr})
 
   // 6b. 加载技能
   skills, err := agent.LoadSkills(cfg.Workspace)

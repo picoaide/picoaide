@@ -565,6 +565,9 @@ func roughTokenCount(s string) int {
 }
 
 func enforceMemoryBudget(content string, maxTokens int) string {
+  if maxTokens <= 0 {
+    return content
+  }
   for roughTokenCount(content) > maxTokens {
     sections := parseMemorySections(content)
 
@@ -596,6 +599,9 @@ func enforceMemoryBudget(content string, maxTokens int) string {
 }
 
 func enforceUserBudget(content string, maxTokens int) string {
+  if maxTokens <= 0 {
+    return content
+  }
   for roughTokenCount(content) > maxTokens {
     sections := parseUserSections(content)
 

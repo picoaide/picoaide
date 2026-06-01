@@ -215,7 +215,7 @@ func TestEngine_InjectsAgentProtocol(t *testing.T) {
     "绝不编造",
     "工具优先",
     "安全准则",
-    "子代理",
+    "subagent",
     "企业级",
   }
   for _, s := range required {
