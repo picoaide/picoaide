@@ -200,9 +200,10 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
   var fullResponse string
   var lastSent int
   cursor := len(events)
+  sendCtx := context.Background()
   flushIM := func(text string) {
     if s.agentIntegration == nil { return }
-    err := s.agentIntegration.imGateway.Send(ctx, msg.Platform, msg.ChatID, text)
+    err := s.agentIntegration.imGateway.Send(sendCtx, msg.Platform, msg.ChatID, text)
     if err != nil {
       slog.Warn("IM 发送失败", "platform", msg.Platform, "error", err)
     }
@@ -220,10 +221,9 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
   }
 
   // 等待并处理新事件
+  // 使用 Background 上下文而非 DingTalk 回调上下文，避免因回调超时导致长任务结果丢失
   for {
     select {
-    case <-ctx.Done():
-      return
     case _, ok := <-notifCh:
       if !ok {
         // 通道关闭，run 已完成，处理剩余事件
