@@ -530,13 +530,6 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         result = &ToolResult{Success: false, Data: fmt.Sprintf("工具执行失败: %s", execErr)}
         slog.Debug("agent.tool_execute_error", "tool", tc.Name, "error", execErr.Error())
       } else {
-        // 工具结果太大时自动截断中间，保留头尾，避免撑爆上下文
-        if len(result.Data) > 8000 {
-          head := result.Data[:4000]
-          tail := result.Data[len(result.Data)-3000:]
-          omitted := len(result.Data) - 7000
-          result.Data = fmt.Sprintf("%s\n\n[... 因过长已截断，省略 %d 字符，共 %d 字符]\n\n%s", head, omitted, len(result.Data), tail)
-        }
         resultPreview := result.Data
         if len(resultPreview) > 200 {
           resultPreview = resultPreview[:200] + "..."
