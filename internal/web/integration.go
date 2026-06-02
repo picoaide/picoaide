@@ -223,51 +223,49 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
   // 等待并处理新事件
   // 使用 Background 上下文而非 DingTalk 回调上下文，避免因回调超时导致长任务结果丢失
   for {
-    select {
-    case _, ok := <-notifCh:
-      if !ok {
-        // 通道关闭，run 已完成，处理剩余事件
-        run.mu.Lock()
-        remaining := run.events[cursor:]
-        run.mu.Unlock()
-        for _, evt := range remaining {
-          if evt.Type == "text_delta" {
-            var text string
-            if json.Unmarshal(evt.Data, &text) == nil {
-              fullResponse += text
-            }
-          }
-        }
-        if lastSent < len(fullResponse) {
-          flushIM(fullResponse[lastSent:])
-        }
-        return
-      }
+    _, ok := <-notifCh
+    if !ok {
+      // 通道关闭，run 已完成，处理剩余事件
       run.mu.Lock()
-      newEvents := run.events[cursor:]
-      cursor = len(run.events)
+      remaining := run.events[cursor:]
       run.mu.Unlock()
-      for _, evt := range newEvents {
-        switch evt.Type {
-        case "text_delta":
+      for _, evt := range remaining {
+        if evt.Type == "text_delta" {
           var text string
           if json.Unmarshal(evt.Data, &text) == nil {
             fullResponse += text
           }
-        case "tool_call_start":
-          if streamOutput && lastSent < len(fullResponse) {
+        }
+      }
+      if lastSent < len(fullResponse) {
+        flushIM(fullResponse[lastSent:])
+      }
+      return
+    }
+    run.mu.Lock()
+    newEvents := run.events[cursor:]
+    cursor = len(run.events)
+    run.mu.Unlock()
+    for _, evt := range newEvents {
+      switch evt.Type {
+      case "text_delta":
+        var text string
+        if json.Unmarshal(evt.Data, &text) == nil {
+          fullResponse += text
+        }
+      case "tool_call_start":
+        if streamOutput && lastSent < len(fullResponse) {
+          flushIM(fullResponse[lastSent:])
+          lastSent = len(fullResponse)
+        }
+      case "error":
+        var errMsg string
+        if json.Unmarshal(evt.Data, &errMsg) == nil {
+          slog.Error("PicoAgent 错误", "error", errMsg)
+          if lastSent < len(fullResponse) {
             flushIM(fullResponse[lastSent:])
-            lastSent = len(fullResponse)
           }
-        case "error":
-          var errMsg string
-          if json.Unmarshal(evt.Data, &errMsg) == nil {
-            slog.Error("PicoAgent 错误", "error", errMsg)
-            if lastSent < len(fullResponse) {
-              flushIM(fullResponse[lastSent:])
-            }
-            flushIM("发生错误: " + errMsg)
-          }
+          flushIM("发生错误: " + errMsg)
         }
       }
     }
