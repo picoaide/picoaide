@@ -391,7 +391,7 @@ func TestEvolveWithLLMResult(t *testing.T) {
     store.AppendMessage(key, &Message{
       Role:      RoleAssistant,
       Content:   "answer " + string(rune('0'+i)),
-      ToolCalls: []ToolCall{{ID: "call_1", Function: ToolFunction{Name: "web_search", Arguments: "{}"}}},
+      ToolCalls: []ToolCall{{ID: "call_1", Function: ToolFunction{Name: "command", Arguments: "{}"}}},
     })
   }
 

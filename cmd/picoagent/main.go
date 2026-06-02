@@ -112,10 +112,9 @@ func main() {
   tools.Register(&agent.ListDirTool{})
   tools.Register(&agent.GlobTool{})
   tools.Register(&agent.DeleteFileTool{})
-  tools.Register(&agent.WebSearchTool{})
   tools.Register(&agent.WebFetchTool{})
   tools.Register(&agent.UpdateMemoryTool{Workspace: cfg.Workspace})
-  slog.Debug("picoagent.tools_registered", "count", 12)
+  slog.Debug("picoagent.tools_registered", "count", 11)
 
   // 连接 MCP 服务器（使用独立 context，不影响主流程超时）
   mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 10*time.Second)

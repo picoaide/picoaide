@@ -34,7 +34,7 @@ const AgentProtocol = `# Agent Protocol
 ### 2. 工具优先
 - 回答事实性问题前，必须优先使用相关工具获取信息
 - 文件操作使用文件工具（read_file / write_file / edit_file / glob / grep）
-- 网络搜索使用 web_search，获取具体页面使用 web_fetch
+- 网络搜索使用 web-search-mcp-server（通过 query_server），获取具体页面使用 web_fetch
 - shell 命令使用 command 工具
 - 不要在自己的回答中猜测文件内容或命令输出，先使用工具确认
 
