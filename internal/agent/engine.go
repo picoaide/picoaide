@@ -270,8 +270,11 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       maxIter = 20
     }
   }
-  // 使用管理员配置的 max_tokens。为 0 时不传参，由模型服务端自行决定输出上限
+  // 使用管理员配置的 max_tokens。为 0 时仍设 16384 上限，防止 thinking mode 无限输出
   maxTokens := m.MaxTokens
+  if maxTokens <= 0 {
+    maxTokens = 16384
+  }
   temperature := m.Temperature
   if temperature <= 0 {
     temperature = 0.7
