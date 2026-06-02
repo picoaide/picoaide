@@ -22,10 +22,12 @@ type SubAgentResult struct {
 }
 
 type managedAgent struct {
-  taskDesc string
-  result   *SubAgentResult
-  done     chan struct{}
-  cancel   context.CancelFunc
+  taskDesc   string
+  serverName string // MCP 服务器名，子代理只会加载该服务器的工具
+  toolsHint  string // 主代理提供的工具使用指引
+  result     *SubAgentResult
+  done       chan struct{}
+  cancel     context.CancelFunc
 }
 
 // SubAgentManager 持有父引擎的配置和依赖，用于创建子引擎
@@ -49,7 +51,8 @@ func NewSubAgentManager(cfg *AgentConfig, provider Provider, tools *ToolRegistry
 // SpawnAgent 创建独立的子代理（完整 LLM + 工具能力），在 goroutine 中运行。
 // ctx 仅用于在入口处检查父上下文是否已取消（见 SubAgentSpawnTool.Execute）；
 // 子代理内部的上下文使用独立的 Background，不继承调用方的超时/取消，取消通过 Cancel/CancelAll 管理。
-func (m *SubAgentManager) SpawnAgent(ctx context.Context, name string, taskDesc string) error {
+// serverName 指定 MCP 服务器名，子代理自动加载该服务器的全部工具；toolsHint 是主代理提供的工具使用指引。
+func (m *SubAgentManager) SpawnAgent(ctx context.Context, name string, taskDesc string, serverName string, toolsHint string) error {
   if name == "" || taskDesc == "" {
     return fmt.Errorf("name 和 task 不能为空")
   }
@@ -59,13 +62,13 @@ func (m *SubAgentManager) SpawnAgent(ctx context.Context, name string, taskDesc 
     return fmt.Errorf("子代理 %s 已在运行", name)
   }
 
-  // 子代理必须比 spawning iteration 存活更久：不能继承 iterCtx（有 per-iteration timeout）。
-  // 使用独立的 Background 上下文，取消通过 Cancel/CancelAll 管理。
   subCtx, cancel := context.WithCancel(context.Background())
   ma := &managedAgent{
-    taskDesc: taskDesc,
-    done:     make(chan struct{}),
-    cancel:   cancel,
+    taskDesc:   taskDesc,
+    serverName: serverName,
+    toolsHint:  toolsHint,
+    done:       make(chan struct{}),
+    cancel:     cancel,
   }
   m.agents[name] = ma
   m.mu.Unlock()
@@ -81,14 +84,14 @@ func (m *SubAgentManager) SpawnAgent(ctx context.Context, name string, taskDesc 
         }
       }
     }()
-    ma.result = m.runSubAgent(subCtx, name, taskDesc)
+    ma.result = m.runSubAgent(subCtx, name, taskDesc, serverName, toolsHint)
   }()
 
   return nil
 }
 
 // runSubAgent 创建子引擎并执行任务
-func (m *SubAgentManager) runSubAgent(ctx context.Context, name, taskDesc string) *SubAgentResult {
+func (m *SubAgentManager) runSubAgent(ctx context.Context, name, taskDesc, serverName, toolsHint string) *SubAgentResult {
   // 子代理使用临时目录存储会话，父进程结束后自动清理
   workDir, err := os.MkdirTemp("", "picoaide-subagent-*")
   if err != nil {
@@ -98,12 +101,22 @@ func (m *SubAgentManager) runSubAgent(ctx context.Context, name, taskDesc string
 
   store := NewSessionStore(filepath.Join(workDir, "session"))
   engine := NewEngine(m.config, m.provider, m.tools, store)
-  // 子引擎不创建子代理管理器，禁用递归
   engine.subAgentMgr = nil
+
+  // 如果指定了 MCP 服务器，预加载该服务器的工具
+  if serverName != "" {
+    engine.PreloadServer(serverName)
+  }
+
+  // 如果主代理提供了工具指引，追加到 system prompt
+  sysPrompt := ""
+  if toolsHint != "" {
+    sysPrompt = fmt.Sprintf("## 工具使用指引（由主代理指定）\n%s\n\n请严格按照上述指引使用工具。", toolsHint)
+  }
 
   var response string
   msg := &Message{Role: RoleUser, Content: taskDesc}
-  err = engine.Process(ctx, "", nil, msg, func(ev StreamEvent) {
+  err = engine.Process(ctx, sysPrompt, nil, msg, func(ev StreamEvent) {
     switch ev.Type {
     case "text_delta":
       var text string
@@ -220,6 +233,14 @@ func (t *SubAgentSpawnTool) Schema() map[string]interface{} {
         "type":        "string",
         "description": "子代理要执行的任务描述，作为独立 AI 的输入消息",
       },
+      "server": map[string]interface{}{
+        "type":        "string",
+        "description": "MCP 服务器名（可选）。指定后子代理自动加载该服务器的全部工具。从「可用 MCP 服务器」列表中选取。",
+      },
+      "tools_hint": map[string]interface{}{
+        "type":        "string",
+        "description": "工具使用指引（可选）。主代理告知子代理如何调用工具，例如「使用 get_news_sentiment 查询，searchKey 传公司名」。",
+      },
     },
     "required": []string{"name", "task"},
   }
@@ -227,8 +248,10 @@ func (t *SubAgentSpawnTool) Schema() map[string]interface{} {
 
 func (t *SubAgentSpawnTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
   var params struct {
-    Name string `json:"name"`
-    Task string `json:"task"`
+    Name      string `json:"name"`
+    Task      string `json:"task"`
+    Server    string `json:"server"`
+    ToolsHint string `json:"tools_hint"`
   }
   if err := json.Unmarshal(args, &params); err != nil {
     return &ToolResult{Success: false, Data: "参数解析失败"}, nil
@@ -245,9 +268,9 @@ func (t *SubAgentSpawnTool) Execute(ctx context.Context, args json.RawMessage) (
     return &ToolResult{Success: false, Data: "父上下文已取消，无法创建子代理"}, nil
   }
 
-  slog.Debug("subagent.spawn", "name", params.Name, "task_length", len(params.Task))
+  slog.Debug("subagent.spawn", "name", params.Name, "task_length", len(params.Task), "server", params.Server)
 
-  if err := t.Manager.SpawnAgent(ctx, params.Name, params.Task); err != nil {
+  if err := t.Manager.SpawnAgent(ctx, params.Name, params.Task, params.Server, params.ToolsHint); err != nil {
     return &ToolResult{Success: false, Data: err.Error()}, nil
   }
 

@@ -51,8 +51,8 @@ type ToolExecutor interface {
 }
 
 type ToolEntry struct {
-  executor ToolExecutor
-  ttl      int
+  executor   ToolExecutor
+  serverName string // "" 表示基础工具；非空表示属于某个 MCP 服务器
 }
 
 type ToolRegistry struct {
@@ -69,9 +69,15 @@ func NewToolRegistry() *ToolRegistry {
 func (r *ToolRegistry) Register(executor ToolExecutor) {
   r.mu.Lock()
   defer r.mu.Unlock()
-  r.entries[executor.Name()] = &ToolEntry{
-    executor: executor,
-    ttl:      10,
+  r.entries[executor.Name()] = &ToolEntry{executor: executor}
+}
+
+// SetServer 标记某工具属于指定的 MCP 服务器
+func (r *ToolRegistry) SetServer(toolName, serverName string) {
+  r.mu.Lock()
+  defer r.mu.Unlock()
+  if e, ok := r.entries[toolName]; ok {
+    e.serverName = serverName
   }
 }
 
@@ -126,6 +132,58 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, args json.RawMe
   )
 
   return result, err
+}
+
+// ListBasic 返回所有基础工具（不属于任何 MCP 服务器的工具）
+func (r *ToolRegistry) ListBasic() []ToolDef {
+  r.mu.RLock()
+  defer r.mu.RUnlock()
+
+  var defs []ToolDef
+  for _, entry := range r.entries {
+    if entry.serverName == "" {
+      defs = append(defs, ToolDef{
+        Name:        entry.executor.Name(),
+        Description: entry.executor.Description(),
+        InputSchema: entry.executor.Schema(),
+      })
+    }
+  }
+  return defs
+}
+
+// ListByServer 返回指定 MCP 服务器的所有工具
+func (r *ToolRegistry) ListByServer(serverName string) []ToolDef {
+  r.mu.RLock()
+  defer r.mu.RUnlock()
+
+  var defs []ToolDef
+  for _, entry := range r.entries {
+    if entry.serverName == serverName {
+      defs = append(defs, ToolDef{
+        Name:        entry.executor.Name(),
+        Description: entry.executor.Description(),
+        InputSchema: entry.executor.Schema(),
+      })
+    }
+  }
+  return defs
+}
+
+// ListServers 返回所有已注册的 MCP 服务器名（去重）
+func (r *ToolRegistry) ListServers() []string {
+  r.mu.RLock()
+  defer r.mu.RUnlock()
+
+  seen := make(map[string]bool)
+  var servers []string
+  for _, entry := range r.entries {
+    if entry.serverName != "" && !seen[entry.serverName] {
+      seen[entry.serverName] = true
+      servers = append(servers, entry.serverName)
+    }
+  }
+  return servers
 }
 
 // ============================================================

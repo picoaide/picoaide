@@ -21,7 +21,7 @@ func testSubAgentProvider() *mockProvider {
 func TestSubAgentManager_SpawnAndCollect(t *testing.T) {
   mgr := NewSubAgentManager(testConfig(), testSubAgentProvider(), NewToolRegistry())
 
-  err := mgr.SpawnAgent(context.Background(), "worker", "return hello")
+  err := mgr.SpawnAgent(context.Background(), "worker", "return hello", "", "")
   if err != nil {
     t.Fatal(err)
   }
@@ -40,8 +40,8 @@ func TestSubAgentManager_SpawnAndCollect(t *testing.T) {
 
 func TestSubAgentManager_List(t *testing.T) {
   mgr := NewSubAgentManager(testConfig(), testSubAgentProvider(), NewToolRegistry())
-  mgr.SpawnAgent(context.Background(), "a", "task a")
-  mgr.SpawnAgent(context.Background(), "b", "task b")
+  mgr.SpawnAgent(context.Background(), "a", "task a", "", "")
+  mgr.SpawnAgent(context.Background(), "b", "task b", "", "")
 
   names := mgr.List()
   if len(names) != 2 {
@@ -62,8 +62,8 @@ func TestSubAgentManager_List(t *testing.T) {
 
 func TestSubAgentManager_CancelAll(t *testing.T) {
   mgr := NewSubAgentManager(testConfig(), testSubAgentProvider(), NewToolRegistry())
-  mgr.SpawnAgent(context.Background(), "slow1", "task 1")
-  mgr.SpawnAgent(context.Background(), "slow2", "task 2")
+  mgr.SpawnAgent(context.Background(), "slow1", "task 1", "", "")
+  mgr.SpawnAgent(context.Background(), "slow2", "task 2", "", "")
 
   // 取消子代理（如果已快速完成则 Collect 直接返回成功）
   mgr.CancelAll()
@@ -80,10 +80,10 @@ func TestSubAgentManager_CancelAll(t *testing.T) {
 
 func TestSubAgentManager_SpawnDuplicate(t *testing.T) {
   mgr := NewSubAgentManager(testConfig(), testSubAgentProvider(), NewToolRegistry())
-  if err := mgr.SpawnAgent(context.Background(), "dup", "first"); err != nil {
+  if err := mgr.SpawnAgent(context.Background(), "dup", "first", "", ""); err != nil {
     t.Fatal(err)
   }
-  if err := mgr.SpawnAgent(context.Background(), "dup", "second"); err == nil {
+  if err := mgr.SpawnAgent(context.Background(), "dup", "second", "", ""); err == nil {
     t.Error("expected error for duplicate spawn, got nil")
   }
 }
@@ -101,7 +101,7 @@ func TestSubAgentManager_CollectNonExistent(t *testing.T) {
 
 func TestSubAgentManager_EmptyName(t *testing.T) {
   mgr := NewSubAgentManager(testConfig(), testSubAgentProvider(), NewToolRegistry())
-  err := mgr.SpawnAgent(context.Background(), "", "task")
+  err := mgr.SpawnAgent(context.Background(), "", "task", "", "")
   if err == nil {
     t.Error("expected error for empty name")
   }
@@ -109,7 +109,7 @@ func TestSubAgentManager_EmptyName(t *testing.T) {
 
 func TestSubAgentManager_EmptyTask(t *testing.T) {
   mgr := NewSubAgentManager(testConfig(), testSubAgentProvider(), NewToolRegistry())
-  err := mgr.SpawnAgent(context.Background(), "test", "")
+  err := mgr.SpawnAgent(context.Background(), "test", "", "", "")
   if err == nil {
     t.Error("expected error for empty task")
   }
@@ -265,7 +265,7 @@ func TestSubAgentTool_ManagerNil(t *testing.T) {
 func TestSubAgentCollect_Timeout(t *testing.T) {
   mgr := NewSubAgentManager(testConfig(), testSubAgentProvider(), NewToolRegistry())
 
-  err := mgr.SpawnAgent(context.Background(), "timeout-test", "return hello")
+  err := mgr.SpawnAgent(context.Background(), "timeout-test", "return hello", "", "")
   if err != nil {
     t.Fatal(err)
   }

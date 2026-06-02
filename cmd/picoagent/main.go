@@ -149,6 +149,9 @@ func main() {
   tools.Register(&agent.SubAgentSpawnTool{Manager: subAgentMgr})
   tools.Register(&agent.SubAgentCollectTool{Manager: subAgentMgr})
 
+  // 6ab. 注册 MCP 代理调用工具
+  tools.Register(&agent.QueryServerTool{Registry: tools})
+
   // 6b. 加载技能
   skills, err := agent.LoadSkills(cfg.Workspace)
   if err != nil {

@@ -95,16 +95,18 @@ const AgentProtocol = `# Agent Protocol
 // ============================================================
 
 type Engine struct {
-  provider      Provider
-  tools         *ToolRegistry
-  store         *SessionStore
-  compactor     *Compactor
-  config        *AgentConfig
-  skills        []*Skill
-  subAgentMgr   *SubAgentManager
-  sessionKey    string // 当前会话 key，压缩后写回 store
-  fsyncInterval int    // 每隔 N 轮 fsync 一次会话，0 禁用
-  iterCount     int    // 当前 Process 的迭代计数
+  provider          Provider
+  tools             *ToolRegistry
+  store             *SessionStore
+  compactor         *Compactor
+  config            *AgentConfig
+  skills            []*Skill
+  subAgentMgr       *SubAgentManager
+  sessionKey        string   // 当前会话 key，压缩后写回 store
+  fsyncInterval     int      // 每隔 N 轮 fsync 一次会话，0 禁用
+  iterCount         int      // 当前 Process 的迭代计数
+  preloadedServers  []string // 子代理预加载的 MCP 服务器
+  preloadedSystem   string   // 追加到 system prompt 的内容（如工具指引）
 }
 
 func NewEngine(cfg *AgentConfig, provider Provider, tools *ToolRegistry, store *SessionStore) *Engine {
@@ -136,6 +138,41 @@ func (e *Engine) SubAgentManager() *SubAgentManager {
 
 func (e *Engine) SetSubAgentManager(mgr *SubAgentManager) {
   e.subAgentMgr = mgr
+}
+
+// PreloadServer 预加载指定 MCP 服务器的工具到引擎工具列表
+func (e *Engine) PreloadServer(serverName string) {
+  for _, s := range e.preloadedServers {
+    if s == serverName {
+      return
+    }
+  }
+  e.preloadedServers = append(e.preloadedServers, serverName)
+}
+
+// AppendToSystemPrompt 追加内容到 system prompt 末尾
+func (e *Engine) AppendToSystemPrompt(text string) {
+  if e.preloadedSystem != "" {
+    e.preloadedSystem += "\n" + text
+  } else {
+    e.preloadedSystem = text
+  }
+}
+
+// buildServerSummary 从工具注册表中生成 MCP 服务器摘要
+func (e *Engine) buildServerSummary() string {
+  servers := e.tools.ListServers()
+  if len(servers) == 0 {
+    return ""
+  }
+  var lines []string
+  for _, s := range servers {
+    // 尝试从 MCP 工具管理中获取摘要，如果没有则从工具列表生成
+    tools := e.tools.ListByServer(s)
+    summary := generateServerSummary(s, tools)
+    lines = append(lines, "- "+summary)
+  }
+  return strings.Join(lines, "\n")
 }
 
 // fsyncSession 持久化当前消息列表到 live.jsonl
@@ -196,6 +233,20 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     if skillsPrompt != "" {
       sysPrompt = sysPrompt + "\n\n" + skillsPrompt
     }
+  }
+
+  // 主 agent 模式下添加 MCP 服务器摘要
+  if len(e.preloadedServers) == 0 {
+    serverSummary := e.buildServerSummary()
+    if serverSummary != "" {
+      sysPrompt = sysPrompt + "\n\n## 可用 MCP 服务器\n" + serverSummary +
+        "\n\n使用 query_server 工具快速调用某个 MCP 服务器的工具。批量任务请使用 subagent_spawn + subagent_collect。"
+    }
+  }
+
+  // 追加预置内容（如子代理工具指引）
+  if e.preloadedSystem != "" {
+    sysPrompt = sysPrompt + "\n\n" + e.preloadedSystem
   }
 
   slog.Debug("agent.system_prompt_built", "sys_prompt_length", len(sysPrompt))
@@ -319,7 +370,11 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       }),
     })
 
-    toolDefs := e.tools.Resolve(iterCtx)
+    // 构建工具列表：基础工具 + 预加载的 MCP 服务器工具
+    toolDefs := e.tools.ListBasic()
+    for _, srv := range e.preloadedServers {
+      toolDefs = append(toolDefs, e.tools.ListByServer(srv)...)
+    }
     var pendingTools []ToolCallData
     var currentResp string
 
