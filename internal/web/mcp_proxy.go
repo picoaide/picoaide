@@ -448,53 +448,62 @@ func mcpHTTPHandshake(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
     if err != nil {
       return nil, "", fmt.Errorf("创建 HTTP 请求失败: %w", err)
     }
-    httpReq.Header.Set("Content-Type", "application/json")
-    for k, v := range proxy.Headers {
-      httpReq.Header.Set(k, v)
-    }
-    if sessionID != "" {
-      httpReq.Header.Set("Mcp-Session-Id", sessionID)
-    }
+  httpReq.Header.Set("Content-Type", "application/json")
+  httpReq.Header.Set("Mcp-Protocol-Version", "2024-11-05")
+  for k, v := range proxy.Headers {
+    httpReq.Header.Set(k, v)
+  }
+  if sessionID != "" {
+    httpReq.Header.Set("Mcp-Session-Id", sessionID)
+  }
 
-    httpResp, err := client.Do(httpReq)
-    if err != nil {
-      return nil, "", fmt.Errorf("HTTP 请求失败: %w", err)
-    }
-    defer httpResp.Body.Close()
+  httpResp, err := client.Do(httpReq)
+  if err != nil {
+    return nil, "", fmt.Errorf("HTTP 请求失败: %w", err)
+  }
+  defer httpResp.Body.Close()
 
-    // 检查响应中的 Session ID
-    newSessionID := httpResp.Header.Get("Mcp-Session-Id")
-    if newSessionID != "" {
-      sessionID = newSessionID
-    }
+  // 检查响应中的 Session ID
+  newSessionID := httpResp.Header.Get("Mcp-Session-Id")
+  if newSessionID != "" {
+    sessionID = newSessionID
+  }
 
-    body, err := io.ReadAll(httpResp.Body)
-    if err != nil {
-      return nil, "", fmt.Errorf("读取 HTTP 响应失败: %w", err)
-    }
+  // 读取响应体
+  body, err := io.ReadAll(httpResp.Body)
+  if err != nil {
+    return nil, "", fmt.Errorf("读取 HTTP 响应失败: %w", err)
+  }
 
-    var resp struct {
-      JSONRPC string          `json:"jsonrpc"`
-      ID      json.Number     `json:"id"`
-      Result  json.RawMessage `json:"result"`
-      Error   *struct {
-        Code    int    `json:"code"`
-        Message string `json:"message"`
-      } `json:"error"`
-    }
-    if err := json.Unmarshal(body, &resp); err != nil {
-      return nil, "", fmt.Errorf("解析 HTTP 响应 JSON 失败: %w (body: %s)", err, string(body))
-    }
+  // 尝试解析为 JSON-RPC（普通 HTTP 或 SSE data 行内嵌 JSON）
+  // 对于 SSE 响应，body 是 "data: {...}\n\ndata: {...}" 格式
+  parseBody := body
+  if httpResp.Header.Get("Content-Type") == "text/event-stream" || bytes.HasPrefix(bytes.TrimSpace(body), []byte("data: ")) {
+    parseBody = extractSSEJSON(body)
+  }
 
-    if resp.Error != nil {
-      return nil, "", fmt.Errorf("MCP 错误 (code=%d): %s", resp.Error.Code, resp.Error.Message)
-    }
+  var resp struct {
+    JSONRPC string          `json:"jsonrpc"`
+    ID      json.Number     `json:"id"`
+    Result  json.RawMessage `json:"result"`
+    Error   *struct {
+      Code    int    `json:"code"`
+      Message string `json:"message"`
+    } `json:"error"`
+  }
+  if err := json.Unmarshal(parseBody, &resp); err != nil {
+    return nil, "", fmt.Errorf("解析 HTTP 响应 JSON 失败: %w (body: %s)", err, string(parseBody))
+  }
 
-    var result map[string]interface{}
-    if err := json.Unmarshal(resp.Result, &result); err != nil {
-      return nil, "", fmt.Errorf("解析 result 失败: %w", err)
-    }
-    return result, sessionID, nil
+  if resp.Error != nil {
+    return nil, "", fmt.Errorf("MCP 错误 (code=%d): %s", resp.Error.Code, resp.Error.Message)
+  }
+
+  var result map[string]interface{}
+  if err := json.Unmarshal(resp.Result, &result); err != nil {
+    return nil, "", fmt.Errorf("解析 result 失败: %w", err)
+  }
+  return result, sessionID, nil
   }
 
   // 发送 initialize
@@ -650,6 +659,7 @@ func (p *MCPProxy) callHTTP(ctx context.Context, toolName string, args map[strin
     return nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
   }
   httpReq.Header.Set("Content-Type", "application/json")
+  httpReq.Header.Set("Mcp-Protocol-Version", "2024-11-05")
   for k, v := range p.Headers {
     httpReq.Header.Set(k, v)
   }
@@ -677,6 +687,12 @@ func (p *MCPProxy) callHTTP(ctx context.Context, toolName string, args map[strin
     return nil, fmt.Errorf("读取 HTTP 响应失败: %w", err)
   }
 
+  // 处理 SSE 响应
+  parseBody := body
+  if httpResp.Header.Get("Content-Type") == "text/event-stream" || bytes.HasPrefix(bytes.TrimSpace(body), []byte("data: ")) {
+    parseBody = extractSSEJSON(body)
+  }
+
   var resp struct {
     JSONRPC string          `json:"jsonrpc"`
     ID      json.Number     `json:"id"`
@@ -686,8 +702,8 @@ func (p *MCPProxy) callHTTP(ctx context.Context, toolName string, args map[strin
       Message string `json:"message"`
     } `json:"error"`
   }
-  if err := json.Unmarshal(body, &resp); err != nil {
-    return nil, fmt.Errorf("解析 HTTP 响应 JSON 失败: %w", err)
+  if err := json.Unmarshal(parseBody, &resp); err != nil {
+    return nil, fmt.Errorf("解析 HTTP 响应 JSON 失败: %w (body: %s)", err, string(parseBody))
   }
 
   if resp.Error != nil {
@@ -721,6 +737,18 @@ func (p *MCPProxy) stop() {
   }
   p.running = false
   p.tools = nil
+}
+
+// extractSSEJSON 从 SSE 响应体中提取第一个 data: 行的 JSON
+func extractSSEJSON(body []byte) []byte {
+  scanner := bufio.NewScanner(bytes.NewReader(body))
+  for scanner.Scan() {
+    line := scanner.Text()
+    if strings.HasPrefix(line, "data: ") {
+      return []byte(line[6:])
+    }
+  }
+  return body
 }
 
 // mapToEnvSlice 将 map[string]string 转换为 ["KEY=VAL", ...] 格式

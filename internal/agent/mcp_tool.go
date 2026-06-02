@@ -452,9 +452,12 @@ func (t *QueryServerTool) Execute(ctx context.Context, args json.RawMessage) (*T
     return &ToolResult{Success: false, Data: "server 和 tool 不能为空"}, nil
   }
 
-  toolName := fmt.Sprintf("mcp_%s_%s", params.Server, params.Tool)
+  executor := t.Registry.LookupByServer(params.Server, params.Tool)
+  if executor == nil {
+    return nil, fmt.Errorf("服务器 %s 上未找到工具 %s", params.Server, params.Tool)
+  }
   rawArgs, _ := json.Marshal(params.Args)
-  return t.Registry.Execute(ctx, toolName, rawArgs)
+  return executor.Execute(ctx, rawArgs)
 }
 
 func keysOfMap(m map[string]interface{}) []string {

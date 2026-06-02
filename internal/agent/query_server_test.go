@@ -8,8 +8,8 @@ import (
 
 func TestQueryServerTool_Name(t *testing.T) {
   r := NewToolRegistry()
-  r.Register(&mockServerTool{name: "mcp_srv_get_info"})
-  r.SetServer("mcp_srv_get_info", "srv")
+  r.Register(&mockServerTool{name: "get_info"})
+  r.SetServer("get_info", "srv")
 
   tool := &QueryServerTool{Registry: r}
   if tool.Name() != "query_server" {
@@ -19,8 +19,8 @@ func TestQueryServerTool_Name(t *testing.T) {
 
 func TestQueryServerTool_Execute(t *testing.T) {
   r := NewToolRegistry()
-  r.Register(&mockServerTool{name: "mcp_srv_get_info"})
-  r.SetServer("mcp_srv_get_info", "srv")
+  r.Register(&mockServerTool{name: "get_info"})
+  r.SetServer("get_info", "srv")
 
   tool := &QueryServerTool{Registry: r}
   args, _ := json.Marshal(map[string]interface{}{

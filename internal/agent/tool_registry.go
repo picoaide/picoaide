@@ -134,6 +134,18 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, args json.RawMe
   return result, err
 }
 
+// LookupByServer 查找指定 MCP 服务器上的工具，返回其 Executor
+func (r *ToolRegistry) LookupByServer(serverName, toolName string) ToolExecutor {
+  r.mu.RLock()
+  defer r.mu.RUnlock()
+  for _, entry := range r.entries {
+    if entry.serverName == serverName && entry.executor.Name() == toolName {
+      return entry.executor
+    }
+  }
+  return nil
+}
+
 // ListBasic 返回所有基础工具（不属于任何 MCP 服务器的工具）
 func (r *ToolRegistry) ListBasic() []ToolDef {
   r.mu.RLock()
