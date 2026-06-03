@@ -64,6 +64,13 @@ func RegisterPicoaideService(name string, tools []ToolDef, serverName string) {
   serviceRegistryMu.Unlock()
 }
 
+// unregisterService 注销一个 MCP SSE 服务
+func unregisterService(name string) {
+  serviceRegistryMu.Lock()
+  delete(serviceRegistry, name)
+  serviceRegistryMu.Unlock()
+}
+
 // RegisterService 注册一个 MCP SSE 服务
 func RegisterService(name string, hub *ServiceHub, tools []ToolDef, serverName string) {
   serviceRegistryMu.Lock()
@@ -256,11 +263,6 @@ func (s *Server) handleMCPSSEServicePost(c *gin.Context) {
           tools = append(tools, toolToMap(t))
         }
       }
-      // 4. 第三方 MCP 工具
-      mcpTools := globalMCPManager.GetTools(username)
-      for _, t := range mcpTools {
-        tools = append(tools, toolToMap(t))
-      }
     } else {
       for _, t := range info.Tools {
         tools = append(tools, toolToMap(t))
@@ -307,11 +309,14 @@ func (s *Server) handleMCPToolCall(c *gin.Context, id json.Number, params json.R
       picoaideHandleMCPToolCall(s, c, id, p.Name, p.Arguments, username)
       return
     }
-    // 再尝试第三方 MCP 工具
-    result, err := globalMCPManager.CallTool(c.Request.Context(), p.Name, p.Arguments)
-    if err == nil {
-      writeMCPResult(c.Writer, id, formatMCPResult(result))
-      return
+    // 第三方 MCP 代理服务：按服务名查找代理，直接转发
+    serviceName := c.Param("service")
+    if proxy, ok := globalMCPManager.GetProxy(serviceName); ok {
+      result, err := proxy.call(c.Request.Context(), p.Name, p.Arguments)
+      if err == nil {
+        writeMCPResult(c.Writer, id, formatMCPResult(result))
+        return
+      }
     }
     // 转发到浏览器 Hub
     if strings.HasPrefix(p.Name, "browser_") {

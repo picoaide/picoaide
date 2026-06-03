@@ -124,10 +124,16 @@ func LoadMCPServers(ctx context.Context) error {
   globalMCPManager.proxies = m.proxies
   globalMCPManager.mu.Unlock()
 
-  // 停止不再使用（从新配置中移除）的旧代理子进程
+  // 为每个代理注册独立的 MCP SSE 服务（像 browser/computer 一样）
+  for name, proxy := range m.proxies {
+    registerProxyService(name, proxy.tools)
+  }
+
+  // 注销已被移除的代理服务
   for name, old := range oldProxies {
     if _, keep := m.proxies[name]; !keep {
       old.stop()
+      unregisterService(name)
     }
   }
 
@@ -149,33 +155,17 @@ func fetchProxyTools(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
 
 // fetchStdioTools 通过子进程 stdio 获取工具列表
 func fetchStdioTools(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
-  tools, err := mcpStdioHandshake(ctx, proxy)
-  if err != nil {
-    return nil, fmt.Errorf("stdio 握手失败: %w", err)
-  }
-  return prefixToolNames(proxy.Name, tools), nil
+  return mcpStdioHandshake(ctx, proxy)
 }
 
 // fetchHTTPTools 通过 HTTP 请求获取工具列表
 func fetchHTTPTools(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
-  tools, err := mcpHTTPHandshake(ctx, proxy)
-  if err != nil {
-    return nil, fmt.Errorf("HTTP 握手失败: %w", err)
-  }
-  return prefixToolNames(proxy.Name, tools), nil
+  return mcpHTTPHandshake(ctx, proxy)
 }
 
-// prefixToolNames 为工具名添加 mcp_<server_name>_ 前缀（幂等）
-func prefixToolNames(serverName string, tools []ToolDef) []ToolDef {
-  prefix := "mcp_" + serverName + "_"
-  prefixed := make([]ToolDef, len(tools))
-  for i, t := range tools {
-    prefixed[i] = t
-    if !strings.HasPrefix(t.Name, prefix) {
-      prefixed[i].Name = prefix + t.Name
-    }
-  }
-  return prefixed
+// registerProxyService 为 MCP 代理注册独立的 SSE 服务
+func registerProxyService(name string, tools []ToolDef) {
+  RegisterPicoaideService(name, tools, "picoaide-"+name)
 }
 
 // ============================================================
@@ -213,6 +203,25 @@ func (m *MCPProxyManager) ToolCount(name string) int {
   proxy.mu.Lock()
   defer proxy.mu.Unlock()
   return len(proxy.tools)
+}
+
+// ListProxyServices 返回所有已注册的第三方 MCP 代理服务名列表
+func ListProxyServices() []string {
+  globalMCPManager.mu.RLock()
+  defer globalMCPManager.mu.RUnlock()
+  names := make([]string, 0, len(globalMCPManager.proxies))
+  for name := range globalMCPManager.proxies {
+    names = append(names, name)
+  }
+  return names
+}
+
+// GetProxy 按名称获取 MCP 代理
+func (m *MCPProxyManager) GetProxy(name string) (*MCPProxy, bool) {
+  m.mu.RLock()
+  defer m.mu.RUnlock()
+  p, ok := m.proxies[name]
+  return p, ok
 }
 
 // GetServerTools 返回指定 MCP 服务器的全部工具列表

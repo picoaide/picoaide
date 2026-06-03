@@ -24,9 +24,6 @@ type MCPToolManager struct {
   tools           map[string]*mcpToolEntry
   serverConfigs   map[string]MCPServer
   serverSummaries map[string]string // 服务器名 → 一行摘要
-  toolMCPServer   map[string]string // 工具名 → 实际归属的 MCP 服务器名
-  toolMCPFullName map[string]string // 工具名 → MCP 服务端完整名（含前缀）
-  proxyOrigin     map[string]string // 代理服务器名 → 托管它的 MCP 会话名（如 web-search-mcp-server → agent）
   mcpToken        string
   WorkspaceDir    string // 沙箱工作区路径，用于保存文件等
 }
@@ -42,9 +39,6 @@ func NewMCPToolManager() *MCPToolManager {
     tools:           make(map[string]*mcpToolEntry),
     serverConfigs:   make(map[string]MCPServer),
     serverSummaries: make(map[string]string),
-    toolMCPServer:   make(map[string]string),
-    toolMCPFullName: make(map[string]string),
-    proxyOrigin:     make(map[string]string),
   }
 }
 
@@ -126,28 +120,8 @@ func (m *MCPToolManager) connectOnce(ctx context.Context, name string, server *M
         delete(m.tools, existingName)
       }
     }
-    // 检测 MCP 代理工具（名称带 mcp_<server>_ 前缀）
-    actualServer := name
-    displayName := entry.Name
-    mcpFullName := ""
-    if strings.HasPrefix(entry.Name, "mcp_") {
-      parts := strings.SplitN(entry.Name, "_", 3)
-      if len(parts) == 3 {
-        actualServer = parts[1]
-        displayName = parts[2]
-        mcpFullName = entry.Name
-      }
-    }
-    // 用原名注册（query_server 通过原名查找），MCP 代理工具重新归属到对应服务器
-    m.tools[displayName] = &mcpToolEntry{serverName: actualServer, tool: entry}
-    m.toolMCPServer[displayName] = actualServer
-    if mcpFullName != "" {
-      m.toolMCPFullName[displayName] = mcpFullName
-      // 记录代理服务器 → 托管会话的映射，用于 CallTool 路由
-      if _, exists := m.proxyOrigin[actualServer]; !exists {
-        m.proxyOrigin[actualServer] = name
-      }
-    }
+    // 工具归属到对应的 MCP 服务器（browser/computer/agent/web-search-mcp-server 等）
+    m.tools[entry.Name] = &mcpToolEntry{serverName: name, tool: entry}
   }
 
   // 连接成功后自动生成服务器摘要
@@ -190,21 +164,16 @@ func (m *MCPToolManager) tryReconnect(ctx context.Context, name string) error {
 func (m *MCPToolManager) RegisterAll(registry *ToolRegistry) {
   m.mu.Lock()
   defer m.mu.Unlock()
-  for displayName, entry := range m.tools {
-    fullName := m.toolMCPFullName[displayName]
-    executor := &mcpToolExecutor{
-      name:         displayName,
+  for name, entry := range m.tools {
+    registry.Register(&mcpToolExecutor{
+      name:         name,
       desc:         entry.tool.Description,
       schema:       entry.tool.InputSchema,
       serverName:   entry.serverName,
       manager:      m,
       workspaceDir: m.WorkspaceDir,
-    }
-    if fullName != "" {
-      executor.mcpName = fullName
-    }
-    registry.Register(executor)
-    registry.SetServer(displayName, entry.serverName)
+    })
+    registry.SetServer(name, entry.serverName)
   }
 }
 
@@ -212,24 +181,17 @@ func (m *MCPToolManager) CallTool(ctx context.Context, serverName, toolName stri
   // 持锁获取 session 并保持锁在 CallTool 期间不被释放，
   // 防止并发 connectOnce 关闭正在使用的 session
   m.mu.Lock()
-  // 代理服务器（如 web-search-mcp-server）没有自己的 session，通过 origin 找到托管会话
-  sessName := serverName
-  if m.sessions[sessName] == nil {
-    if origin, ok := m.proxyOrigin[sessName]; ok {
-      sessName = origin
-    }
-  }
-  session := m.sessions[sessName]
+  session := m.sessions[serverName]
   if session == nil {
     m.mu.Unlock()
-    if err := m.tryReconnect(ctx, sessName); err != nil {
+    if err := m.tryReconnect(ctx, serverName); err != nil {
       return nil, err
     }
     m.mu.Lock()
-    session = m.sessions[sessName]
+    session = m.sessions[serverName]
     if session == nil {
       m.mu.Unlock()
-      return nil, fmt.Errorf("MCP 服务器 %s 重连后仍然不可用", sessName)
+      return nil, fmt.Errorf("MCP 服务器 %s 重连后仍然不可用", serverName)
     }
   }
   result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: args})
@@ -281,8 +243,7 @@ func (m *MCPToolManager) Close() {
 }
 
 type mcpToolExecutor struct {
-  name        string // 显示名（query_server 用原名）
-  mcpName     string // MCP 服务端完整名（含前缀，如 mcp_web-search-mcp-server_web_search）
+  name        string
   desc        string
   schema      interface{}
   serverName  string
@@ -299,11 +260,7 @@ func (e *mcpToolExecutor) Execute(ctx context.Context, args json.RawMessage) (*T
   if err := json.Unmarshal(args, &arguments); err != nil {
     arguments = map[string]interface{}{}
   }
-  callName := e.name
-  if e.mcpName != "" {
-    callName = e.mcpName
-  }
-  result, err := e.manager.CallTool(ctx, e.serverName, callName, arguments)
+  result, err := e.manager.CallTool(ctx, e.serverName, e.name, arguments)
   if err != nil {
     return &ToolResult{Success: false, Data: fmt.Sprintf("MCP 工具调用失败: %v", err)}, nil
   }

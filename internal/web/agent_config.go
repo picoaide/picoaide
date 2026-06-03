@@ -83,6 +83,17 @@ func (s *Server) handlePicoAgentConfig(c *gin.Context) {
   }
 
   // 4. 构造响应
+  mcpServers := map[string]mcpServer{
+    "browser":  {Socket: "/run/picoaide.sock"},
+    "computer": {Socket: "/run/picoaide.sock"},
+    "agent":    {Socket: "/run/picoaide.sock"},
+  }
+  // 添加第三方 MCP 代理服务（如 web-search-mcp-server），有授权的才可见
+  for _, name := range ListProxyServices() {
+    if hasMCPGrant(name, username) {
+      mcpServers[name] = mcpServer{Socket: "/run/picoaide.sock"}
+    }
+  }
   resp := agentConfigResponse{
     UserID:    username,
     Workspace: "/workspace",
@@ -90,11 +101,7 @@ func (s *Server) handlePicoAgentConfig(c *gin.Context) {
       "kb_search":  {Enabled: true},
       "web_search": {Enabled: true},
     },
-    MCPServers: map[string]mcpServer{
-      "browser":  {Socket: "/run/picoaide.sock"},
-      "computer": {Socket: "/run/picoaide.sock"},
-      "agent":    {Socket: "/run/picoaide.sock"},
-    },
+    MCPServers: mcpServers,
   }
 
   // 模型配置：从 settings 表直接读取
