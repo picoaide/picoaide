@@ -24,6 +24,8 @@ type MCPToolManager struct {
   tools           map[string]*mcpToolEntry
   serverConfigs   map[string]MCPServer
   serverSummaries map[string]string // 服务器名 → 一行摘要
+  toolMCPServer   map[string]string // 工具名 → 实际归属的 MCP 服务器名
+  toolMCPFullName map[string]string // 工具名 → MCP 服务端完整名（含前缀）
   mcpToken        string
   WorkspaceDir    string // 沙箱工作区路径，用于保存文件等
 }
@@ -39,6 +41,8 @@ func NewMCPToolManager() *MCPToolManager {
     tools:           make(map[string]*mcpToolEntry),
     serverConfigs:   make(map[string]MCPServer),
     serverSummaries: make(map[string]string),
+    toolMCPServer:   make(map[string]string),
+    toolMCPFullName: make(map[string]string),
   }
 }
 
@@ -120,7 +124,24 @@ func (m *MCPToolManager) connectOnce(ctx context.Context, name string, server *M
         delete(m.tools, existingName)
       }
     }
-    m.tools[entry.Name] = &mcpToolEntry{serverName: name, tool: entry}
+    // 检测 MCP 代理工具（名称带 mcp_<server>_ 前缀）
+    actualServer := name
+    displayName := entry.Name
+    mcpFullName := ""
+    if strings.HasPrefix(entry.Name, "mcp_") {
+      parts := strings.SplitN(entry.Name, "_", 3)
+      if len(parts) == 3 {
+        actualServer = parts[1]
+        displayName = parts[2]
+        mcpFullName = entry.Name
+      }
+    }
+    // 用原名注册（query_server 通过原名查找），MCP 代理工具重新归属到对应服务器
+    m.tools[displayName] = &mcpToolEntry{serverName: actualServer, tool: entry}
+    m.toolMCPServer[displayName] = actualServer
+    if mcpFullName != "" {
+      m.toolMCPFullName[displayName] = mcpFullName
+    }
   }
 
   // 连接成功后自动生成服务器摘要
@@ -133,11 +154,11 @@ func (m *MCPToolManager) connectOnce(ctx context.Context, name string, server *M
 // collectServerTools 收集指定服务器的工具定义列表
 func (m *MCPToolManager) collectServerTools(serverName string) []ToolDef {
   var defs []ToolDef
-  for _, entry := range m.tools {
+  for displayName, entry := range m.tools {
     if entry.serverName == serverName {
       schema, _ := entry.tool.InputSchema.(map[string]interface{})
       defs = append(defs, ToolDef{
-        Name:        entry.tool.Name,
+        Name:        displayName,
         Description: entry.tool.Description,
         InputSchema: schema,
       })
@@ -163,16 +184,21 @@ func (m *MCPToolManager) tryReconnect(ctx context.Context, name string) error {
 func (m *MCPToolManager) RegisterAll(registry *ToolRegistry) {
   m.mu.Lock()
   defer m.mu.Unlock()
-  for _, entry := range m.tools {
-    registry.Register(&mcpToolExecutor{
-      name:         entry.tool.Name,
+  for displayName, entry := range m.tools {
+    fullName := m.toolMCPFullName[displayName]
+    executor := &mcpToolExecutor{
+      name:         displayName,
       desc:         entry.tool.Description,
       schema:       entry.tool.InputSchema,
       serverName:   entry.serverName,
       manager:      m,
       workspaceDir: m.WorkspaceDir,
-    })
-    registry.SetServer(entry.tool.Name, entry.serverName)
+    }
+    if fullName != "" {
+      executor.mcpName = fullName
+    }
+    registry.Register(executor)
+    registry.SetServer(displayName, entry.serverName)
   }
 }
 
@@ -242,7 +268,8 @@ func (m *MCPToolManager) Close() {
 }
 
 type mcpToolExecutor struct {
-  name        string
+  name        string // 显示名（query_server 用原名）
+  mcpName     string // MCP 服务端完整名（含前缀，如 mcp_web-search-mcp-server_web_search）
   desc        string
   schema      interface{}
   serverName  string
@@ -259,7 +286,11 @@ func (e *mcpToolExecutor) Execute(ctx context.Context, args json.RawMessage) (*T
   if err := json.Unmarshal(args, &arguments); err != nil {
     arguments = map[string]interface{}{}
   }
-  result, err := e.manager.CallTool(ctx, e.serverName, e.name, arguments)
+  callName := e.name
+  if e.mcpName != "" {
+    callName = e.mcpName
+  }
+  result, err := e.manager.CallTool(ctx, e.serverName, callName, arguments)
   if err != nil {
     return &ToolResult{Success: false, Data: fmt.Sprintf("MCP 工具调用失败: %v", err)}, nil
   }
