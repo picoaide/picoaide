@@ -26,6 +26,7 @@ type MCPToolManager struct {
   serverSummaries map[string]string // 服务器名 → 一行摘要
   toolMCPServer   map[string]string // 工具名 → 实际归属的 MCP 服务器名
   toolMCPFullName map[string]string // 工具名 → MCP 服务端完整名（含前缀）
+  proxyOrigin     map[string]string // 代理服务器名 → 托管它的 MCP 会话名（如 web-search-mcp-server → agent）
   mcpToken        string
   WorkspaceDir    string // 沙箱工作区路径，用于保存文件等
 }
@@ -43,6 +44,7 @@ func NewMCPToolManager() *MCPToolManager {
     serverSummaries: make(map[string]string),
     toolMCPServer:   make(map[string]string),
     toolMCPFullName: make(map[string]string),
+    proxyOrigin:     make(map[string]string),
   }
 }
 
@@ -141,6 +143,10 @@ func (m *MCPToolManager) connectOnce(ctx context.Context, name string, server *M
     m.toolMCPServer[displayName] = actualServer
     if mcpFullName != "" {
       m.toolMCPFullName[displayName] = mcpFullName
+      // 记录代理服务器 → 托管会话的映射，用于 CallTool 路由
+      if _, exists := m.proxyOrigin[actualServer]; !exists {
+        m.proxyOrigin[actualServer] = name
+      }
     }
   }
 
@@ -206,17 +212,24 @@ func (m *MCPToolManager) CallTool(ctx context.Context, serverName, toolName stri
   // 持锁获取 session 并保持锁在 CallTool 期间不被释放，
   // 防止并发 connectOnce 关闭正在使用的 session
   m.mu.Lock()
-  session := m.sessions[serverName]
+  // 代理服务器（如 web-search-mcp-server）没有自己的 session，通过 origin 找到托管会话
+  sessName := serverName
+  if m.sessions[sessName] == nil {
+    if origin, ok := m.proxyOrigin[sessName]; ok {
+      sessName = origin
+    }
+  }
+  session := m.sessions[sessName]
   if session == nil {
     m.mu.Unlock()
-    if err := m.tryReconnect(ctx, serverName); err != nil {
+    if err := m.tryReconnect(ctx, sessName); err != nil {
       return nil, err
     }
     m.mu.Lock()
-    session = m.sessions[serverName]
+    session = m.sessions[sessName]
     if session == nil {
       m.mu.Unlock()
-      return nil, fmt.Errorf("MCP 服务器 %s 重连后仍然不可用", serverName)
+      return nil, fmt.Errorf("MCP 服务器 %s 重连后仍然不可用", sessName)
     }
   }
   result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: args})
