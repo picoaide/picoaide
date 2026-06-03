@@ -137,7 +137,7 @@ export async function init(ctx) {
           '<div id="auth-grants-list" class="mt-1"><small>加载中...</small></div>' +
           '<hr class="my-1">' +
           '<div class="field"><label>授权类型</label>' +
-            '<select id="auth-grant-type"><option value="user">用户</option><option value="group">用户组</option></select></div>' +
+            '<select id="auth-grant-type"><option value="user">用户</option><option value="group">用户组</option><option value="*">所有用户</option></select></div>' +
           '<div class="field"><label>授权对象</label>' +
             '<input type="text" id="auth-grant-value" placeholder="用户名或组名"></div>' +
           '<div id="auth-modal-msg" class="msg"></div>' +
@@ -150,9 +150,22 @@ export async function init(ctx) {
     overlay.querySelector('#auth-modal-close').onclick = () => overlay.remove();
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 
+    // 选择"所有用户"时，禁用输入框，固定 grant_value='*'
+    const grantTypeSel = overlay.querySelector('#auth-grant-type');
+    const grantValueInput = overlay.querySelector('#auth-grant-value');
+    grantTypeSel.addEventListener('change', function() {
+      if (this.value === '*') {
+        grantValueInput.disabled = true;
+        grantValueInput.placeholder = '所有用户无需输入';
+      } else {
+        grantValueInput.disabled = false;
+        grantValueInput.placeholder = '用户名或组名';
+      }
+    });
+
     overlay.querySelector('#auth-add-btn').addEventListener('click', async () => {
-      const grantType = overlay.querySelector('#auth-grant-type').value;
-      const grantValue = overlay.querySelector('#auth-grant-value').value.trim();
+      const grantType = grantTypeSel.value;
+      const grantValue = grantType === '*' ? '*' : grantValueInput.value.trim();
       if (!grantValue) { await alertModal('请输入授权对象'); return; }
       showMsg('#auth-modal-msg', '添加中...', true);
       const res = await Api.post('/api/admin/mcp/servers/grants/add', {
@@ -184,7 +197,14 @@ export async function init(ctx) {
     }
     container.innerHTML = '';
     for (const g of grants) {
-      const label = (String(g.grant_type) === 'user' ? '用户: ' : '组: ') + String(g.grant_value);
+      const gt = String(g.grant_type);
+      const gv = String(g.grant_value);
+      let label;
+      if (gt === '*') {
+        label = '所有用户';
+      } else {
+        label = (gt === 'user' ? '用户: ' : '组: ') + gv;
+      }
       const id = String(g.id);
       const tag = document.createElement('span');
       tag.className = 'tag';
