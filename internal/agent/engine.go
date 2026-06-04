@@ -280,6 +280,11 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     temperature = 0.7
   }
 
+  // 设置子代理事件转发回调
+  if e.subAgentMgr != nil {
+    e.subAgentMgr.SetParentCb(cb)
+  }
+
   slog.Debug("agent.model_config",
     "model_id", modelID,
     "max_iter", maxIter,
@@ -295,11 +300,8 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
   cancelCtx, cancelAll := context.WithCancel(context.Background())
   defer cancelAll()
   go func() {
-    select {
-    case <-ctx.Done():
-      cancelAll()
-    case <-cancelCtx.Done():
-    }
+    <-ctx.Done()
+    cancelAll()
   }()
   perIterTimeout := m.RequestTimeout
   if perIterTimeout <= 0 {
@@ -328,7 +330,9 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     // 主动压缩：多轮压缩直至 token 数低于可用预算
     if e.compactor != nil && overflow {
       slog.Debug("agent.proactive_compact", "token_count", tokenCount, "budget", usableTokens)
+      cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "start"})})
       for pass := 0; pass < 10; pass++ {
+        time.Sleep(10 * time.Millisecond) // 让出调度，使 events 能送达浏览器
         compacted, err := compactLLMMessages(iterCtx, e.compactor, llmMsgs, usableTokens)
         if err != nil {
           slog.Debug("agent.compact_fallback", "error", err.Error())
@@ -360,6 +364,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         }
       }
       slog.Debug("agent.after_proactive_compact", "token_count", tokenCount, "message_count", len(llmMsgs))
+      cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "done"})})
     }
 
     // 发送上下文进度事件
@@ -420,6 +425,8 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
           cb(event)
         case "error":
           cb(event)
+        case "reasoning":
+          cb(event)
         }
       })
 
@@ -454,6 +461,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       if llmRetry < maxLLMRetries {
         llmRetry++
         slog.Warn("agent.llm_retry", "retry", llmRetry, "max", maxLLMRetries, "error", llmErr.Error())
+        cb(StreamEvent{Type: "llm_retry", Data: mustJSON(map[string]int{"retry": llmRetry, "max": maxLLMRetries})})
         iterCancel()
         iterCtx, iterCancel = context.WithTimeout(cancelCtx, time.Duration(perIterTimeout)*time.Second)
         pendingTools = nil
@@ -468,6 +476,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       iterCancel()
       taskDoneReason = "error"
       slog.Error("agent.llm_error", "error", llmErr.Error())
+      cb(StreamEvent{Type: "error", Data: mustJSON(fmt.Sprintf("LLM 调用失败: %s", llmErr.Error()))})
       err = fmt.Errorf("LLM 调用失败: %w", llmErr)
       return
     }
@@ -524,6 +533,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         inputPreview = inputPreview[:200] + "..."
       }
       slog.Debug("agent.tool_execute_start", "tool", tc.Name, "id", tc.ID, "input_preview", inputPreview)
+      cb(StreamEvent{Type: "tool_progress", Data: mustJSON(map[string]interface{}{"tool": tc.Name, "status": "running"})})
 
       result, execErr := e.tools.Execute(iterCtx, tc.Name, tc.Input)
       if execErr != nil {
@@ -559,7 +569,9 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       postCount := estimateTokens(sysPrompt, llmMsgs)
       if postCount >= usableTokens/2 {
         slog.Debug("agent.post_turn_compact", "token_count", postCount, "threshold", usableTokens*3/4)
+        cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "start"})})
         for pass := 0; pass < 10; pass++ {
+          time.Sleep(10 * time.Millisecond)
           compacted, err := compactLLMMessages(context.Background(), e.compactor, llmMsgs, usableTokens)
           if err != nil {
             llmMsgs = trimMessages(llmMsgs)
@@ -570,6 +582,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
             break
           }
         }
+        cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "done"})})
         slog.Debug("agent.post_turn_compact_done", "token_count", estimateTokens(sysPrompt, llmMsgs))
       }
     }
@@ -588,6 +601,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     if !toolCallsExecuted {
       taskDoneReason = "error"
       slog.Debug("agent.empty_response")
+      cb(StreamEvent{Type: "error", Data: mustJSON("LLM 返回空响应，请重试")})
       err = fmt.Errorf("LLM 返回空响应")
       return
     }

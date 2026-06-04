@@ -32,11 +32,16 @@ type managedAgent struct {
 
 // SubAgentManager 持有父引擎的配置和依赖，用于创建子引擎
 type SubAgentManager struct {
-  mu       sync.Mutex
-  agents   map[string]*managedAgent
-  config   *AgentConfig
-  provider Provider
-  tools    *ToolRegistry
+  mu        sync.Mutex
+  agents    map[string]*managedAgent
+  config    *AgentConfig
+  provider  Provider
+  tools     *ToolRegistry
+  parentCb  func(StreamEvent) // 转发子代理事件到父引擎 cb
+}
+
+func (m *SubAgentManager) SetParentCb(cb func(StreamEvent)) {
+  m.parentCb = cb
 }
 
 func NewSubAgentManager(cfg *AgentConfig, provider Provider, tools *ToolRegistry) *SubAgentManager {
@@ -117,6 +122,20 @@ func (m *SubAgentManager) runSubAgent(ctx context.Context, name, taskDesc, serve
   var response string
   msg := &Message{Role: RoleUser, Content: taskDesc}
   err = engine.Process(ctx, sysPrompt, nil, msg, func(ev StreamEvent) {
+    // 转发关键事件到父引擎（tool_call_start、reasoning、error）
+    if m.parentCb != nil {
+      switch ev.Type {
+      case "tool_call_start", "reasoning", "error":
+        m.parentCb(StreamEvent{
+          Type: "subagent_event",
+          Data: mustJSONData(map[string]interface{}{
+            "name": name,
+            "sub_type": ev.Type,
+            "data": string(ev.Data),
+          }),
+        })
+      }
+    }
     switch ev.Type {
     case "text_delta":
       var text string
@@ -334,4 +353,9 @@ func (t *SubAgentCollectTool) Execute(ctx context.Context, args json.RawMessage)
 
   result := t.Manager.Collect(params.Name, timeout)
   return &ToolResult{Success: result.Success, Data: result.Data}, nil
+}
+
+func mustJSONData(v interface{}) json.RawMessage {
+  data, _ := json.Marshal(v)
+  return data
 }

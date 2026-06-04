@@ -212,7 +212,6 @@ func main() {
   }()
 
   stdinReader := bufio.NewReader(os.Stdin)
-  idleTimeout := 1 * time.Minute
   inputCh := make(chan inputResult, 1)
   // 单 goroutine 循环读取 stdin，避免 per-iteration 泄漏
   go func() {
@@ -240,7 +239,8 @@ msgLoop:
         break msgLoop
       }
       inputMsg = result.msg
-    case <-time.After(idleTimeout):
+    case <-time.After(10 * time.Minute):
+      // 10 分钟没有新输入 → 退出，开始记忆进化
       slog.Debug("picoagent.idle_timeout")
       break msgLoop
     case <-signalCtx.Done():

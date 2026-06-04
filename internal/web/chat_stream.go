@@ -11,6 +11,7 @@ import (
   "net/http"
   "os"
   "path/filepath"
+  "sort"
   "strings"
   "sync"
   "time"
@@ -20,6 +21,7 @@ import (
   "github.com/picoaide/picoaide/internal/agent"
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
+  "github.com/picoaide/picoaide/internal/sandbox"
   "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
 )
@@ -40,6 +42,7 @@ type chatRun struct {
   username string
   createdAt time.Time
   cancel   context.CancelFunc
+  source   string // "web" 或 "im"，用于决定是否转发事件到 IM
 
   mu     sync.Mutex
   events []streamEvent
@@ -84,10 +87,11 @@ func generateRunID() string {
   return hex.EncodeToString(b)
 }
 
-func newChatRun(username string) *chatRun {
+func newChatRun(username, source string) *chatRun {
   return &chatRun{
     runID:     generateRunID(),
     username:  username,
+    source:    source,
     createdAt: time.Now(),
     subs:      make(map[chan struct{}]bool),
   }
@@ -118,7 +122,7 @@ func (r *chatRun) finish() {
   r.subs = make(map[chan struct{}]bool)
   r.mu.Unlock()
 
-  userRun.Delete(r.username)
+  userRun.CompareAndDelete(r.username, r)
 
   // 延迟清理
   go func() {
@@ -151,7 +155,12 @@ func (r *chatRun) unsubscribe(ch chan struct{}) {
 }
 
 // startChatSandbox 创建聊天运行并启动沙箱，Web 和 IM 共用
-func (s *Server) startChatSandbox(username, message string, inputJSON []byte) *chatRun {
+// source 为 "web" 或 "im"，"web" 来源的事件会转发到用户的所有 IM 渠道
+func (s *Server) startChatSandbox(username, message string, inputJSON []byte, source ...string) *chatRun {
+  src := "web"
+  if len(source) > 0 && source[0] == "im" {
+    src = "im"
+  }
   // 同一用户发新消息时，取消上一个正在运行的沙箱（通过 context 优雅退出）
   // 上一个沙箱退出后会 releaseUser，当前消息的 acquireUser 再获取 token 启动
   if v, ok := userRun.Load(username); ok {
@@ -159,7 +168,7 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte) *c
   }
 
   runCtx, runCancel := context.WithCancel(context.Background())
-  run := newChatRun(username)
+  run := newChatRun(username, src)
   run.cancel = runCancel
   activeRuns.Store(run.runID, run)
   userRun.Store(username, run)
@@ -179,6 +188,7 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte) *c
     events, err := s.agentIntegration.sandbox.Run(
       runCtx, mcpToken, inputJSON, workspace, apiKeys,
       buildSkillMounts(username), username,
+      func(evt sandbox.StreamEvent) { run.append(streamEvent{Type: evt.Type, Data: evt.Data}) },
     )
     if err != nil {
       if errors.Is(err, context.Canceled) {
@@ -186,15 +196,34 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte) *c
       } else {
         slog.Debug("chat.sandbox_error", "run_id", run.runID, "error", err.Error())
         run.append(streamEvent{Type: "error", Data: mustMarshal(err.Error())})
+        if run.source == "web" {
+          s.forwardEventToIM(username, sandbox.StreamEvent{Type: "error", Data: mustMarshal(err.Error())}, "")
+        }
       }
       run.finish()
       s.persistRunEvents(username, run)
       return
     }
     var eventCount int
+    var imResponse string
     for evt := range events {
       eventCount++
       run.append(streamEvent{Type: evt.Type, Data: evt.Data})
+      // Web 来源的事件转发到用户的所有 IM 渠道
+      if run.source == "web" {
+        if evt.Type == "text_delta" {
+          var text string
+          if json.Unmarshal(evt.Data, &text) == nil {
+            imResponse += text
+          }
+        } else if evt.Type != "finish" {
+          s.forwardEventToIM(username, evt, "")
+        }
+      }
+    }
+    // 将完整回复发送到 IM
+    if run.source == "web" && imResponse != "" {
+      s.forwardEventToIM(username, sandbox.StreamEvent{Type: "finish"}, imResponse)
     }
     slog.Debug("chat.sandbox_complete", "run_id", run.runID, "event_count", eventCount)
     run.finish()
@@ -202,6 +231,51 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte) *c
   }()
 
   return run
+}
+
+// forwardEventToIM 将关键事件通过 IM 网关发送到用户的所有 IM 渠道
+// 异步执行，不阻塞主事件循环
+func (s *Server) forwardEventToIM(username string, evt sandbox.StreamEvent, extraText string) {
+  if s.agentIntegration == nil {
+    return
+  }
+  var text string
+  switch evt.Type {
+  case "tool_call_start":
+    var td struct {
+      Name  string          `json:"name"`
+      Input json.RawMessage `json:"input"`
+    }
+    if json.Unmarshal(evt.Data, &td) == nil && td.Name != "" {
+      text = fmt.Sprintf("🔧 正在使用 %s 工具...", td.Name)
+    }
+  case "reasoning":
+    text = "🤔 AI 思考中..."
+  case "error":
+    var errMsg string
+    if json.Unmarshal(evt.Data, &errMsg) == nil {
+      text = "❌ " + errMsg
+    }
+  case "finish":
+    text = extraText
+  }
+  if text == "" {
+    return
+  }
+  // 异步发送，不阻塞主事件循环
+  go func(msg string) {
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+    channels, err := auth.ListUserChannelByUsername(username)
+    if err != nil {
+      return
+    }
+    for _, ch := range channels {
+      if ch.Enabled && ch.Configured {
+        s.agentIntegration.imGateway.SendToUser(ctx, ch.Channel, username, msg)
+      }
+    }
+  }(text)
 }
 
 // ============================================================
@@ -215,7 +289,26 @@ func (s *Server) persistRunEvents(username string, run *chatRun) {
   if len(entries) == 0 {
     return
   }
-  eventsFile := filepath.Join(sessDir, entries[0].Name(), "events.jsonl")
+  // 按修改时间排序，取最新会话目录
+  sessions := make([]string, 0, len(entries))
+  for _, e := range entries {
+    if e.IsDir() {
+      sessions = append(sessions, e.Name())
+    }
+  }
+  if len(sessions) == 0 {
+    return
+  }
+  // 按修改时间降序排列，最新的在最前面
+  sort.Slice(sessions, func(i, j int) bool {
+    fi, _ := os.Stat(filepath.Join(sessDir, sessions[i]))
+    fj, _ := os.Stat(filepath.Join(sessDir, sessions[j]))
+    if fi == nil || fj == nil {
+      return fi != nil
+    }
+    return fi.ModTime().After(fj.ModTime())
+  })
+  eventsFile := filepath.Join(sessDir, sessions[0], "events.jsonl")
   if !strings.HasPrefix(filepath.Clean(eventsFile), sessDir+string(os.PathSeparator)) {
     return
   }
@@ -244,8 +337,9 @@ func (s *Server) handleChatActive(c *gin.Context) {
     runID = v.(*chatRun).runID
   } else {
     activeRuns.Range(func(key, value interface{}) bool {
-      if value.(*chatRun).username == username {
-        runID = value.(*chatRun).runID
+      run, ok := value.(*chatRun)
+      if ok && run.username == username {
+        runID = run.runID
         return false
       }
       return true

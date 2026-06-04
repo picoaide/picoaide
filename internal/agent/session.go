@@ -64,14 +64,15 @@ type SessionScope struct {
 }
 
 type SessionMeta struct {
-  Key       string        `json:"key"`
-  Summary   string        `json:"summary"`
-  Skip      int           `json:"skip"`
-  Count     int           `json:"count"`
-  CreatedAt string        `json:"created_at"`
-  UpdatedAt string        `json:"updated_at"`
-  Scope     *SessionScope `json:"scope,omitempty"`
-  Aliases   []string      `json:"aliases,omitempty"`
+  Key           string        `json:"key"`
+  Summary       string        `json:"summary"`
+  Skip          int           `json:"skip"`
+  Count         int           `json:"count"`
+  CreatedAt     string        `json:"created_at"`
+  UpdatedAt     string        `json:"updated_at"`
+  EvolvedCount  int           `json:"evolved_count"` // 已进化分析的消息数
+  Scope         *SessionScope `json:"scope,omitempty"`
+  Aliases       []string      `json:"aliases,omitempty"`
 }
 
 // ============================================================

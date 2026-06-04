@@ -190,8 +190,8 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
     }
   }
 
-  // 没有活跃沙箱，创建新沙箱
-  run := s.startChatSandbox(username, msg.Text, inputJSON)
+  // 没有活跃沙箱，创建新沙箱（标记 im 来源，避免 goroutine 重复转发）
+  run := s.startChatSandbox(username, msg.Text, inputJSON, "im")
 
   // 订阅 chatRun 事件，转发到 IM
   notifCh, events := run.subscribe()

@@ -394,7 +394,7 @@ func killOnCancel(ctx context.Context, cmd *exec.Cmd) {
 }
 
 // Run 流式运行沙箱，picoagent 每输出一行事件就实时发送到 channel
-func (m *Manager) Run(ctx context.Context, token string, inputJSON []byte, workspace string, apiKeys map[string]string, mounts []Mount, username string) (<-chan StreamEvent, error) {
+func (m *Manager) Run(ctx context.Context, token string, inputJSON []byte, workspace string, apiKeys map[string]string, mounts []Mount, username string, eventCb ...func(StreamEvent)) (<-chan StreamEvent, error) {
   slog.Debug("sandbox.run_start",
     "username", username,
     "workspace", workspace,
@@ -407,14 +407,29 @@ func (m *Manager) Run(ctx context.Context, token string, inputJSON []byte, works
   // select 中 runCtx.Done() 与 events 同时就绪，Go 随机选择会丢弃事件（event_count=0）
   // 改为在 scanner goroutine 结束后显式 cancel
 
-  cleanup, stdout, cmd, err := m.prepareSandbox(runCtx, token, inputJSON, workspace, apiKeys, mounts, username)
+  // 启动进度事件
+  emitEvent := func(typ string, data map[string]interface{}) {
+    if len(eventCb) > 0 && eventCb[0] != nil {
+      eventCb[0](StreamEvent{Type: typ, Data: mustJSON(data)})
+    }
+  }
+  emitEvent("progress_startup", map[string]interface{}{"stage": "mounting_overlay"})
+
+  // 启动阶段设 30 秒超时，运行阶段由 AI 控制不设限
+  startupCtx, startupCancel := context.WithTimeout(runCtx, 30*time.Second)
+  defer startupCancel()
+  cleanup, stdout, cmd, err := m.prepareSandbox(startupCtx, token, inputJSON, workspace, apiKeys, mounts, username)
   if err != nil {
     cancel()
     return nil, err
   }
+  emitEvent("progress_startup", map[string]interface{}{"stage": "picoagent_started"})
 
-  // 监听调用方 context，而非 runCtx（runCtx 在 Run 返回时被 defer cancel 立即取消）
-  killOnCancel(ctx, cmd)
+  // 同时监听调用方 ctx（用户取消）和 runCtx（maxSandboxDuration 超时）
+  killOnCancel(runCtx, cmd)
+  if ctx != runCtx {
+    killOnCancel(ctx, cmd)
+  }
 
   // 当 picoagent 退出后关闭 stdout pipe（即使 scanner 未读到 EOF）
   // 防止 picoagent 子进程持有 stdout fd 导致 scanner 永远阻塞
