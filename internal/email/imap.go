@@ -318,7 +318,7 @@ func parseSearchQuery(query string) *imap.SearchCriteria {
     case "BODY":
       if i+1 < len(parts) {
         i++
-        criteria.Body = append(criteria.Body, parts[i])
+        criteria.Text = append(criteria.Text, parts[i])
       }
     case "TO":
       if i+1 < len(parts) {
@@ -335,7 +335,7 @@ func parseSearchQuery(query string) *imap.SearchCriteria {
     case "SEEN":
       criteria.WithFlags = []string{imap.SeenFlag}
     default:
-      criteria.Body = append(criteria.Body, parts[i])
+      criteria.Text = append(criteria.Text, parts[i])
     }
   }
   return criteria
