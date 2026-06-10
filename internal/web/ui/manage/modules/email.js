@@ -1,6 +1,6 @@
 export async function init(ctx) {
   var $ = ctx.$, esc = ctx.esc, showMsg = ctx.showMsg, Api = ctx.Api, confirmModal = ctx.confirmModal;
-  var isEditing = false;
+  var savedEmail = null;
 
   async function loadConfig() {
     var data = await Api.get('/api/user/email');
@@ -9,8 +9,10 @@ export async function init(ctx) {
       return;
     }
     if (data.configured && data.email) {
+      savedEmail = data.email;
       showConfigCard(data.email);
     } else {
+      savedEmail = null;
       showForm(null);
     }
   }
@@ -42,7 +44,6 @@ export async function init(ctx) {
       $('#imap-tls').value = email.imapTls ? 'true' : 'false';
       $('#login-user').value = email.loginUser || '';
       $('#login-password').value = '';
-      isEditing = true;
     } else {
       $('#email-addr').value = '';
       $('#smtp-host').value = '';
@@ -53,7 +54,6 @@ export async function init(ctx) {
       $('#imap-tls').value = 'true';
       $('#login-user').value = '';
       $('#login-password').value = '';
-      isEditing = false;
     }
   }
 
@@ -124,6 +124,7 @@ export async function init(ctx) {
     var res = await Api.post('/api/user/email/delete', {});
     if (res.success) {
       showMsg('#email-status', '配置已删除', true);
+      savedEmail = null;
       showForm(null);
     } else {
       showMsg('#email-status', res.error || '删除失败', false);
@@ -133,7 +134,9 @@ export async function init(ctx) {
   $('#email-save-btn').addEventListener('click', saveConfig);
   $('#email-delete-btn').addEventListener('click', deleteConfig);
   $('#email-test-btn').addEventListener('click', testConnection);
-  $('#email-edit-btn').addEventListener('click', function() { showForm(null); loadConfig(); });
+  $('#email-edit-btn').addEventListener('click', function() {
+    showForm(savedEmail);
+  });
 
   loadConfig();
 }
