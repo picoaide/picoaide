@@ -429,6 +429,11 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
   g.GET("/channels", s.handleUserChannelsGet)
   g.GET("/channels/config-fields", s.handleChannelConfigFieldsGet)
   g.POST("/channels/config-fields", s.handleChannelConfigFieldsSave)
+  // 邮箱配置
+  g.GET("/user/email", s.handleEmailGet)
+  g.POST("/user/email", s.handleEmailSave)
+  g.POST("/user/email/test", s.handleEmailTest)
+  g.POST("/user/email/delete", s.handleEmailDelete)
   // 超管 API 路由组
   admin := g.Group("/admin")
   admin.Use(s.superadminMiddleware())
