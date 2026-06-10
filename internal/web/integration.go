@@ -8,7 +8,7 @@ import (
   "path/filepath"
 
   "github.com/picoaide/picoaide/internal/agent"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/im"
   "github.com/picoaide/picoaide/internal/logger"
@@ -47,9 +47,9 @@ func (s *Server) initAgentIntegration() (*AgentIntegration, error) {
   if s.loadConfig() != nil {
     // 钉钉 — 从 user_channels 读取每用户凭据
     dingtalkProvider := im.NewDingTalkProvider()
-    engine, err := auth.GetEngine()
+    engine, err := store.GetEngine()
     if err == nil {
-      var channels []auth.UserChannel
+      var channels []store.UserChannel
       engine.Where("channel = ? AND configured = ? AND enabled = ?", "dingtalk", true, true).Find(&channels)
       for _, ch := range channels {
         var creds map[string]string
@@ -68,9 +68,9 @@ func (s *Server) initAgentIntegration() (*AgentIntegration, error) {
 
     // 飞书 — 从 user_channels 读取每用户凭据
     feishuProvider := im.NewFeishuProvider()
-    feishuEngine, feishuErr := auth.GetEngine()
+    feishuEngine, feishuErr := store.GetEngine()
     if feishuErr == nil {
-      var feishuChannels []auth.UserChannel
+      var feishuChannels []store.UserChannel
       feishuEngine.Where("channel = ? AND configured = ? AND enabled = ?", "feishu", true, true).Find(&feishuChannels)
       for _, ch := range feishuChannels {
         var creds map[string]string
@@ -85,9 +85,9 @@ func (s *Server) initAgentIntegration() (*AgentIntegration, error) {
 
     // 企微 — 从 user_channels 读取每用户凭据
     wecomProvider := im.NewWeComProvider()
-    wecomEngine, wecomErr := auth.GetEngine()
+    wecomEngine, wecomErr := store.GetEngine()
     if wecomErr == nil {
-      var wecomChannels []auth.UserChannel
+      var wecomChannels []store.UserChannel
       wecomEngine.Where("channel = ? AND configured = ? AND enabled = ?", "wecom", true, true).Find(&wecomChannels)
       for _, ch := range wecomChannels {
         var creds map[string]string
@@ -102,7 +102,7 @@ func (s *Server) initAgentIntegration() (*AgentIntegration, error) {
   }
 
   // 3. Cron 调度器
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     return nil, err
   }
@@ -142,7 +142,7 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
 
   // 保存当前会话 ID + webhook 作为该用户的默认通知渠道
   if msg.ChatID != "" {
-    if existing, err := auth.GetUserChannel(username, msg.Platform); err == nil && existing != nil {
+    if existing, err := store.GetUserChannel(username, msg.Platform); err == nil && existing != nil {
       var creds map[string]string
       if json.Unmarshal([]byte(existing.Credentials), &creds) == nil {
         changed := false
@@ -156,7 +156,7 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
         }
         if changed {
           updated, _ := json.Marshal(creds)
-          auth.UpsertUserChannelWithCreds(username, msg.Platform, existing.Enabled, existing.Configured, string(updated))
+          store.UpsertUserChannelWithCreds(username, msg.Platform, existing.Enabled, existing.Configured, string(updated))
         }
       }
     }
@@ -169,7 +169,7 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
 
   // 检查用户是否开启分段回复
   streamOutput := true
-  if uc, err := auth.GetUserChannel(username, msg.Platform); err == nil && uc != nil {
+  if uc, err := store.GetUserChannel(username, msg.Platform); err == nil && uc != nil {
     var creds map[string]string
     if json.Unmarshal([]byte(uc.Credentials), &creds) == nil {
       if v, ok := creds["stream"]; ok {
@@ -273,12 +273,12 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
 }
 
 // executeCronJob 执行定时任务 → 启动沙箱 → 结果发到 IM
-func (s *Server) executeCronJob(ctx context.Context, sb *sandbox.Manager, store *scheduler.SQLCronStore, job *scheduler.CronJob) error {
+func (s *Server) executeCronJob(ctx context.Context, sb *sandbox.Manager, cronStore *scheduler.SQLCronStore, job *scheduler.CronJob) error {
   workspace := filepath.Join(config.WorkDir(), "users", job.UserID)
 
-  mcpToken, err := auth.GetMCPToken(job.UserID)
+  mcpToken, err := store.GetMCPToken(job.UserID)
   if err != nil {
-    mcpToken, _ = auth.GenerateMCPToken(job.UserID)
+    mcpToken, _ = store.GenerateMCPToken(job.UserID)
   }
 
   input := agent.Message{
@@ -319,7 +319,7 @@ func (s *Server) executeCronJob(ctx context.Context, sb *sandbox.Manager, store 
 
 // sendCronResult 向用户推送定时任务执行结果
 func (s *Server) sendCronResult(ctx context.Context, job *scheduler.CronJob, result string) {
-  channels, err := auth.ListUserChannelByUsername(job.UserID)
+  channels, err := store.ListUserChannelByUsername(job.UserID)
   if err != nil {
     return
   }
@@ -337,7 +337,7 @@ func (s *Server) notifyCronFailure(ctx context.Context, job *scheduler.CronJob, 
   if s.agentIntegration == nil {
     return
   }
-  channels, err := auth.ListUserChannelByUsername(job.UserID)
+  channels, err := store.ListUserChannelByUsername(job.UserID)
   if err != nil {
     return
   }
@@ -357,12 +357,12 @@ func (s *Server) notifyCronFailure(ctx context.Context, job *scheduler.CronJob, 
 // loadAPIKeys 从 settings 表加载 API 密钥
 func (s *Server) loadAPIKeys() map[string]string {
   keys := make(map[string]string)
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     return keys
   }
 
-  var settings []auth.Setting
+  var settings []store.Setting
   if err := engine.Find(&settings); err != nil {
     return keys
   }
@@ -380,11 +380,11 @@ func (s *Server) getConfig(key string) (string, bool) {
   if s.loadConfig() == nil {
     return "", false
   }
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     return "", false
   }
-  var setting auth.Setting
+  var setting store.Setting
   has, err := engine.Where("key = ?", key).Get(&setting)
   if err != nil || !has {
     return "", false
@@ -394,7 +394,7 @@ func (s *Server) getConfig(key string) (string, bool) {
 
 // buildSkillMounts 查询用户绑定的技能，返回沙箱只读挂载列表
 func buildSkillMounts(username string) []sandbox.Mount {
-  skillNames, err := auth.GetUserSkills(username)
+  skillNames, err := store.GetUserSkills(username)
   if err != nil || len(skillNames) == 0 {
     return nil
   }

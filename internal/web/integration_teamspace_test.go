@@ -4,7 +4,7 @@ import (
   "net/url"
   "testing"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 // ============================================================
@@ -144,10 +144,10 @@ func TestSharedFolders_UserCanViewAccessible(t *testing.T) {
 func TestSharedFolders_SetGroups(t *testing.T) {
   env := setupTestServer(t)
   // 创建组
-  auth.CreateGroup("team-a", "local", "", nil)
-  auth.CreateGroup("team-b", "local", "", nil)
-  gidA, _ := auth.GetGroupID("team-a")
-  gidB, _ := auth.GetGroupID("team-b")
+  store.CreateGroup("team-a", "local", "", nil)
+  store.CreateGroup("team-b", "local", "", nil)
+  gidA, _ := store.GetGroupID("team-a")
+  gidB, _ := store.GetGroupID("team-b")
 
   // 创建共享文件夹
   env.postForm(t, "/api/admin/shared-folders/create", "testadmin", url.Values{"name": {"test"}})
@@ -192,8 +192,8 @@ func TestSharedFolders_SetGroups_NonexistentFolder(t *testing.T) {
 func TestSharedFolders_TestMount(t *testing.T) {
   env := setupTestServer(t)
   // 创建共享文件夹
-  auth.CreateSharedFolder("test", "", false, "testadmin")
-  sf, _ := auth.GetSharedFolderByName("test")
+  store.CreateSharedFolder("test", "", false, "testadmin")
+  sf, _ := store.GetSharedFolderByName("test")
 
   // 测试挂载
   resp := env.postForm(t, "/api/admin/shared-folders/test", "testadmin", url.Values{
@@ -206,8 +206,8 @@ func TestSharedFolders_TestMount(t *testing.T) {
 
 func TestSharedFolders_TestMount_NonexistentUser(t *testing.T) {
   env := setupTestServer(t)
-  auth.CreateSharedFolder("test", "", false, "testadmin")
-  sf, _ := auth.GetSharedFolderByName("test")
+  store.CreateSharedFolder("test", "", false, "testadmin")
+  sf, _ := store.GetSharedFolderByName("test")
 
   resp := env.postForm(t, "/api/admin/shared-folders/test", "testadmin", url.Values{
     "folder_id": {itoa(int(sf.ID))},
@@ -222,8 +222,8 @@ func TestSharedFolders_TestMount_NonexistentUser(t *testing.T) {
 
 func TestSharedFolders_MountAll(t *testing.T) {
   env := setupTestServer(t)
-  auth.CreateSharedFolder("test", "", true, "testadmin")
-  sf, _ := auth.GetSharedFolderByName("test")
+  store.CreateSharedFolder("test", "", true, "testadmin")
+  sf, _ := store.GetSharedFolderByName("test")
 
   resp := env.postForm(t, "/api/admin/shared-folders/mount", "testadmin", url.Values{
     "folder_id": {itoa(int(sf.ID))},
@@ -246,21 +246,21 @@ func TestSharedFolders_MountAll_NonexistentFolder(t *testing.T) {
 func TestSharedFolders_GroupDeleteCascades(t *testing.T) {
   env := setupTestServer(t)
   // 创建组、用户
-  auth.CreateGroup("to-delete", "local", "", nil)
-  gid, _ := auth.GetGroupID("to-delete")
-  auth.AddUsersToGroup("to-delete", []string{"testuser"})
+  store.CreateGroup("to-delete", "local", "", nil)
+  gid, _ := store.GetGroupID("to-delete")
+  store.AddUsersToGroup("to-delete", []string{"testuser"})
 
   // 创建共享文件夹关联该组
-  auth.CreateSharedFolder("shared-with-group", "", false, "testadmin")
-  sf, _ := auth.GetSharedFolderByName("shared-with-group")
-  auth.SetSharedFolderGroups(sf.ID, []int64{gid})
+  store.CreateSharedFolder("shared-with-group", "", false, "testadmin")
+  sf, _ := store.GetSharedFolderByName("shared-with-group")
+  store.SetSharedFolderGroups(sf.ID, []int64{gid})
 
   // 删除组
   resp := env.postForm(t, "/api/admin/groups/delete", "testadmin", url.Values{"name": {"to-delete"}})
   assertStatus(t, resp, 200)
 
   // 验证共享文件夹的组关联已被清除
-  groups, _ := auth.GetSharedFolderGroupIDs(sf.ID)
+  groups, _ := store.GetSharedFolderGroupIDs(sf.ID)
   if len(groups) != 0 {
     t.Errorf("shared folder still has %d group associations after group delete", len(groups))
   }
@@ -273,19 +273,19 @@ func TestSharedFolders_GroupDeleteCascades(t *testing.T) {
 func TestSharedFolders_UserDeleteCleansMountRecords(t *testing.T) {
   env := setupTestServer(t)
   // 创建额外用户
-  auth.CreateUser("delete-me", "pass", "user")
+  store.CreateUser("delete-me", "pass", "user")
 
   // 创建共享文件夹并记录挂载
-  auth.CreateSharedFolder("test", "", false, "testadmin")
-  sf, _ := auth.GetSharedFolderByName("test")
-  auth.RecordMountTest(sf.ID, "delete-me", true)
+  store.CreateSharedFolder("test", "", false, "testadmin")
+  sf, _ := store.GetSharedFolderByName("test")
+  store.RecordMountTest(sf.ID, "delete-me", true)
 
   // 删除用户
   resp := env.postForm(t, "/api/admin/users/delete", "testadmin", url.Values{"username": {"delete-me"}})
   assertStatus(t, resp, 200)
 
   // 验证挂载记录已清理
-  _, err := auth.GetMountStatus(sf.ID, "delete-me")
+  _, err := store.GetMountStatus(sf.ID, "delete-me")
   if err == nil {
     t.Error("mount record should be deleted after user deletion")
   }

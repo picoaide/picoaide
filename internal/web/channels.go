@@ -7,7 +7,7 @@ import (
 
   "github.com/gin-gonic/gin"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/im"
 )
 
@@ -74,18 +74,18 @@ var channelKeyMap = func() map[string]channelDef {
 
 // channelEnabled 检查渠道是否在系统设置中开启
 func channelEnabled(chKey string) bool {
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     return false
   }
-  var s auth.Setting
+  var s store.Setting
   has, _ := engine.Where("key = ? AND value = 'true'", "channel."+chKey+".enabled").Get(&s)
   return has
 }
 
 // userChannelCreds 从 user_channels 表获取用户渠道凭据（JSON map）
 func userChannelCreds(username, channel string) map[string]string {
-  uc, err := auth.GetUserChannel(username, channel)
+  uc, err := store.GetUserChannel(username, channel)
   if err != nil || uc == nil || uc.Credentials == "" {
     return nil
   }
@@ -125,8 +125,8 @@ func (s *Server) handleUserChannelsGet(c *gin.Context) {
     return
   }
 
-  userChannels, _ := auth.ListUserChannelByUsername(username)
-  userChanMap := make(map[string]*auth.UserChannel)
+  userChannels, _ := store.ListUserChannelByUsername(username)
+  userChanMap := make(map[string]*store.UserChannel)
   for i := range userChannels {
     userChanMap[userChannels[i].Channel] = &userChannels[i]
   }
@@ -211,7 +211,7 @@ func (s *Server) handleChannelConfigFieldsGet(c *gin.Context) {
     })
   }
 
-  userChan, _ := auth.GetUserChannel(username, section)
+  userChan, _ := store.GetUserChannel(username, section)
   enabled := userChan != nil && userChan.Enabled
 
   writeJSON(c, http.StatusOK, map[string]interface{}{
@@ -295,13 +295,13 @@ func (s *Server) handleChannelConfigFieldsSave(c *gin.Context) {
 
   // 没有传 enabled 时，从现有记录读取
   if values["enabled"] == nil {
-    existing, _ := auth.GetUserChannel(username, section)
+    existing, _ := store.GetUserChannel(username, section)
     if existing != nil {
       enabled = existing.Enabled
     }
   }
 
-  if err := auth.UpsertUserChannelWithCreds(username, section, enabled, configured, string(credsJSON)); err != nil {
+  if err := store.UpsertUserChannelWithCreds(username, section, enabled, configured, string(credsJSON)); err != nil {
     writeError(c, http.StatusInternalServerError, fmt.Sprintf("保存渠道配置失败: %s", err.Error()))
     return
   }

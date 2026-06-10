@@ -298,10 +298,11 @@ func TestMustJSON(t *testing.T) {
 }
 
 // ============================================================
-// overflow.go
+// Compactor
 // ============================================================
 
-func TestIsOverflow(t *testing.T) {
+func TestCompactorIsOverflow(t *testing.T) {
+  c := NewCompactor(DefaultCompactionConfig())
   tests := []struct {
     name         string
     tokenCount   int
@@ -309,22 +310,23 @@ func TestIsOverflow(t *testing.T) {
     want         bool
   }{
     {"below_limit", 100000, 200000, false},
-    {"at_usable_boundary", 180000, 200000, true},  // usable=180000, 180000>=180000
+    {"at_usable_boundary", 180000, 200000, true},
     {"exceeds_usable", 180001, 200000, true},
     {"zero_context_default", 180001, 0, true},
-    {"small_context_overflow", 5000, 20000, true},  // usable=0
+    {"small_context_overflow", 5000, 20000, true},
   }
   for _, tt := range tests {
     t.Run(tt.name, func(t *testing.T) {
-      got := IsOverflow(tt.tokenCount, tt.contextLimit)
+      got := c.IsOverflowWithLimit(tt.tokenCount, tt.contextLimit)
       if got != tt.want {
-        t.Errorf("IsOverflow(%d, %d) = %v, want %v", tt.tokenCount, tt.contextLimit, got, tt.want)
+        t.Errorf("IsOverflowWithLimit(%d, %d) = %v, want %v", tt.tokenCount, tt.contextLimit, got, tt.want)
       }
     })
   }
 }
 
-func TestUsableTokens(t *testing.T) {
+func TestCompactorUsableTokens(t *testing.T) {
+  c := NewCompactor(DefaultCompactionConfig())
   tests := []struct {
     contextLimit int
     want         int
@@ -334,7 +336,7 @@ func TestUsableTokens(t *testing.T) {
     {50000, 30000},
   }
   for _, tt := range tests {
-    got := UsableTokens(tt.contextLimit)
+    got := c.UsableTokens(tt.contextLimit)
     if got != tt.want {
       t.Errorf("UsableTokens(%d) = %d, want %d", tt.contextLimit, got, tt.want)
     }
@@ -786,29 +788,6 @@ func TestRetryPolicy_DelayNegative(t *testing.T) {
   got := p.Delay(-1)
   if got != 2000*time.Millisecond {
     t.Errorf("Delay(-1) = %v, want 2s", got)
-  }
-}
-
-// ============================================================
-// BuildStructuredOutputTool
-// ============================================================
-
-func TestBuildStructuredOutputTool(t *testing.T) {
-  schema := map[string]interface{}{
-    "type": "object",
-    "properties": map[string]interface{}{
-      "answer": map[string]interface{}{"type": "string"},
-    },
-  }
-  tool := BuildStructuredOutputTool(schema)
-  if tool.Name != "StructuredOutput" {
-    t.Errorf("Name = %q", tool.Name)
-  }
-  if tool.Description == "" {
-    t.Errorf("empty description")
-  }
-  if tool.InputSchema == nil {
-    t.Errorf("nil schema")
   }
 }
 

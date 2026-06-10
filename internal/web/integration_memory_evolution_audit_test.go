@@ -7,7 +7,7 @@ import (
   "strings"
   "testing"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 // ============================================================
@@ -18,7 +18,7 @@ func TestPicoAgentAudit_Success(t *testing.T) {
   env := setupTestServer(t)
 
   // 生成 MCP token
-  token, err := auth.GenerateMCPToken("testuser")
+  token, err := store.GenerateMCPToken("testuser")
   if err != nil {
     t.Fatalf("GenerateMCPToken: %v", err)
   }
@@ -50,11 +50,11 @@ func TestPicoAgentAudit_Success(t *testing.T) {
   }
 
   // 验证审计记录已写入 DB
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     t.Fatal(err)
   }
-  var logs []auth.MemoryEvolutionLog
+  var logs []store.MemoryEvolutionLog
   if err := engine.Where("session_key = ?", "test-session-001").Find(&logs); err != nil {
     t.Fatal(err)
   }
@@ -100,7 +100,7 @@ func TestPicoAgentAudit_Unauthorized(t *testing.T) {
 func TestPicoAgentAudit_TokenMismatch(t *testing.T) {
   env := setupTestServer(t)
 
-  token, err := auth.GenerateMCPToken("testuser")
+  token, err := store.GenerateMCPToken("testuser")
   if err != nil {
     t.Fatalf("GenerateMCPToken: %v", err)
   }
@@ -131,7 +131,7 @@ func TestPicoAgentAudit_TokenMismatch(t *testing.T) {
 func TestPicoAgentAudit_EmptyBody(t *testing.T) {
   env := setupTestServer(t)
 
-  token, err := auth.GenerateMCPToken("testuser")
+  token, err := store.GenerateMCPToken("testuser")
   if err != nil {
     t.Fatalf("GenerateMCPToken: %v", err)
   }

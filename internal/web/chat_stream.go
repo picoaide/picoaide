@@ -19,7 +19,7 @@ import (
   "github.com/gin-gonic/gin"
 
   "github.com/picoaide/picoaide/internal/agent"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/sandbox"
   "github.com/picoaide/picoaide/internal/logger"
@@ -174,9 +174,9 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte, so
   userRun.Store(username, run)
   run.append(streamEvent{Type: "user_message", Data: mustMarshal(message)})
 
-  mcpToken, err := auth.GetMCPToken(username)
+  mcpToken, err := store.GetMCPToken(username)
   if err != nil {
-    mcpToken, _ = auth.GenerateMCPToken(username)
+    mcpToken, _ = store.GenerateMCPToken(username)
   }
   workspace := filepath.Join(config.WorkDir(), "users", username)
   apiKeys := s.loadAPIKeys()
@@ -266,7 +266,7 @@ func (s *Server) forwardEventToIM(username string, evt sandbox.StreamEvent, extr
   go func(msg string) {
     ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
     defer cancel()
-    channels, err := auth.ListUserChannelByUsername(username)
+    channels, err := store.ListUserChannelByUsername(username)
     if err != nil {
       return
     }

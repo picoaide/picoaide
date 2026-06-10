@@ -5,7 +5,7 @@ import (
   "net/http"
 
   "github.com/gin-gonic/gin"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/im"
@@ -31,7 +31,7 @@ func (s *Server) requireSuperadmin(c *gin.Context) string {
   if username == "" {
     return ""
   }
-  if !auth.IsSuperadmin(username) {
+  if !store.IsSuperadmin(username) {
     writeError(c, http.StatusForbidden, "仅超级管理员可访问")
     return ""
   }
@@ -49,7 +49,7 @@ func (s *Server) initializeUser(username string) error {
   if err := user.InitUser(s.loadConfig(), username); err != nil {
     return err
   }
-  if _, err := auth.AllocateIP(username); err != nil {
+  if _, err := store.AllocateIP(username); err != nil {
     return err
   }
   s.applyDefaultSkillsToUser(username)
@@ -63,13 +63,13 @@ func (s *Server) initializeUser(username string) error {
 func (s *Server) purgeOrdinaryAuthProviderStateForConfig(cfg *config.GlobalConfig) (*authProviderSwitchCleanupResult, error) {
   result := &authProviderSwitchCleanupResult{}
 
-  deletedUsers, usersRemoved, err := auth.DeleteAllRegularUsers()
+  deletedUsers, usersRemoved, err := store.DeleteAllRegularUsers()
   if err != nil {
     return result, err
   }
   result.UsersRemoved = usersRemoved
 
-  if err := auth.ClearAllGroups(); err != nil {
+  if err := store.ClearAllGroups(); err != nil {
     return result, err
   }
   result.GroupsCleared = true
@@ -132,7 +132,7 @@ func (s *Server) syncUsersFromDirectory(cleanupStaleUsers bool) (*userSyncResult
   }
 
   for _, username := range userResult.AllowedUsers {
-    if !auth.UserExists(username) {
+    if !store.UserExists(username) {
       continue
     }
     if err := s.initializeUser(username); err == nil {
@@ -141,7 +141,7 @@ func (s *Server) syncUsersFromDirectory(cleanupStaleUsers bool) (*userSyncResult
   }
 
   if cleanupStaleUsers {
-    localUsers, err := auth.GetAllLocalUsers()
+    localUsers, err := store.GetAllLocalUsers()
     if err != nil {
       return nil, err
     }
@@ -158,7 +158,7 @@ func (s *Server) syncUsersFromDirectory(cleanupStaleUsers bool) (*userSyncResult
       if err := user.ArchiveUser(s.loadConfig(), u.Username); err == nil {
         result.ArchivedStaleUsers++
       }
-      _ = auth.DeleteUser(u.Username)
+      _ = store.DeleteUser(u.Username)
     }
   }
 

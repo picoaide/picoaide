@@ -16,7 +16,7 @@ import (
   "syscall"
   "time"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 // maxSandboxDuration 沙箱最长运行时间，超时后强制终止
@@ -752,7 +752,7 @@ func ensureBridge() {
 
 // userIP 从数据库分配/获取用户 IP（顺序分配，避免 CRC32 碰撞）
 func userIP(username string) string {
-  ip, err := auth.AllocateIP(username)
+  ip, err := store.AllocateIP(username)
   if err != nil {
     slog.Error("分配 IP 失败，使用备用 IP", "username", username, "error", err)
     // 回退：从用户名 hash 生成，仅当数据库不可用时的备选方案
@@ -812,7 +812,7 @@ func teardownNetNS(username string) {
   veth := vethName(username)
   exec.Command("ip", "link", "delete", veth+"-s").Run()
   exec.Command("ip", "link", "delete", veth).Run()
-  if err := auth.ReleaseIP(username); err != nil {
+  if err := store.ReleaseIP(username); err != nil {
     slog.Warn("释放 IP 失败", "username", username, "error", err)
   }
 }

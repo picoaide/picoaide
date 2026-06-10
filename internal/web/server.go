@@ -23,7 +23,7 @@ import (
   "syscall"
   "time"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/logger"
@@ -58,6 +58,8 @@ func (s *Server) loadConfig() *config.GlobalConfig {
   return s.cfg.Load()
 }
 
+const superadminKey = "superadmin"
+
 const sessionSecretSettingKey = "internal.session_secret"
 
 func randomHex(bytesLen int) (string, error) {
@@ -69,14 +71,14 @@ func randomHex(bytesLen int) (string, error) {
 }
 
 func ensureSessionSecret() (string, error) {
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     return "", err
   }
   if _, err := engine.Exec("DELETE FROM settings WHERE key = ?", "web.password"); err != nil {
     return "", err
   }
-  var setting auth.Setting
+  var setting store.Setting
   has, err := engine.Where("key = ?", sessionSecretSettingKey).Get(&setting)
   if err != nil {
     return "", err
@@ -118,7 +120,7 @@ func (s *Server) syncAuto() {
 
   // 同步组
   groupResult, err := authsource.SyncGroups(authMode, s.loadConfig(), func(username string) error {
-    if !auth.UserExists(username) {
+    if !store.UserExists(username) {
       return s.initializeUser(username)
     }
     return nil
@@ -166,12 +168,12 @@ func (s *Server) restartSyncTimer() {
 
 func (s *Server) syncGroupParents(groupMap authsource.GroupHierarchy) {
   for groupName := range groupMap {
-    if err := auth.SetGroupParent(groupName, nil); err != nil {
+    if err := store.SetGroupParent(groupName, nil); err != nil {
       slog.Warn("清空组父级失败", "group", groupName, "error", err)
     }
   }
   for parentName, group := range groupMap {
-    parentID, err := auth.GetGroupID(parentName)
+    parentID, err := store.GetGroupID(parentName)
     if err != nil {
       continue
     }
@@ -179,7 +181,7 @@ func (s *Server) syncGroupParents(groupMap authsource.GroupHierarchy) {
       if _, ok := groupMap[childName]; !ok {
         continue
       }
-      if err := auth.SetGroupParent(childName, &parentID); err != nil {
+      if err := store.SetGroupParent(childName, &parentID); err != nil {
         slog.Warn("同步组父子关系失败", "parent", parentName, "child", childName, "error", err)
       }
     }
@@ -225,22 +227,22 @@ func (s *Server) sessionUserAllowed(username string) bool {
   if username == "" {
     return false
   }
-  if auth.IsSuperadmin(username) {
+  if store.IsSuperadmin(username) {
     return true
   }
   if !s.loadConfig().UnifiedAuthEnabled() {
-    return auth.UserExists(username)
+    return store.UserExists(username)
   }
   if s.loadConfig().AuthMode() == "local" {
     return false
   }
-  if auth.UserExists(username) && !auth.IsExternalUser(username) {
+  if store.UserExists(username) && !store.IsExternalUser(username) {
     return false
   }
   if !user.AllowedByWhitelist(s.loadConfig(), s.loadConfig().AuthMode(), username) {
     return false
   }
-  return auth.UserExists(username)
+  return store.UserExists(username)
 }
 
 // getSessionUser 从请求的 cookie 中提取已登录的用户名
@@ -279,6 +281,30 @@ func (s *Server) checkCSRF(c *gin.Context) bool {
     token = c.Query("csrf_token")
   }
   return hmac.Equal([]byte(token), []byte(s.csrfToken(username)))
+}
+
+// superadminMiddleware 超级管理员认证中间件
+func (s *Server) superadminMiddleware() gin.HandlerFunc {
+  return func(c *gin.Context) {
+    username := s.requireAuth(c)
+    if username == "" {
+      c.Abort()
+      return
+    }
+    if !store.IsSuperadmin(username) {
+      writeError(c, http.StatusForbidden, "仅超级管理员可访问")
+      c.Abort()
+      return
+    }
+    if c.Request.Method != "GET" && c.Request.Method != "HEAD" {
+      if !s.checkCSRF(c) {
+        c.Abort()
+        return
+      }
+    }
+    c.Set(superadminKey, username)
+    c.Next()
+  }
 }
 
 // maxBodyBytes 非 upload 端点的请求体大小上限（1 MB）
@@ -405,6 +431,7 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
   g.POST("/channels/config-fields", s.handleChannelConfigFieldsSave)
   // 超管 API 路由组
   admin := g.Group("/admin")
+  admin.Use(s.superadminMiddleware())
   {
     admin.GET("/users", s.handleAdminUsers)
     admin.POST("/users/create", s.handleAdminUserCreate)
@@ -617,9 +644,9 @@ func Serve() error {
   }
 
   // 初始化数据库
-  if err := auth.InitDB(wd); err != nil {
+  if err := store.InitDB(wd); err != nil {
     os.MkdirAll(wd, 0755)
-    if err := auth.InitDB(wd); err != nil {
+    if err := store.InitDB(wd); err != nil {
       return fmt.Errorf("初始化数据库失败: %w", err)
     }
   }
@@ -653,10 +680,10 @@ func Serve() error {
   }
 
   // 自动创建超管（首次运行时）
-  admins, err := auth.GetSuperadmins()
+  admins, err := store.GetSuperadmins()
   if err != nil || len(admins) == 0 {
-    password := auth.GenerateRandomPassword(16)
-    if err := auth.CreateUser("admin", password, "superadmin"); err != nil {
+    password := store.GenerateRandomPassword(16)
+    if err := store.CreateUser("admin", password, "superadmin"); err != nil {
       slog.Warn("自动创建超管失败", "error", err)
     } else {
       slog.Info("自动创建超管账户", "username", "admin")
@@ -680,7 +707,7 @@ func Serve() error {
 
   // 启动审计日志清理（停止由 gracefulShutdown 管理）
   s.auditCleanerCtx, s.auditCleanerCancel = context.WithCancel(context.Background())
-  auth.StartAuditLogCleaner(s.auditCleanerCtx)
+  store.StartAuditLogCleaner(s.auditCleanerCtx)
 
   // 定时同步（实时响应配置变更）
   s.restartSyncTimer()

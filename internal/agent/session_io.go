@@ -136,6 +136,7 @@ func (s *SessionStore) ArchiveSize(key string) int {
     if err != nil {
       continue
     }
+    defer f.Close()
     scanner := bufio.NewScanner(f)
     scanner.Buffer(make([]byte, 512*1024), 512*1024)
     for scanner.Scan() {
@@ -143,7 +144,6 @@ func (s *SessionStore) ArchiveSize(key string) int {
         total++
       }
     }
-    f.Close()
   }
   return total
 }

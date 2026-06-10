@@ -224,85 +224,22 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
   }
   llmMsgs = append(llmMsgs, msg.ToLLMMessage())
 
-  // 注入 Agent Protocol 到系统提示词首部
-  sysPrompt = AgentProtocol + "\n\n" + sysPrompt
-
-  // 追加技能内容到系统提示词
-  if len(e.skills) > 0 {
-    skillsPrompt := BuildSkillsPrompt(e.skills)
-    if skillsPrompt != "" {
-      sysPrompt = sysPrompt + "\n\n" + skillsPrompt
-    }
-  }
-
-  // 主 agent 模式下添加 MCP 服务器摘要
-  if len(e.preloadedServers) == 0 {
-    serverSummary := e.buildServerSummary()
-    if serverSummary != "" {
-      sysPrompt = sysPrompt + "\n\n## 可用 MCP 服务器\n" + serverSummary +
-        "\n\n使用 query_server 工具快速调用某个 MCP 服务器的工具。批量任务请使用 subagent_spawn + subagent_collect。"
-    }
-  }
-
-  // 追加预置内容（如子代理工具指引）
-  if e.preloadedSystem != "" {
-    sysPrompt = sysPrompt + "\n\n" + e.preloadedSystem
-  }
-
-  slog.Debug("agent.system_prompt_built", "sys_prompt_length", len(sysPrompt))
+  sysPrompt = e.buildSystemPrompt(sysPrompt)
 
   var fullResponse string
   var toolCallsExecuted bool
 
   m := e.config.Model
   modelID := m.ModelID
-  maxIter := m.MaxIter
-  contextWindow := m.ContextWindow
-  if contextWindow <= 0 {
-    contextWindow = 200000
-  }
-
-  // 系统提示词太长时截断，保证回复空间
+  maxIter, contextWindow, maxTokens, temperature := e.prepareModelConfig(m)
   sysPrompt = truncatePrompt(sysPrompt, llmMsgs, e.compactor, contextWindow)
-  if maxIter <= 0 {
-    maxIter = e.config.MaxIter
-    if maxIter <= 0 {
-      maxIter = 20
-    }
-  }
-  // 使用管理员配置的 max_tokens。为 0 时仍设 16384 上限，防止 thinking mode 无限输出
-  maxTokens := m.MaxTokens
-  if maxTokens <= 0 {
-    maxTokens = 16384
-  }
-  temperature := m.Temperature
-  if temperature <= 0 {
-    temperature = 0.7
-  }
 
-  // 设置子代理事件转发回调
   if e.subAgentMgr != nil {
     e.subAgentMgr.SetParentCb(cb)
   }
 
-  slog.Debug("agent.model_config",
-    "model_id", modelID,
-    "max_iter", maxIter,
-    "context_window", contextWindow,
-    "max_tokens", maxTokens,
-    "temperature", temperature,
-  )
-
-  // 父 ctx（来自 main.go）用于整体取消（用户停止）
-  // 但它的超时是整个 Process 累计的（request_timeout 秒）。
-  // 多轮工具调用很容易超时，所以用独立 context 做单轮超时：
-  // cancelCtx 由父 ctx 的 cancel 传播而来，迭代超时从 cancelCtx 派生。
-  cancelCtx, cancelAll := context.WithCancel(context.Background())
+  cancelCtx, cancelAll := e.setupExecContext(ctx)
   defer cancelAll()
-  go func() {
-    <-ctx.Done()
-    cancelAll()
-  }()
   perIterTimeout := m.RequestTimeout
   if perIterTimeout <= 0 {
     perIterTimeout = 120
@@ -564,28 +501,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     }
     pendingTools = nil
     toolCallsExecuted = true
-    // 回合后压缩：工具执行后 token 超 50% 则预压缩，避免下轮溢出
-    if e.compactor != nil {
-      postCount := estimateTokens(sysPrompt, llmMsgs)
-      if postCount >= usableTokens/2 {
-        slog.Debug("agent.post_turn_compact", "token_count", postCount, "threshold", usableTokens*3/4)
-        cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "start"})})
-        for pass := 0; pass < 10; pass++ {
-          time.Sleep(10 * time.Millisecond)
-          compacted, err := compactLLMMessages(context.Background(), e.compactor, llmMsgs, usableTokens)
-          if err != nil {
-            llmMsgs = trimMessages(llmMsgs)
-            break
-          }
-          llmMsgs = compacted
-          if estimateTokens(sysPrompt, llmMsgs) < usableTokens {
-            break
-          }
-        }
-        cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "done"})})
-        slog.Debug("agent.post_turn_compact_done", "token_count", estimateTokens(sysPrompt, llmMsgs))
-      }
-    }
+    e.postTurnCompaction(sysPrompt, &llmMsgs, usableTokens, cb)
 
     // 定期 fsync 会话
     e.iterCount++
@@ -618,6 +534,101 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
 
   cb(FinishEvent(fullResponse, map[string]int{}))
   return nil
+}
+
+// postTurnCompaction 工具执行后进行 token 压缩，防止下轮溢出
+func (e *Engine) postTurnCompaction(sysPrompt string, llmMsgs *[]LLMMessage, usableTokens int, cb func(StreamEvent)) {
+  if e.compactor == nil {
+    return
+  }
+  postCount := estimateTokens(sysPrompt, *llmMsgs)
+  if postCount < usableTokens/2 {
+    return
+  }
+  slog.Debug("agent.post_turn_compact", "token_count", postCount, "threshold", usableTokens*3/4)
+  cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "start"})})
+  for pass := 0; pass < 10; pass++ {
+    time.Sleep(10 * time.Millisecond)
+    compacted, err := compactLLMMessages(context.Background(), e.compactor, *llmMsgs, usableTokens)
+    if err != nil {
+      *llmMsgs = trimMessages(*llmMsgs)
+      break
+    }
+    *llmMsgs = compacted
+    if estimateTokens(sysPrompt, *llmMsgs) < usableTokens {
+      break
+    }
+  }
+  cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "done"})})
+  slog.Debug("agent.post_turn_compact_done", "token_count", estimateTokens(sysPrompt, *llmMsgs))
+}
+
+// setupExecContext 创建独立执行 context，父 ctx 取消时传播
+func (e *Engine) setupExecContext(ctx context.Context) (context.Context, context.CancelFunc) {
+  cancelCtx, cancelAll := context.WithCancel(context.Background())
+  go func() {
+    <-ctx.Done()
+    cancelAll()
+  }()
+  return cancelCtx, cancelAll
+}
+
+// prepareModelConfig 提取并兜底模型配置参数
+func (e *Engine) prepareModelConfig(m ModelConfig) (maxIter, contextWindow, maxTokens int, temperature float64) {
+  maxIter = m.MaxIter
+  contextWindow = m.ContextWindow
+  if contextWindow <= 0 {
+    contextWindow = 200000
+  }
+  if maxIter <= 0 {
+    maxIter = e.config.MaxIter
+    if maxIter <= 0 {
+      maxIter = 20
+    }
+  }
+  maxTokens = m.MaxTokens
+  if maxTokens <= 0 {
+    maxTokens = 16384
+  }
+  temperature = m.Temperature
+  if temperature <= 0 {
+    temperature = 0.7
+  }
+  slog.Debug("agent.model_config",
+    "model_id", m.ModelID,
+    "max_iter", maxIter,
+    "context_window", contextWindow,
+    "max_tokens", maxTokens,
+    "temperature", temperature,
+  )
+  return
+}
+
+// buildSystemPrompt 构建完整系统提示词（注入协议 + 技能 + MCP 摘要 + 预置内容）
+func (e *Engine) buildSystemPrompt(base string) string {
+  result := AgentProtocol + "\n\n" + base
+
+  if len(e.skills) > 0 {
+    skillsPrompt := BuildSkillsPrompt(e.skills)
+    if skillsPrompt != "" {
+      result = result + "\n\n" + skillsPrompt
+    }
+  }
+
+  if len(e.preloadedServers) == 0 {
+    serverSummary := e.buildServerSummary()
+    if serverSummary != "" {
+      result = result + "\n\n## 可用 MCP 服务器\n" + serverSummary +
+        "\n\n使用 query_server 工具快速调用某个 MCP 服务器的工具。批量任务请使用 subagent_spawn + subagent_collect。"
+    }
+  }
+
+  if e.preloadedSystem != "" {
+    result = result + "\n\n" + e.preloadedSystem
+  }
+
+  slog.Debug("agent.system_prompt_built", "sys_prompt_length", len(result))
+  return result
 }
 
 // ============================================================

@@ -7,7 +7,7 @@ import (
   "sync/atomic"
   "time"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/logger"
 )
 
@@ -61,7 +61,7 @@ func init() {
 func enqueueTask(taskType string, users []string, fn func(username string) error) (string, error) {
   var filtered []string
   for _, u := range users {
-    if auth.IsSuperadmin(u) {
+    if store.IsSuperadmin(u) {
       continue
     }
     filtered = append(filtered, u)

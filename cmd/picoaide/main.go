@@ -8,7 +8,7 @@ import (
   "path/filepath"
   "strconv"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/rootfs"
   "github.com/picoaide/picoaide/internal/util"
@@ -85,13 +85,14 @@ func main() {
       os.Exit(1)
     }
     wd, _ := os.Getwd()
-    if err := auth.InitDB(wd); err != nil {
+    if err := store.InitDB(wd); err != nil {
       os.MkdirAll(wd, 0755)
-      if err := auth.InitDB(wd); err != nil {
+      if err := store.InitDB(wd); err != nil {
         fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
         os.Exit(1)
       }
     }
+    config.SetEngineProvider(store.GetEngine)
     if err := runResetPassword(positional[0]); err != nil {
       fmt.Fprintf(os.Stderr, "重置密码失败: %v\n", err)
       os.Exit(1)
@@ -107,14 +108,14 @@ func main() {
 // ============================================================
 
 func runResetPassword(username string) error {
-  if !auth.UserExists(username) {
+  if !store.UserExists(username) {
     return fmt.Errorf("用户 %s 不存在", username)
   }
-  if !auth.IsSuperadmin(username) {
+  if !store.IsSuperadmin(username) {
     return fmt.Errorf("用户 %s 不是超管，仅支持重置超管密码", username)
   }
-  password := auth.GenerateRandomPassword(16)
-  if err := auth.ChangePassword(username, password); err != nil {
+  password := store.GenerateRandomPassword(16)
+  if err := store.ChangePassword(username, password); err != nil {
     return err
   }
   fmt.Fprintf(os.Stderr, "用户 %s 密码已重置: %s\n", username, password)
@@ -150,19 +151,20 @@ func runInitSilent() {
   os.MkdirAll(filepath.Join(workDir, "rules"), 0755)
 
   os.Chdir(workDir)
-  if err := auth.InitDB(workDir); err != nil {
+  if err := store.InitDB(workDir); err != nil {
     fmt.Fprintf(os.Stderr, "初始化数据库失败: %v\n", err)
     os.Exit(1)
   }
+  config.SetEngineProvider(store.GetEngine)
 
   if err := rootfs.Ensure(filepath.Join(workDir, "rootfs")); err != nil {
     fmt.Fprintf(os.Stderr, "初始化沙箱 rootfs 失败: %v\n", err)
     os.Exit(1)
   }
 
-  password := auth.GenerateRandomPassword(16)
-  if !auth.UserExists("admin") {
-    if err := auth.CreateUser("admin", password, "superadmin"); err != nil {
+  password := store.GenerateRandomPassword(16)
+  if !store.UserExists("admin") {
+    if err := store.CreateUser("admin", password, "superadmin"); err != nil {
       fmt.Fprintf(os.Stderr, "创建超管失败: %v\n", err)
       os.Exit(1)
     }

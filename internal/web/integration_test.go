@@ -15,7 +15,7 @@ import (
 
   "github.com/gin-gonic/gin"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/user"
 )
@@ -36,7 +36,7 @@ func setupTestServer(t *testing.T) *testEnv {
   t.Helper()
 
   // 关闭已有数据库连接
-  auth.ResetDB()
+  store.ResetDB()
 
   // 创建临时目录
   tmpDir := t.TempDir()
@@ -44,9 +44,10 @@ func setupTestServer(t *testing.T) *testEnv {
   t.Setenv("PICOAIDE_RULE_CACHE_DIR", filepath.Join(tmpDir, "rules"))
 
   // 初始化数据库
-  if err := auth.InitDB(tmpDir); err != nil {
+  if err := store.InitDB(tmpDir); err != nil {
     t.Fatalf("InitDB: %v", err)
   }
+  config.SetEngineProvider(store.GetEngine)
 
   // 写入默认配置到 settings 表
   if err := config.InitDBDefaults(); err != nil {
@@ -72,12 +73,12 @@ func setupTestServer(t *testing.T) *testEnv {
   }
 
   // 创建超管
-  if err := auth.CreateUser("testadmin", "admin123", "superadmin"); err != nil {
+  if err := store.CreateUser("testadmin", "admin123", "superadmin"); err != nil {
     t.Fatalf("CreateUser(testadmin): %v", err)
   }
 
   // 创建普通用户
-  if err := auth.CreateUser("testuser", "user123", "user"); err != nil {
+  if err := store.CreateUser("testuser", "user123", "user"); err != nil {
     t.Fatalf("CreateUser(testuser): %v", err)
   }
 

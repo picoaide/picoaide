@@ -4,7 +4,7 @@ import (
   "net/url"
   "testing"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/user"
 )
 
@@ -29,10 +29,10 @@ func TestUserCookies_ListWithData(t *testing.T) {
   env := setupTestServer(t)
 
   // Insert cookies via DB directly (same as browser extension would)
-  if err := auth.SetCookie("testuser", "example.com", "session=abc"); err != nil {
+  if err := store.SetCookie("testuser", "example.com", "session=abc"); err != nil {
     t.Fatal(err)
   }
-  if err := auth.SetCookie("testuser", "other.com", "token=xyz"); err != nil {
+  if err := store.SetCookie("testuser", "other.com", "token=xyz"); err != nil {
     t.Fatal(err)
   }
 
@@ -68,7 +68,7 @@ func TestUserCookies_ListWithData(t *testing.T) {
 func TestUserCookies_Delete(t *testing.T) {
   env := setupTestServer(t)
 
-  if err := auth.SetCookie("testuser", "example.com", "session=abc"); err != nil {
+  if err := store.SetCookie("testuser", "example.com", "session=abc"); err != nil {
     t.Fatal(err)
   }
 
@@ -81,7 +81,7 @@ func TestUserCookies_Delete(t *testing.T) {
   }
 
   // Verify it's gone
-  got, _ := auth.GetCookie("testuser", "example.com")
+  got, _ := store.GetCookie("testuser", "example.com")
   if got != "" {
     t.Errorf("cookie still exists: %q", got)
   }
@@ -105,15 +105,15 @@ func TestUserCookies_DeleteRequiresAuth(t *testing.T) {
 func TestUserCookies_UserIsolation(t *testing.T) {
   env := setupTestServer(t)
 
-  if err := auth.CreateUser("user2", "pass2", "user"); err != nil {
+  if err := store.CreateUser("user2", "pass2", "user"); err != nil {
     t.Fatal(err)
   }
   if err := user.InitUser(env.Cfg, "user2"); err != nil {
     t.Fatal(err)
   }
 
-  auth.SetCookie("testuser", "example.com", "from_testuser")
-  auth.SetCookie("user2", "other.com", "from_user2")
+  store.SetCookie("testuser", "example.com", "from_testuser")
+  store.SetCookie("user2", "other.com", "from_user2")
 
   // testuser should only see their own
   resp := env.get(t, "/api/user/cookies", "testuser")

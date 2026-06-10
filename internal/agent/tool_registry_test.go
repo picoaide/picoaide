@@ -331,8 +331,8 @@ func TestListDirTool_NotExist(t *testing.T) {
   if result.Success {
     t.Fatalf("expected failure, got success: %s", result.Data)
   }
-  if !strings.Contains(result.Data, "失败") {
-    t.Errorf("expected '失败' message, got: %s", result.Data)
+  if !strings.Contains(result.Data, "路径不在工作区内") {
+    t.Errorf("expected sandbox restriction message, got: %s", result.Data)
   }
 }
 

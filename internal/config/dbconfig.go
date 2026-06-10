@@ -5,8 +5,6 @@ import (
   "fmt"
   "strconv"
   "strings"
-
-  "github.com/picoaide/picoaide/internal/auth"
 )
 
 // ============================================================
@@ -15,11 +13,11 @@ import (
 
 // SettingsCount 返回 settings 表中的配置项数量
 func SettingsCount() (int, error) {
-  engine, err := auth.GetEngine()
+  engine, err := getEngine()
   if err != nil {
     return 0, fmt.Errorf("获取数据库引擎失败: %w", err)
   }
-  count, err := engine.Count(&auth.Setting{})
+  count, err := engine.Count(&Setting{})
   if err != nil {
     return 0, fmt.Errorf("查询配置数量失败: %w", err)
   }
@@ -28,12 +26,12 @@ func SettingsCount() (int, error) {
 
 // LoadFromDB 从数据库加载全局配置
 func LoadFromDB() (*GlobalConfig, error) {
-  engine, err := auth.GetEngine()
+  engine, err := getEngine()
   if err != nil {
     return nil, fmt.Errorf("获取数据库引擎失败: %w", err)
   }
 
-  var settings []auth.Setting
+  var settings []Setting
   if err := engine.Find(&settings); err != nil {
     return nil, fmt.Errorf("查询配置失败: %w", err)
   }
@@ -177,7 +175,7 @@ func configToKV(cfg *GlobalConfig) (map[string]string, error) {
 
 // SaveToDB 将全局配置保存到数据库
 func SaveToDB(cfg *GlobalConfig, changedBy string) error {
-  engine, err := auth.GetEngine()
+  engine, err := getEngine()
   if err != nil {
     return fmt.Errorf("获取数据库引擎失败: %w", err)
   }
@@ -197,7 +195,7 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
 
   for key, newValue := range kv {
     // 查询当前值
-    var existing auth.Setting
+    var existing Setting
     has, err := session.Where("key = ?", key).Get(&existing)
     if err != nil {
       return fmt.Errorf("查询配置失败: %w", err)
@@ -210,7 +208,7 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
 
     // 记录变更历史
     if has {
-      history := &auth.SettingsHistory{
+      history := &SettingsHistory{
         Key:       key,
         OldValue:  existing.Value,
         NewValue:  newValue,
@@ -239,12 +237,12 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
 
 // LoadRawFromDB 从数据库加载配置并返回嵌套 JSON 结构（与 LoadRaw 返回格式一致）
 func LoadRawFromDB() (map[string]interface{}, error) {
-  engine, err := auth.GetEngine()
+  engine, err := getEngine()
   if err != nil {
     return nil, fmt.Errorf("获取数据库引擎失败: %w", err)
   }
 
-  var settings []auth.Setting
+  var settings []Setting
   if err := engine.Find(&settings); err != nil {
     return nil, fmt.Errorf("查询配置失败: %w", err)
   }
@@ -265,7 +263,7 @@ func SaveRawToDB(data map[string]interface{}, changedBy string) error {
   removeFixedConfigFields(data)
   flat := flattenConfig(data)
 
-  engine, err := auth.GetEngine()
+  engine, err := getEngine()
   if err != nil {
     return fmt.Errorf("获取数据库引擎失败: %w", err)
   }
@@ -282,7 +280,7 @@ func SaveRawToDB(data map[string]interface{}, changedBy string) error {
       continue
     }
     // 查询当前值
-    var existing auth.Setting
+    var existing Setting
     has, err := session.Where("key = ?", key).Get(&existing)
     if err != nil {
       return fmt.Errorf("查询配置失败: %w", err)
@@ -295,7 +293,7 @@ func SaveRawToDB(data map[string]interface{}, changedBy string) error {
 
     // 记录变更历史
     if has {
-      history := &auth.SettingsHistory{
+      history := &SettingsHistory{
         Key:       key,
         OldValue:  existing.Value,
         NewValue:  newValue,

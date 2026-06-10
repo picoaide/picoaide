@@ -1,10 +1,6 @@
-package auth
+package store
 
 import "time"
-
-// ============================================================
-// ORM 模型定义
-// ============================================================
 
 // LocalUser 本地用户表
 type LocalUser struct {
@@ -17,9 +13,7 @@ type LocalUser struct {
   CreatedAt    string `xorm:"notnull 'created_at'"`
 }
 
-func (LocalUser) TableName() string {
-  return "local_users"
-}
+func (LocalUser) TableName() string { return "local_users" }
 
 // Setting 系统设置表
 type Setting struct {
@@ -28,9 +22,7 @@ type Setting struct {
   UpdatedAt string `xorm:"notnull 'updated_at'"`
 }
 
-func (Setting) TableName() string {
-  return "settings"
-}
+func (Setting) TableName() string { return "settings" }
 
 // SettingsHistory 设置变更历史表
 type SettingsHistory struct {
@@ -42,9 +34,7 @@ type SettingsHistory struct {
   ChangedAt string `xorm:"notnull 'changed_at'"`
 }
 
-func (SettingsHistory) TableName() string {
-  return "settings_history"
-}
+func (SettingsHistory) TableName() string { return "settings_history" }
 
 // WhitelistEntry 白名单表
 type WhitelistEntry struct {
@@ -54,9 +44,7 @@ type WhitelistEntry struct {
   AddedAt  string `xorm:"notnull 'added_at'"`
 }
 
-func (WhitelistEntry) TableName() string {
-  return "whitelist"
-}
+func (WhitelistEntry) TableName() string { return "whitelist" }
 
 // Group 用户组表
 type Group struct {
@@ -68,9 +56,7 @@ type Group struct {
   CreatedAt   string `xorm:"notnull 'created_at'"`
 }
 
-func (Group) TableName() string {
-  return "groups"
-}
+func (Group) TableName() string { return "groups" }
 
 // UserGroup 用户-组关联表
 type UserGroup struct {
@@ -79,11 +65,9 @@ type UserGroup struct {
   GroupID  int64  `xorm:"notnull 'group_id'"`
 }
 
-func (UserGroup) TableName() string {
-  return "user_groups"
-}
+func (UserGroup) TableName() string { return "user_groups" }
 
-// UserChannel 记录用户可见渠道和启用状态，凭据以 JSON 存储在 credentials 列。
+// UserChannel 记录用户可见渠道和启用状态
 type UserChannel struct {
   ID            int64  `xorm:"pk autoincr 'id'"`
   Username      string `xorm:"notnull 'username'"`
@@ -92,13 +76,11 @@ type UserChannel struct {
   Enabled       bool   `xorm:"notnull 'enabled'"`
   Configured    bool   `xorm:"notnull 'configured'"`
   ConfigVersion int    `xorm:"notnull 'config_version'"`
-  Credentials   string `xorm:"'credentials'"`       // JSON 格式的渠道凭据
+  Credentials   string `xorm:"'credentials'"`
   UpdatedAt     string `xorm:"notnull 'updated_at'"`
 }
 
-func (UserChannel) TableName() string {
-  return "user_channels"
-}
+func (UserChannel) TableName() string { return "user_channels" }
 
 // SharedFolder 共享文件夹
 type SharedFolder struct {
@@ -111,9 +93,7 @@ type SharedFolder struct {
   UpdatedAt   string `xorm:"notnull 'updated_at'" json:"updated_at"`
 }
 
-func (SharedFolder) TableName() string {
-  return "shared_folders"
-}
+func (SharedFolder) TableName() string { return "shared_folders" }
 
 // SharedFolderGroup 共享文件夹—用户组关联
 type SharedFolderGroup struct {
@@ -122,11 +102,9 @@ type SharedFolderGroup struct {
   GroupID  int64 `xorm:"notnull unique(folder_group) 'group_id'" json:"group_id"`
 }
 
-func (SharedFolderGroup) TableName() string {
-  return "shared_folder_groups"
-}
+func (SharedFolderGroup) TableName() string { return "shared_folder_groups" }
 
-// SharedFolderMount 共享文件夹挂载状态（缓存）
+// SharedFolderMount 共享文件夹挂载状态
 type SharedFolderMount struct {
   ID        int64  `xorm:"pk autoincr 'id'" json:"id"`
   FolderID  int64  `xorm:"notnull unique(folder_user) 'folder_id'" json:"folder_id"`
@@ -135,11 +113,9 @@ type SharedFolderMount struct {
   CheckedAt string `xorm:"notnull 'checked_at'" json:"checked_at"`
 }
 
-func (SharedFolderMount) TableName() string {
-  return "shared_folder_mounts"
-}
+func (SharedFolderMount) TableName() string { return "shared_folder_mounts" }
 
-// ShareMount 共享文件夹挂载规范（auth 包内部结构，供 web 层转换为挂载信息）
+// ShareMount 共享文件夹挂载规范
 type ShareMount struct {
   Source string
   Target string
@@ -153,9 +129,7 @@ type SkillRecord struct {
   UpdatedAt   string `xorm:"notnull 'updated_at'"`
 }
 
-func (SkillRecord) TableName() string {
-  return "skills"
-}
+func (SkillRecord) TableName() string { return "skills" }
 
 // UserSkill 用户-技能直接绑定表
 type UserSkill struct {
@@ -166,9 +140,7 @@ type UserSkill struct {
   UpdatedAt string `xorm:"updated 'updated_at'"`
 }
 
-func (UserSkill) TableName() string {
-  return "user_skills"
-}
+func (UserSkill) TableName() string { return "user_skills" }
 
 // UserCookie 用户 Cookie 表
 type UserCookie struct {
@@ -179,19 +151,16 @@ type UserCookie struct {
   UpdatedAt string `xorm:"notnull 'updated_at'"`
 }
 
-func (UserCookie) TableName() string {
-  return "user_cookies"
-}
+func (UserCookie) TableName() string { return "user_cookies" }
 
 // CookieEntry 前端展示用的 Cookie 元数据
 type CookieEntry struct {
   Domain    string `json:"domain"`
-  Cookies   string `json:"-"` // 不暴露给前端
+  Cookies   string `json:"-"`
   UpdatedAt string `json:"updated_at"`
 }
 
 // MemoryEvolutionLog 记忆进化审计日志表
-// picoagent 在每次会话结束后记录记忆变更，通过 API 写入此表
 type MemoryEvolutionLog struct {
   ID             int64     `xorm:"pk autoincr 'id'"`
   Username       string    `xorm:"notnull 'username'"`
@@ -201,11 +170,9 @@ type MemoryEvolutionLog struct {
   CreatedAt      time.Time `xorm:"created 'created_at'"`
 }
 
-func (MemoryEvolutionLog) TableName() string {
-  return "memory_evolution_log"
-}
+func (MemoryEvolutionLog) TableName() string { return "memory_evolution_log" }
 
-// GroupInfo 组信息（包含成员数），非数据库模型，仅用于查询结果
+// GroupInfo 组信息（包含成员数）
 type GroupInfo struct {
   ID          int64  `json:"id"`
   Name        string `json:"name"`

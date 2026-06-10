@@ -8,7 +8,7 @@ import (
 
   "github.com/gin-gonic/gin"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 //go:embed ui/*
@@ -45,7 +45,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
     if !ok {
       return false
     }
-    if auth.IsSuperadmin(username) {
+    if store.IsSuperadmin(username) {
       c.Redirect(http.StatusFound, "/admin/dashboard")
       return false
     }
@@ -56,7 +56,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
     if !ok {
       return false
     }
-    if !auth.IsSuperadmin(username) {
+    if !store.IsSuperadmin(username) {
       c.Redirect(http.StatusFound, "/user")
       return false
     }

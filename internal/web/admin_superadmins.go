@@ -6,6 +6,7 @@ import (
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/logger"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/user"
 )
 
@@ -19,7 +20,7 @@ func (s *Server) handleAdminSuperadmins(c *gin.Context) {
     return
   }
   if c.Request.Method == "GET" {
-    list, err := auth.GetSuperadmins()
+    list, err := store.GetSuperadmins()
     if err != nil {
       writeError(c, http.StatusInternalServerError, err.Error())
       return
@@ -55,13 +56,13 @@ func (s *Server) handleAdminSuperadminCreate(c *gin.Context) {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  if auth.UserExists(username) {
+  if store.UserExists(username) {
     writeError(c, http.StatusBadRequest, "用户 "+username+" 已存在")
     return
   }
 
-  password := auth.GenerateRandomPassword(12)
-  if err := auth.CreateUser(username, password, "superadmin"); err != nil {
+  password := store.GenerateRandomPassword(12)
+  if err := store.CreateUser(username, password, "superadmin"); err != nil {
     writeError(c, http.StatusInternalServerError, "创建超管失败: "+err.Error())
     return
   }
@@ -103,18 +104,18 @@ func (s *Server) handleAdminSuperadminDelete(c *gin.Context) {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  if !auth.IsSuperadmin(username) {
+  if !store.IsSuperadmin(username) {
     writeError(c, http.StatusBadRequest, username+" 不是超管")
     return
   }
 
-  admins, _ := auth.GetSuperadmins()
+  admins, _ := store.GetSuperadmins()
   if len(admins) <= 1 {
     writeError(c, http.StatusBadRequest, "至少保留一个超管账户")
     return
   }
 
-  if err := auth.DeleteUser(username); err != nil {
+  if err := store.DeleteUser(username); err != nil {
     writeError(c, http.StatusInternalServerError, "删除失败: "+err.Error())
     return
   }
@@ -146,13 +147,13 @@ func (s *Server) handleAdminSuperadminReset(c *gin.Context) {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  if !auth.IsSuperadmin(username) {
+  if !store.IsSuperadmin(username) {
     writeError(c, http.StatusBadRequest, username+" 不是超管")
     return
   }
 
-  password := auth.GenerateRandomPassword(12)
-  if err := auth.ChangePassword(username, password); err != nil {
+  password := store.GenerateRandomPassword(12)
+  if err := store.ChangePassword(username, password); err != nil {
     writeError(c, http.StatusInternalServerError, "重置密码失败: "+err.Error())
     return
   }
@@ -197,7 +198,7 @@ func (s *Server) handleAdminChangePassword(c *gin.Context) {
     return
   }
 
-  if err := auth.ChangePassword(username, newPassword); err != nil {
+  if err := store.ChangePassword(username, newPassword); err != nil {
     writeError(c, http.StatusInternalServerError, "修改密码失败: "+err.Error())
     return
   }

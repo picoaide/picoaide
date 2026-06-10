@@ -10,7 +10,16 @@ import (
   "strings"
   "text/template"
   "time"
+
+  "xorm.io/xorm"
 )
+
+var getEngine func() (*xorm.Engine, error)
+
+// SetEngineProvider 设置引擎获取函数，由 main.go 在初始化后注入
+func SetEngineProvider(provider func() (*xorm.Engine, error)) {
+  getEngine = provider
+}
 
 func (cfg *GlobalConfig) GetSecurityConfig() interface{} {
   return cfg.Security

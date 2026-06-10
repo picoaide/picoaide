@@ -11,7 +11,7 @@ import (
 
   "github.com/gin-gonic/gin"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
 )
@@ -29,14 +29,14 @@ func (s *Server) handleAdminSharedFolders(c *gin.Context) {
     writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
-  all, err := auth.ListSharedFolders()
+  all, err := store.ListSharedFolders()
   if err != nil {
     writeError(c, http.StatusInternalServerError, err.Error())
     return
   }
-  result := make([]*auth.SharedFolderInfo, 0, len(all))
+  result := make([]*store.SharedFolderInfo, 0, len(all))
   for i := range all {
-    info, err := auth.BuildSharedFolderInfo(&all[i])
+    info, err := store.BuildSharedFolderInfo(&all[i])
     if err != nil {
       writeError(c, http.StatusInternalServerError, err.Error())
       return
@@ -85,7 +85,7 @@ func (s *Server) handleAdminSharedFoldersCreate(c *gin.Context) {
   }
 
   // 创建数据库记录
-  if err := auth.CreateSharedFolder(name, description, isPublic, username); err != nil {
+  if err := store.CreateSharedFolder(name, description, isPublic, username); err != nil {
     // 目录已创建，需要回滚
     os.RemoveAll(shareDir)
     writeError(c, http.StatusBadRequest, err.Error())
@@ -94,7 +94,7 @@ func (s *Server) handleAdminSharedFoldersCreate(c *gin.Context) {
 
   // 关联组
   if groupIDsStr != "" {
-    sf, err := auth.GetSharedFolderByName(name)
+    sf, err := store.GetSharedFolderByName(name)
     if err == nil {
       parts := strings.Split(groupIDsStr, ",")
       gids := make([]int64, 0, len(parts))
@@ -105,7 +105,7 @@ func (s *Server) handleAdminSharedFoldersCreate(c *gin.Context) {
         }
       }
       if len(gids) > 0 {
-        auth.SetSharedFolderGroups(sf.ID, gids)
+        store.SetSharedFolderGroups(sf.ID, gids)
       }
     }
   }
@@ -146,7 +146,7 @@ func (s *Server) handleAdminSharedFoldersUpdate(c *gin.Context) {
   }
 
   // 获取旧记录（用于检测是否需要 mv 目录）
-  oldSF, err := auth.GetSharedFolder(id)
+  oldSF, err := store.GetSharedFolder(id)
   if err != nil {
     writeError(c, http.StatusBadRequest, "共享文件夹不存在")
     return
@@ -167,7 +167,7 @@ func (s *Server) handleAdminSharedFoldersUpdate(c *gin.Context) {
   }
 
   // 更新数据库
-  if err := auth.UpdateSharedFolder(id, newName, description, newIsPublic); err != nil {
+  if err := store.UpdateSharedFolder(id, newName, description, newIsPublic); err != nil {
     // 回滚目录改名
     if needsRename {
       oldDir := filepath.Join(filepath.Dir(s.loadConfig().UsersRoot), "shared", oldSF.Name)
@@ -201,7 +201,7 @@ func (s *Server) handleAdminSharedFoldersDelete(c *gin.Context) {
     return
   }
 
-  sf, err := auth.GetSharedFolder(id)
+  sf, err := store.GetSharedFolder(id)
   if err != nil {
     writeError(c, http.StatusBadRequest, "共享文件夹不存在")
     return
@@ -218,7 +218,7 @@ func (s *Server) handleAdminSharedFoldersDelete(c *gin.Context) {
   }
 
   // 删除数据库记录
-  if err := auth.DeleteSharedFolder(id); err != nil {
+  if err := store.DeleteSharedFolder(id); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
@@ -249,7 +249,7 @@ func (s *Server) handleAdminSharedFoldersSetGroups(c *gin.Context) {
   }
 
   // 获取旧成员
-  oldMembers, _ := auth.GetSharedFolderMembers(folderID)
+  oldMembers, _ := store.GetSharedFolderMembers(folderID)
 
   // 解析新的组 ID 列表
   var gids []int64
@@ -265,13 +265,13 @@ func (s *Server) handleAdminSharedFoldersSetGroups(c *gin.Context) {
     }
   }
 
-  if err := auth.SetSharedFolderGroups(folderID, gids); err != nil {
+  if err := store.SetSharedFolderGroups(folderID, gids); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
 
   // 计算成员变化
-  newMembers, _ := auth.GetSharedFolderMembers(folderID)
+  newMembers, _ := store.GetSharedFolderMembers(folderID)
   oldSet := make(map[string]bool)
   for _, m := range oldMembers {
     oldSet[m] = true
@@ -309,7 +309,7 @@ func (s *Server) handleAdminSharedFoldersTest(c *gin.Context) {
     return
   }
 
-  sf, err := auth.GetSharedFolder(folderID)
+  sf, err := store.GetSharedFolder(folderID)
   if err != nil {
     writeError(c, http.StatusBadRequest, "共享文件夹不存在")
     return
@@ -327,7 +327,7 @@ func (s *Server) handleAdminSharedFoldersTest(c *gin.Context) {
   hostDir := filepath.Join(filepath.Dir(s.loadConfig().UsersRoot), "shared", sf.Name)
   if _, err := os.Stat(hostDir); os.IsNotExist(err) {
     msg = "主机共享目录不存在"
-    auth.RecordMountTest(folderID, testUsername, false)
+    store.RecordMountTest(folderID, testUsername, false)
     writeJSON(c, http.StatusOK, map[string]interface{}{
       "success": true, "mounted": false, "message": msg,
     })
@@ -347,7 +347,7 @@ func (s *Server) handleAdminSharedFoldersTest(c *gin.Context) {
   }
 
   now := time.Now().Format("2006-01-02 15:04:05")
-  auth.RecordMountTest(folderID, testUsername, mounted)
+  store.RecordMountTest(folderID, testUsername, mounted)
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success":    true,
     "mounted":    mounted,
@@ -376,12 +376,12 @@ func (s *Server) handleAdminSharedFoldersMount(c *gin.Context) {
     return
   }
 
-  if _, err := auth.GetSharedFolder(folderID); err != nil {
+  if _, err := store.GetSharedFolder(folderID); err != nil {
     writeError(c, http.StatusBadRequest, "共享文件夹不存在")
     return
   }
 
-  members, err := auth.GetSharedFolderMembers(folderID)
+  members, err := store.GetSharedFolderMembers(folderID)
   if err != nil {
     writeError(c, http.StatusInternalServerError, err.Error())
     return

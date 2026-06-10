@@ -13,7 +13,7 @@ import (
   "strings"
   "sync"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 // ============================================================
@@ -50,7 +50,7 @@ var globalMCPManager = &MCPProxyManager{proxies: make(map[string]*MCPProxy)}
 
 // LoadMCPServers 从数据库加载所有启用的 MCP 服务器并启动代理
 func LoadMCPServers(ctx context.Context) error {
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     return fmt.Errorf("获取数据库连接失败: %w", err)
   }
@@ -684,11 +684,10 @@ func (p *MCPProxy) callHTTP(ctx context.Context, toolName string, args map[strin
   defer httpResp.Body.Close()
 
   // 更新 session ID（某些服务器可能每次请求都更新）
+  // callHTTP 仅从 call() 调用，call() 已持有 p.mu，无需重复加锁
   newSessionID := httpResp.Header.Get("Mcp-Session-Id")
   if newSessionID != "" && newSessionID != p.sessionID {
-    p.mu.Lock()
     p.sessionID = newSessionID
-    p.mu.Unlock()
   }
 
   body, err := io.ReadAll(httpResp.Body)
@@ -775,7 +774,7 @@ func mapToEnvSlice(env map[string]string) []string {
 
 // hasMCPGrant 检查用户是否有权访问指定的 MCP 服务器
 func hasMCPGrant(serverName, username string) bool {
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     return false
   }

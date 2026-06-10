@@ -60,19 +60,19 @@ func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*Tool
 
   req, err := http.NewRequestWithContext(ctx, "GET", params.URL, nil)
   if err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("获取失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("获取失败: %v", err)}, nil
   }
   req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36")
 
   resp, err := t.httpClient().Do(req)
   if err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("获取失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("获取失败: %v", err)}, nil
   }
   defer resp.Body.Close()
 
   body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
   if err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("获取失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("获取失败: %v", err)}, nil
   }
 
   content := strings.TrimSpace(string(body))

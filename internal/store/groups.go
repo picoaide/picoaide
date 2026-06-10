@@ -1,4 +1,4 @@
-package auth
+package store
 
 import (
   "database/sql"
@@ -232,11 +232,17 @@ func SyncUserGroups(username string, groupNames []string, source string) error {
 
   // 确保所有组存在
   for _, name := range groupNames {
-    session.Exec("INSERT OR IGNORE INTO groups (name, source) VALUES (?, ?)", name, source)
+    if _, err := session.Exec("INSERT OR IGNORE INTO groups (name, source) VALUES (?, ?)", name, source); err != nil {
+      _ = session.Rollback()
+      return err
+    }
   }
 
   // 删除用户当前所有组关系
-  session.Where("username = ?", username).Delete(&UserGroup{})
+  if _, err := session.Where("username = ?", username).Delete(&UserGroup{}); err != nil {
+    _ = session.Rollback()
+    return err
+  }
 
   // 添加新的组关系
   for _, name := range groupNames {
@@ -245,7 +251,10 @@ func SyncUserGroups(username string, groupNames []string, source string) error {
     if err != nil || !has {
       continue
     }
-    session.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", username, group.ID)
+    if _, err := session.Exec("INSERT OR IGNORE INTO user_groups (username, group_id) VALUES (?, ?)", username, group.ID); err != nil {
+      _ = session.Rollback()
+      return err
+    }
   }
 
   if err := session.Commit(); err != nil {

@@ -7,7 +7,7 @@ import (
   "strings"
 
   "github.com/gin-gonic/gin"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
 )
@@ -28,7 +28,7 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
   pager := parsePagination(c, 20, 100)
 
   // 本地用户（local_users 表）
-  localUsers, _ := auth.GetAllLocalUsers()
+  localUsers, _ := store.GetAllLocalUsers()
 
   type UserInfo struct {
     Username string   `json:"username"`
@@ -73,7 +73,7 @@ func (s *Server) handleAdminUsers(c *gin.Context) {
   list, total, totalPages, page, pageSize := paginateSlice(candidates, pager)
 
   for i := range list {
-    if groups, err := auth.GetGroupsForUser(list[i].Username); err == nil && len(groups) > 0 {
+    if groups, err := store.GetGroupsForUser(list[i].Username); err == nil && len(groups) > 0 {
       list[i].Groups = groups
     }
   }
@@ -121,14 +121,14 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  if auth.UserExists(username) {
+  if store.UserExists(username) {
     writeError(c, http.StatusBadRequest, "用户 "+username+" 已存在")
     return
   }
 
-  password := auth.GenerateRandomPassword(12)
+  password := store.GenerateRandomPassword(12)
   logger.DebugProcess("create_user", "username", username)
-  if err := auth.CreateUser(username, password, "user"); err != nil {
+  if err := store.CreateUser(username, password, "user"); err != nil {
     writeError(c, http.StatusInternalServerError, "创建用户失败: "+err.Error())
     return
   }
@@ -136,7 +136,7 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
   logger.DebugProcess("init_user", "username", username)
   if err := s.initializeUser(username); err != nil {
     // 回滚：删除已创建的用户记录
-    auth.DeleteUser(username)
+    store.DeleteUser(username)
     writeError(c, http.StatusInternalServerError, "初始化用户失败: "+err.Error())
     return
   }
@@ -224,18 +224,18 @@ func (s *Server) createLocalUser(username string) adminUserBatchCreateResult {
     result.Error = err.Error()
     return result
   }
-  if auth.UserExists(username) {
+  if store.UserExists(username) {
     result.Error = "用户 " + username + " 已存在"
     return result
   }
 
-  password := auth.GenerateRandomPassword(12)
-  if err := auth.CreateUser(username, password, "user"); err != nil {
+  password := store.GenerateRandomPassword(12)
+  if err := store.CreateUser(username, password, "user"); err != nil {
     result.Error = "创建用户失败: " + err.Error()
     return result
   }
   if err := s.initializeUser(username); err != nil {
-    _ = auth.DeleteUser(username)
+    _ = store.DeleteUser(username)
     result.Error = "初始化用户失败: " + err.Error()
     return result
   }
@@ -271,7 +271,7 @@ func (s *Server) handleAdminUserDelete(c *gin.Context) {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  if auth.IsSuperadmin(username) {
+  if store.IsSuperadmin(username) {
     writeError(c, http.StatusBadRequest, "不能通过普通用户接口删除超管")
     return
   }
@@ -285,13 +285,13 @@ func (s *Server) handleAdminUserDelete(c *gin.Context) {
 
   // 删除本地用户记录
   logger.DebugProcess("delete_user_record", "username", username)
-  if err := auth.DeleteUser(username); err != nil {
+  if err := store.DeleteUser(username); err != nil {
     writeError(c, http.StatusInternalServerError, err.Error())
     return
   }
 
   // 清理共享文件夹挂载记录
-  auth.DeleteSharedFolderMountsByUser(username)
+  store.DeleteSharedFolderMountsByUser(username)
 
   logger.Audit("user.delete", "username", username, "operator", s.getSessionUser(c))
   logger.DebugSend("POST", "/api/admin/users/delete", http.StatusOK, "username", username)

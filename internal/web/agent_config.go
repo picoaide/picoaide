@@ -14,7 +14,7 @@ import (
 
   "github.com/gin-gonic/gin"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 // ============================================================
@@ -61,21 +61,21 @@ func (s *Server) handlePicoAgentConfig(c *gin.Context) {
   token := strings.TrimPrefix(authHeader, "Bearer ")
 
   // 2. 验证 token
-  username, ok := auth.ValidateMCPToken(token)
+  username, ok := store.ValidateMCPToken(token)
   if !ok {
     c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的 token"})
     return
   }
 
   // 3. 获取用户配置
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库连接失败"})
     return
   }
 
   // 从 settings 表读取模型配置
-  var settings []auth.Setting
+  var settings []store.Setting
   engine.Find(&settings)
   kv := make(map[string]string)
   for _, s := range settings {

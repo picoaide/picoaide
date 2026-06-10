@@ -6,7 +6,7 @@ import (
 
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/scheduler"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 // picoaideToolDefs PicoAgent 平台工具列表
@@ -99,7 +99,7 @@ func picoaideHandleMCPToolCall(s *Server, c *gin.Context, id json.Number, name s
 
 // handlePicoaideUserInfo 获取当前用户信息
 func handlePicoaideUserInfo(s *Server, c *gin.Context, id json.Number, args map[string]interface{}, username string) {
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     writeMCPResult(c.Writer, id, map[string]interface{}{
       "content": []map[string]interface{}{
@@ -110,7 +110,7 @@ func handlePicoaideUserInfo(s *Server, c *gin.Context, id json.Number, args map[
     return
   }
 
-  var user auth.LocalUser
+  var user store.LocalUser
   has, err := engine.Where("username = ?", username).Get(&user)
   if err != nil || !has {
     writeMCPResult(c.Writer, id, map[string]interface{}{
@@ -132,7 +132,7 @@ func handlePicoaideUserInfo(s *Server, c *gin.Context, id json.Number, args map[
 
 // handlePicoaideSkillsList 获取用户技能列表
 func handlePicoaideSkillsList(s *Server, c *gin.Context, id json.Number, args map[string]interface{}, username string) {
-  skills, err := auth.GetUserSkills(username)
+  skills, err := store.GetUserSkills(username)
   if err != nil {
     writeMCPResult(c.Writer, id, map[string]interface{}{
       "content": []map[string]interface{}{
@@ -161,7 +161,7 @@ func handlePicoaideSkillsList(s *Server, c *gin.Context, id json.Number, args ma
 
 // handlePicoaideSharedFolders 获取可访问的共享文件夹
 func handlePicoaideSharedFolders(s *Server, c *gin.Context, id json.Number, args map[string]interface{}, username string) {
-  folders, err := auth.GetAccessibleSharedFolders(username)
+  folders, err := store.GetAccessibleSharedFolders(username)
   if err != nil {
     writeMCPResult(c.Writer, id, map[string]interface{}{
       "content": []map[string]interface{}{

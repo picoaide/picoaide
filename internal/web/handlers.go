@@ -16,6 +16,7 @@ import (
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/logger"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/user"
 )
 
@@ -65,7 +66,7 @@ func (s *Server) requireNonSuperadmin(c *gin.Context) string {
   if username == "" {
     return ""
   }
-  if auth.IsSuperadmin(username) {
+  if store.IsSuperadmin(username) {
     writeError(c, http.StatusForbidden, "超管用户不允许登录插件，使用普通用户登录")
     return ""
   }
@@ -77,7 +78,7 @@ func (s *Server) requireRegularUser(c *gin.Context) string {
   if username == "" {
     return ""
   }
-  if auth.IsSuperadmin(username) {
+  if store.IsSuperadmin(username) {
     writeError(c, http.StatusForbidden, "管理员没有普通用户配置权限，请进入管理后台")
     return ""
   }
@@ -135,7 +136,7 @@ func (s *Server) handleLogin(c *gin.Context) {
     return
   }
 
-  isSuperadmin := auth.IsSuperadmin(username)
+  isSuperadmin := store.IsSuperadmin(username)
   if s.isExtensionRequest(c) && isSuperadmin {
     logger.DebugSend("POST", "/api/login", http.StatusForbidden, "reason", "superadmin_extension_blocked")
     writeError(c, http.StatusForbidden, "超管用户不允许登录插件，使用普通用户登录")
@@ -203,7 +204,7 @@ func (s *Server) handleLogin(c *gin.Context) {
     return
   }
   logger.DebugProcess("ensure_external_user", "username", username, "auth_mode", authMode)
-  if err := auth.EnsureExternalUser(username, "user", authMode); err != nil {
+  if err := store.EnsureExternalUser(username, "user", authMode); err != nil {
     writeError(c, http.StatusInternalServerError, "同步用户失败: "+err.Error())
     return
   }
@@ -218,7 +219,7 @@ func (s *Server) handleLogin(c *gin.Context) {
   if authsource.HasDirectoryProvider(s.loadConfig()) {
     go func() {
       if groups, err := authsource.FetchUserGroups(s.loadConfig(), username); err == nil && len(groups) > 0 {
-        auth.SyncUserGroups(username, groups, authMode)
+        store.SyncUserGroups(username, groups, authMode)
       }
     }()
   }
@@ -292,12 +293,12 @@ func (s *Server) handleAuthCallback(c *gin.Context) {
     writeError(c, http.StatusForbidden, "请联系管理员添加白名单")
     return
   }
-  if err := auth.EnsureExternalUser(identity.Username, "user", authMode); err != nil {
+  if err := store.EnsureExternalUser(identity.Username, "user", authMode); err != nil {
     writeError(c, http.StatusInternalServerError, "同步用户失败: "+err.Error())
     return
   }
   if len(identity.Groups) > 0 {
-    _ = auth.SyncUserGroups(identity.Username, identity.Groups, authMode)
+    _ = store.SyncUserGroups(identity.Username, identity.Groups, authMode)
   }
 
   if err := s.initializeUser(identity.Username); err != nil {
@@ -375,7 +376,7 @@ func (s *Server) handleUserCookies(c *gin.Context) {
     return
   }
 
-  entries, err := auth.ListCookieDomains(username)
+  entries, err := store.ListCookieDomains(username)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "读取失败")
     return
@@ -410,7 +411,7 @@ func (s *Server) handleUserCookiesDelete(c *gin.Context) {
     return
   }
 
-  if err := auth.DeleteCookie(username, domain); err != nil {
+  if err := store.DeleteCookie(username, domain); err != nil {
     writeError(c, http.StatusInternalServerError, "删除失败: "+err.Error())
     return
   }
@@ -435,8 +436,8 @@ func (s *Server) handleUserInfo(c *gin.Context) {
   c.JSON(200, gin.H{
     "success":  true,
     "username": username,
-    "role":     auth.GetUserRole(username),
-    "source":   auth.GetUserSource(username),
+    "role":     store.GetUserRole(username),
+    "source":   store.GetUserSource(username),
   })
 }
 
@@ -573,7 +574,7 @@ func (s *Server) handleChangePassword(c *gin.Context) {
     return
   }
 
-  if err := auth.ChangePassword(username, newPassword); err != nil {
+  if err := store.ChangePassword(username, newPassword); err != nil {
     writeError(c, http.StatusInternalServerError, "修改密码失败: "+err.Error())
     return
   }
@@ -590,7 +591,7 @@ func (s *Server) handleConfigGet(c *gin.Context) {
   }
 
   // 检查超管权限
-  if !auth.IsSuperadmin(username) {
+  if !store.IsSuperadmin(username) {
     writeError(c, http.StatusForbidden, "仅超级管理员可访问")
     return
   }
@@ -617,7 +618,7 @@ func (s *Server) handleConfigSave(c *gin.Context) {
   logger.DebugRecv("POST", "/api/config", "operator", username)
 
   // 检查超管权限
-  if !auth.IsSuperadmin(username) {
+  if !store.IsSuperadmin(username) {
     writeError(c, http.StatusForbidden, "仅超级管理员可访问")
     return
   }

@@ -4,7 +4,7 @@ import (
   "fmt"
   "testing"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/config"
 )
 
@@ -77,8 +77,8 @@ func (mockDirErrorProvider) FetchGroups(cfg *config.GlobalConfig) (GroupHierarch
 
 func testSyncSetup(t *testing.T) {
   t.Helper()
-  auth.ResetDB()
-  if err := auth.InitDB(t.TempDir()); err != nil {
+  store.ResetDB()
+  if err := store.InitDB(t.TempDir()); err != nil {
     t.Fatalf("InitDB: %v", err)
   }
 }
@@ -99,7 +99,7 @@ func TestSyncUserDirectory_unregisteredProvider(t *testing.T) {
 
 func TestSyncUserDirectory_withMockProvider(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
   Register("test-sync", mockDirProvider{})
   cfg := testConfig("test-sync")
@@ -125,9 +125,9 @@ func TestSyncUserDirectory_withMockProvider(t *testing.T) {
 
 func TestSyncUserDirectory_cleansLocalUsers(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
-  if err := auth.CreateUser("localuser", "password", "user"); err != nil {
+  if err := store.CreateUser("localuser", "password", "user"); err != nil {
     t.Fatalf("CreateUser: %v", err)
   }
 
@@ -145,16 +145,16 @@ func TestSyncUserDirectory_cleansLocalUsers(t *testing.T) {
   if result.LocalUserSynced != 2 {
     t.Fatalf("LocalUserSynced = %d, want 2", result.LocalUserSynced)
   }
-  if auth.UserExists("localuser") {
+  if store.UserExists("localuser") {
     t.Error("localuser should have been deleted")
   }
 }
 
 func TestSyncUserDirectory_skipsSuperadmin(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
-  if err := auth.CreateUser("superadmin", "password", "superadmin"); err != nil {
+  if err := store.CreateUser("superadmin", "password", "superadmin"); err != nil {
     t.Fatalf("CreateUser: %v", err)
   }
 
@@ -169,14 +169,14 @@ func TestSyncUserDirectory_skipsSuperadmin(t *testing.T) {
   if result.DeletedLocalAuth != 0 {
     t.Fatalf("DeletedLocalAuth = %d, want 0", result.DeletedLocalAuth)
   }
-  if !auth.UserExists("superadmin") {
+  if !store.UserExists("superadmin") {
     t.Error("superadmin should not have been deleted")
   }
 }
 
 func TestSyncUserDirectory_emptyProviderUsers(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
   Register("test-sync-empty", mockDirEmptyProvider{})
   cfg := testConfig("test-sync-empty")
@@ -193,7 +193,7 @@ func TestSyncUserDirectory_emptyProviderUsers(t *testing.T) {
 
 func TestSyncUserDirectory_invalidUsername(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
   Register("test-sync-inv", mockDirInvalidUserProvider{})
   cfg := testConfig("test-sync-inv")
@@ -227,7 +227,7 @@ func TestSyncGroups_unregisteredProvider(t *testing.T) {
 
 func TestSyncGroups_withMockProvider(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
   Register("test-groups", mockDirProvider{})
   cfg := testConfig("test-groups")
@@ -256,7 +256,7 @@ func TestSyncGroups_withMockProvider(t *testing.T) {
 
 func TestSyncGroups_emptyGroups(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
   Register("test-groups-empty", mockDirEmptyProvider{})
   cfg := testConfig("test-groups-empty")
@@ -273,7 +273,7 @@ func TestSyncGroups_emptyGroups(t *testing.T) {
 
 func TestSyncGroups_ensureUserError(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
   Register("test-groups-err", mockDirProvider{})
   cfg := testConfig("test-groups-err")
@@ -298,10 +298,10 @@ func TestSyncGroups_ensureUserError(t *testing.T) {
 
 func TestSyncUserDirectory_ensureExternalUserError(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
   // Pre-create alice as superadmin - EnsureExternalUser will fail
-  if err := auth.CreateUser("alice", "password", "superadmin"); err != nil {
+  if err := store.CreateUser("alice", "password", "superadmin"); err != nil {
     t.Fatalf("CreateUser: %v", err)
   }
 
@@ -316,7 +316,7 @@ func TestSyncUserDirectory_ensureExternalUserError(t *testing.T) {
 
 func TestSyncUserDirectory_fetchUsersError(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
   Register("test-sync-err", mockDirErrorProvider{})
   cfg := testConfig("test-sync-err")
@@ -329,7 +329,7 @@ func TestSyncUserDirectory_fetchUsersError(t *testing.T) {
 
 func TestSyncGroups_fetchGroupsError(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
   Register("test-groups-err2", mockDirErrorProvider{})
   cfg := testConfig("test-groups-err2")
@@ -342,10 +342,10 @@ func TestSyncGroups_fetchGroupsError(t *testing.T) {
 
 func TestSyncGroups_ensureExternalUserError(t *testing.T) {
   testSyncSetup(t)
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
   // Pre-create alice as superadmin - EnsureExternalUser will fail for her
-  if err := auth.CreateUser("alice", "password", "superadmin"); err != nil {
+  if err := store.CreateUser("alice", "password", "superadmin"); err != nil {
     t.Fatalf("CreateUser: %v", err)
   }
 

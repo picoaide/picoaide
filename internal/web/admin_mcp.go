@@ -6,7 +6,7 @@ import (
   "strconv"
 
   "github.com/gin-gonic/gin"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 // ============================================================
@@ -65,7 +65,7 @@ func (s *Server) handleAdminMCPServersList(c *gin.Context) {
     return
   }
 
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     writeError(c, http.StatusInternalServerError, "数据库连接失败")
     return
@@ -127,7 +127,7 @@ func (s *Server) handleAdminMCPServerCreate(c *gin.Context) {
     return
   }
 
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     writeError(c, http.StatusInternalServerError, "数据库连接失败")
     return
@@ -167,7 +167,7 @@ func (s *Server) handleAdminMCPServerUpdate(c *gin.Context) {
     return
   }
 
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     writeError(c, http.StatusInternalServerError, "数据库连接失败")
     return
@@ -201,7 +201,7 @@ func (s *Server) handleAdminMCPServerDelete(c *gin.Context) {
     return
   }
 
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     writeError(c, http.StatusInternalServerError, "数据库连接失败")
     return
@@ -232,7 +232,7 @@ func (s *Server) handleAdminMCPServerGrantsList(c *gin.Context) {
     return
   }
 
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     writeError(c, http.StatusInternalServerError, "数据库连接失败")
     return
@@ -280,7 +280,7 @@ func (s *Server) handleAdminMCPServerGrantAdd(c *gin.Context) {
     return
   }
 
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     writeError(c, http.StatusInternalServerError, "数据库连接失败")
     return
@@ -311,7 +311,7 @@ func (s *Server) handleAdminMCPServerGrantRemove(c *gin.Context) {
     return
   }
 
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     writeError(c, http.StatusInternalServerError, "数据库连接失败")
     return

@@ -115,10 +115,7 @@ func (s *Server) rateLimitLogin() gin.HandlerFunc {
     if s.loginLimiter != nil {
       ip := clientIPFromRequest(c.Request)
       if !s.loginLimiter.allow(ip) {
-        c.JSON(http.StatusTooManyRequests, gin.H{
-          "success": false,
-          "error":   "请求过于频繁，请稍后再试",
-        })
+        writeError(c, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
         c.Abort()
         return
       }
