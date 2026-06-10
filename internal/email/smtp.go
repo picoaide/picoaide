@@ -2,6 +2,7 @@ package email
 
 import (
   "bytes"
+  "crypto/tls"
   "encoding/base64"
   "fmt"
   "mime"
@@ -243,7 +244,7 @@ func dialSMTPServer(cfg *Config) (*smtp.Client, error) {
 
   // Try STARTTLS
   if ok, _ := client.Extension("STARTTLS"); ok {
-    if err = client.StartTLS(nil); err != nil {
+    if err = client.StartTLS(&tls.Config{ServerName: cfg.SMTPHost}); err != nil {
       client.Close()
       return nil, &NetworkError{Err: fmt.Errorf("STARTTLS 升级失败: %w", err)}
     }
