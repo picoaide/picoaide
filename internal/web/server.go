@@ -700,6 +700,7 @@ func Serve() error {
   if err != nil {
     return err
   }
+  store.SetSessionSecret(secret)
   csrfKey := secret + "-csrf"
 
   s := &Server{
