@@ -52,6 +52,21 @@ func writeHeader(buf *bytes.Buffer, key, value string) {
   fmt.Fprintf(buf, "%s: %s\r\n", key, value)
 }
 
+// encodeBase64Body 将文本按 base64 编码，每 76 字符换行
+func encodeBase64Body(text string) []byte {
+  encoded := base64.StdEncoding.EncodeToString([]byte(text))
+  var buf bytes.Buffer
+  for i := 0; i < len(encoded); i += 76 {
+    end := i + 76
+    if end > len(encoded) {
+      end = len(encoded)
+    }
+    buf.WriteString(encoded[i:end])
+    buf.WriteString("\r\n")
+  }
+  return buf.Bytes()
+}
+
 // BuildMIMEMessage 构建 RFC 2822 MIME 邮件消息
 func BuildMIMEMessage(msg *OutgoingMessage, cfg *Config) ([]byte, error) {
   var buf bytes.Buffer
@@ -98,17 +113,19 @@ func buildAlternative(buf *bytes.Buffer, msg *OutgoingMessage, cfg *Config, mess
   ct := fmt.Sprintf("multipart/alternative; boundary=\"%s\"", boundary)
   buildHeaders(buf, msg, cfg, messageID, ct)
 
-  // text/plain part
+  // text/plain part (base64 编码，兼容中文)
   textPart, _ := writer.CreatePart(textproto.MIMEHeader{
-    "Content-Type": {"text/plain; charset=\"utf-8\""},
+    "Content-Type":              {"text/plain; charset=\"utf-8\""},
+    "Content-Transfer-Encoding": {"base64"},
   })
-  textPart.Write([]byte(plainBody))
+  textPart.Write([]byte(encodeBase64Body(plainBody)))
 
-  // text/html part
+  // text/html part (base64 编码)
   htmlPart, _ := writer.CreatePart(textproto.MIMEHeader{
-    "Content-Type": {"text/html; charset=\"utf-8\""},
+    "Content-Type":              {"text/html; charset=\"utf-8\""},
+    "Content-Transfer-Encoding": {"base64"},
   })
-  htmlPart.Write([]byte(msg.BodyHTML))
+  htmlPart.Write([]byte(encodeBase64Body(msg.BodyHTML)))
 
   writer.Close()
 }
@@ -128,17 +145,19 @@ func buildMixed(buf *bytes.Buffer, msg *OutgoingMessage, cfg *Config, messageID,
     "Content-Type": {fmt.Sprintf("multipart/alternative; boundary=\"%s\"", altBoundary)},
   })
 
-  // text/plain sub-part
+  // text/plain sub-part (base64 编码)
   textSub, _ := altWriter.CreatePart(textproto.MIMEHeader{
-    "Content-Type": {"text/plain; charset=\"utf-8\""},
+    "Content-Type":              {"text/plain; charset=\"utf-8\""},
+    "Content-Transfer-Encoding": {"base64"},
   })
-  textSub.Write([]byte(plainBody))
+  textSub.Write([]byte(encodeBase64Body(plainBody)))
 
-  // text/html sub-part
+  // text/html sub-part (base64 编码)
   htmlSub, _ := altWriter.CreatePart(textproto.MIMEHeader{
-    "Content-Type": {"text/html; charset=\"utf-8\""},
+    "Content-Type":              {"text/html; charset=\"utf-8\""},
+    "Content-Transfer-Encoding": {"base64"},
   })
-  htmlSub.Write([]byte(msg.BodyHTML))
+  htmlSub.Write([]byte(encodeBase64Body(msg.BodyHTML)))
 
   altWriter.Close()
   altPart.Write(altBuf.Bytes())

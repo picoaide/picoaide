@@ -9,6 +9,9 @@ import (
 
   "github.com/emersion/go-imap"
   "github.com/emersion/go-imap/client"
+  "golang.org/x/text/encoding/charmap"
+  "golang.org/x/text/encoding/simplifiedchinese"
+  "golang.org/x/text/transform"
 )
 
 // ============================================================
@@ -89,7 +92,19 @@ func decodeSubject(s string) string {
   if s == "" {
     return s
   }
-  dec := &mime.WordDecoder{}
+  dec := &mime.WordDecoder{
+    CharsetReader: func(charset string, input io.Reader) (io.Reader, error) {
+      charset = strings.ToLower(charset)
+      switch charset {
+      case "gbk", "gb2312", "gb18030":
+        return transform.NewReader(input, simplifiedchinese.GBK.NewDecoder()), nil
+      case "big5":
+        return transform.NewReader(input, charmap.Windows1255.NewDecoder()), nil
+      default:
+        return nil, fmt.Errorf("不支持的字符集: %s", charset)
+      }
+    },
+  }
   decoded, err := dec.DecodeHeader(s)
   if err != nil {
     return s
@@ -227,8 +242,10 @@ func FetchMessage(cfg *Config, uid uint32, markSeen bool) (*Message, error) {
   seqSet := new(imap.SeqSet)
   seqSet.AddNum(uid)
 
-  section := &imap.BodySectionName{}
-  items := []imap.FetchItem{imap.FetchEnvelope, imap.FetchFlags, imap.FetchBodyStructure, section.FetchItem()}
+  // 获取邮件正文（BODY[TEXT] 不含 MIME 头）
+  textSection := &imap.BodySectionName{}
+  textSection.Specifier = imap.TextSpecifier
+  items := []imap.FetchItem{imap.FetchEnvelope, imap.FetchFlags, imap.FetchBodyStructure, textSection.FetchItem()}
 
   messages := make(chan *imap.Message, 1)
   done := make(chan error, 1)
@@ -266,17 +283,18 @@ func FetchMessage(cfg *Config, uid uint32, markSeen bool) (*Message, error) {
     }
   }
 
-  for _, v := range msg.Body {
-    bodyBytes, _ := io.ReadAll(v)
+  // 解析正文（BODY[TEXT] 为纯文本内容，其他内容做 HTML 探测）
+  for section, literal := range msg.Body {
+    bodyBytes, _ := io.ReadAll(literal)
     bodyStr := string(bodyBytes)
-    ct := ""
-    if msg.BodyStructure != nil {
-      ct = msg.BodyStructure.MIMEType + "/" + msg.BodyStructure.MIMESubType
-    }
-    if strings.Contains(ct, "html") || strings.HasPrefix(strings.TrimSpace(bodyStr), "<") {
-      result.BodyHTML = bodyStr
-    } else {
+    if section != nil && section.Specifier == imap.TextSpecifier {
       result.BodyText = bodyStr
+    } else {
+      if strings.Contains(strings.ToLower(bodyStr), "<html") || strings.Contains(strings.ToLower(bodyStr), "<!doctype") {
+        result.BodyHTML = bodyStr
+      } else if result.BodyText == "" {
+        result.BodyText = bodyStr
+      }
     }
   }
 
