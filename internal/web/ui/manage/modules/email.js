@@ -25,7 +25,7 @@ export async function init(ctx) {
     $('#card-email').textContent = esc(email.email);
     $('#card-smtp').textContent = email.smtpHost + ':' + email.smtpPort + (email.smtpTls ? ' (SSL)' : ' (STARTTLS)');
     $('#card-imap').textContent = email.imapHost + ':' + email.imapPort + (email.imapTls ? ' (SSL)' : ' (STARTTLS)');
-    $('#card-status').textContent = email.enabled ? '已启用' : '未启用';
+    $('#card-status').textContent = '已启用';
     $('#card-test').textContent = email.testResult || '—';
   }
 
