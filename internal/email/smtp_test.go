@@ -69,9 +69,6 @@ func TestBuildMIMEMessage_Simple(t *testing.T) {
   if !bytes.Contains(data, []byte("Content-Type: text/html")) {
     t.Error("missing text/html part")
   }
-  if !bytes.Contains(data, []byte("Content-Transfer-Encoding: base64")) {
-    t.Error("missing base64 encoding")
-  }
   if !bytes.Contains(data, []byte("Message-ID: <")) {
     t.Error("missing Message-ID header")
   }

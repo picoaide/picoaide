@@ -115,19 +115,17 @@ func buildAlternative(buf *bytes.Buffer, msg *OutgoingMessage, cfg *Config, mess
   ct := fmt.Sprintf("multipart/alternative; boundary=\"%s\"", boundary)
   buildHeaders(buf, msg, cfg, messageID, ct)
 
-  // text/plain part (base64 编码，兼容中文)
+  // text/plain part
   textPart, _ := writer.CreatePart(textproto.MIMEHeader{
-    "Content-Type":              {"text/plain; charset=\"utf-8\""},
-    "Content-Transfer-Encoding": {"base64"},
+    "Content-Type": {"text/plain; charset=\"utf-8\""},
   })
-  textPart.Write([]byte(encodeBase64Body(plainBody)))
+  textPart.Write([]byte(plainBody))
 
-  // text/html part (base64 编码)
+  // text/html part
   htmlPart, _ := writer.CreatePart(textproto.MIMEHeader{
-    "Content-Type":              {"text/html; charset=\"utf-8\""},
-    "Content-Transfer-Encoding": {"base64"},
+    "Content-Type": {"text/html; charset=\"utf-8\""},
   })
-  htmlPart.Write([]byte(encodeBase64Body(msg.BodyHTML)))
+  htmlPart.Write([]byte(msg.BodyHTML))
 
   writer.Close()
 }
@@ -147,19 +145,17 @@ func buildMixed(buf *bytes.Buffer, msg *OutgoingMessage, cfg *Config, messageID,
     "Content-Type": {fmt.Sprintf("multipart/alternative; boundary=\"%s\"", altBoundary)},
   })
 
-  // text/plain sub-part (base64 编码)
+  // text/plain sub-part
   textSub, _ := altWriter.CreatePart(textproto.MIMEHeader{
-    "Content-Type":              {"text/plain; charset=\"utf-8\""},
-    "Content-Transfer-Encoding": {"base64"},
+    "Content-Type": {"text/plain; charset=\"utf-8\""},
   })
-  textSub.Write([]byte(encodeBase64Body(plainBody)))
+  textSub.Write([]byte(plainBody))
 
-  // text/html sub-part (base64 编码)
+  // text/html sub-part
   htmlSub, _ := altWriter.CreatePart(textproto.MIMEHeader{
-    "Content-Type":              {"text/html; charset=\"utf-8\""},
-    "Content-Transfer-Encoding": {"base64"},
+    "Content-Type": {"text/html; charset=\"utf-8\""},
   })
-  htmlSub.Write([]byte(encodeBase64Body(msg.BodyHTML)))
+  htmlSub.Write([]byte(msg.BodyHTML))
 
   altWriter.Close()
   altPart.Write(altBuf.Bytes())
