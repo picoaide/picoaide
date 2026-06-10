@@ -42,6 +42,7 @@ func init() {
   RegisterService("browser", browserSvc, browserToolDefs, "picoaide-browser")
   RegisterService("computer", computerSvc, computerToolDefs, "picoaide-computer")
   RegisterPicoaideService("agent", picoaideToolDefs, "picoaide-agent")
+  RegisterPicoaideService("email", emailToolDefs, "picoaide-email")
 }
 
 // getService 并发安全地获取已注册的 MCP 服务
@@ -307,6 +308,11 @@ func (s *Server) handleMCPToolCall(c *gin.Context, id json.Number, params json.R
     // 先检查 PicoAide 平台工具 handler
     if _, ok := picoaideHandlers[p.Name]; ok {
       picoaideHandleMCPToolCall(s, c, id, p.Name, p.Arguments, username)
+      return
+    }
+    // 邮件工具调用（服务端本地处理）
+    if strings.HasPrefix(p.Name, "email_") {
+      emailHandleMCPToolCall(s, c, id, p.Name, p.Arguments, username)
       return
     }
     // 第三方 MCP 代理服务：按服务名查找代理，直接转发
