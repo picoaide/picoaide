@@ -12,7 +12,7 @@ import (
 
 var emailToolDefs = []ToolDef{
   {
-    Name:        "email_send",
+    Name:        "send",
     Description: "发送邮件。需要用户已配置邮件账户。",
     InputSchema: map[string]interface{}{
       "type": "object",
@@ -27,7 +27,7 @@ var emailToolDefs = []ToolDef{
     },
   },
   {
-    Name:        "email_list",
+    Name:        "list",
     Description: "列出指定文件夹中的邮件。",
     InputSchema: map[string]interface{}{
       "type": "object",
@@ -39,7 +39,7 @@ var emailToolDefs = []ToolDef{
     },
   },
   {
-    Name:        "email_read",
+    Name:        "read",
     Description: "读取指定邮件的完整内容。",
     InputSchema: map[string]interface{}{
       "type": "object",
@@ -51,7 +51,7 @@ var emailToolDefs = []ToolDef{
     },
   },
   {
-    Name:        "email_reply",
+    Name:        "reply",
     Description: "回复指定邮件。",
     InputSchema: map[string]interface{}{
       "type": "object",
@@ -64,7 +64,7 @@ var emailToolDefs = []ToolDef{
     },
   },
   {
-    Name:        "email_forward",
+    Name:        "forward",
     Description: "转发指定邮件。",
     InputSchema: map[string]interface{}{
       "type": "object",
@@ -77,7 +77,7 @@ var emailToolDefs = []ToolDef{
     },
   },
   {
-    Name:        "email_search",
+    Name:        "search",
     Description: "搜索邮件。",
     InputSchema: map[string]interface{}{
       "type": "object",
@@ -90,7 +90,7 @@ var emailToolDefs = []ToolDef{
     },
   },
   {
-    Name:        "email_delete",
+    Name:        "delete",
     Description: "删除指定邮件。",
     InputSchema: map[string]interface{}{
       "type": "object",
@@ -102,7 +102,7 @@ var emailToolDefs = []ToolDef{
     },
   },
   {
-    Name:        "email_move",
+    Name:        "move",
     Description: "移动邮件到指定文件夹。",
     InputSchema: map[string]interface{}{
       "type": "object",
@@ -114,7 +114,7 @@ var emailToolDefs = []ToolDef{
     },
   },
   {
-    Name:        "email_folders",
+    Name:        "folders",
     Description: "列出所有邮件文件夹及其未读计数。",
     InputSchema: map[string]interface{}{
       "type":       "object",
@@ -124,15 +124,15 @@ var emailToolDefs = []ToolDef{
 }
 
 var emailHandlers = map[string]func(s *Server, c *gin.Context, id json.Number, args map[string]interface{}, username string){
-  "email_send":    handleEmailSend,
-  "email_list":    handleEmailList,
-  "email_read":    handleEmailRead,
-  "email_reply":   handleEmailReply,
-  "email_forward": handleEmailForward,
-  "email_search":  handleEmailSearch,
-  "email_delete":  handleEmailDelete,
-  "email_move":    handleEmailMove,
-  "email_folders": handleEmailFolders,
+  "send":    handleEmailSend,
+  "list":    handleEmailList,
+  "read":    handleEmailRead,
+  "reply":   handleEmailReply,
+  "forward": handleEmailForward,
+  "search":  handleEmailSearch,
+  "delete":  handleEmailDelete,
+  "move":    handleEmailMove,
+  "folders": handleEmailFolders,
 }
 
 func emailHandleMCPToolCall(s *Server, c *gin.Context, id json.Number, name string, args map[string]interface{}, username string) {

@@ -101,14 +101,12 @@ func buildAlternative(buf *bytes.Buffer, msg *OutgoingMessage, cfg *Config, mess
   // text/plain part
   textPart, _ := writer.CreatePart(textproto.MIMEHeader{
     "Content-Type": {"text/plain; charset=\"utf-8\""},
-    "Content-Transfer-Encoding": {"quoted-printable"},
   })
   textPart.Write([]byte(plainBody))
 
   // text/html part
   htmlPart, _ := writer.CreatePart(textproto.MIMEHeader{
     "Content-Type": {"text/html; charset=\"utf-8\""},
-    "Content-Transfer-Encoding": {"quoted-printable"},
   })
   htmlPart.Write([]byte(msg.BodyHTML))
 
@@ -133,14 +131,12 @@ func buildMixed(buf *bytes.Buffer, msg *OutgoingMessage, cfg *Config, messageID,
   // text/plain sub-part
   textSub, _ := altWriter.CreatePart(textproto.MIMEHeader{
     "Content-Type": {"text/plain; charset=\"utf-8\""},
-    "Content-Transfer-Encoding": {"quoted-printable"},
   })
   textSub.Write([]byte(plainBody))
 
   // text/html sub-part
   htmlSub, _ := altWriter.CreatePart(textproto.MIMEHeader{
     "Content-Type": {"text/html; charset=\"utf-8\""},
-    "Content-Transfer-Encoding": {"quoted-printable"},
   })
   htmlSub.Write([]byte(msg.BodyHTML))
 

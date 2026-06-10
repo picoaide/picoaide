@@ -304,18 +304,18 @@ func (s *Server) handleMCPToolCall(c *gin.Context, id json.Number, params json.R
 
   // 服务端 handler（无 Hub 的服务）
   if info.Hub == nil {
+    serviceName := c.Param("service")
+    // 邮件工具调用（服务端本地处理）
+    if serviceName == "email" {
+      emailHandleMCPToolCall(s, c, id, p.Name, p.Arguments, username)
+      return
+    }
     // 先检查 PicoAide 平台工具 handler
     if _, ok := picoaideHandlers[p.Name]; ok {
       picoaideHandleMCPToolCall(s, c, id, p.Name, p.Arguments, username)
       return
     }
-    // 邮件工具调用（服务端本地处理）
-    if strings.HasPrefix(p.Name, "email_") {
-      emailHandleMCPToolCall(s, c, id, p.Name, p.Arguments, username)
-      return
-    }
     // 第三方 MCP 代理服务：按服务名查找代理，直接转发
-    serviceName := c.Param("service")
     if proxy, ok := globalMCPManager.GetProxy(serviceName); ok {
       result, err := proxy.call(c.Request.Context(), p.Name, p.Arguments)
       if err == nil {
