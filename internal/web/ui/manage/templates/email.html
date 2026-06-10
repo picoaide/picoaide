@@ -1,0 +1,84 @@
+<div class="surface-panel">
+  <div class="toolbar">
+    <div>
+      <div class="toolbar-title">邮箱配置</div>
+      <div class="toolbar-subtitle">配置后可通过 Agent 发送和读取邮件</div>
+    </div>
+    <div>
+      <button class="btn btn-primary" id="email-save-btn" style="display:none">保存</button>
+      <button class="btn btn-danger" id="email-delete-btn" style="display:none">删除配置</button>
+    </div>
+  </div>
+  <div id="email-status" class="msg" style="display:none"></div>
+
+  <div id="email-form">
+    <div class="field">
+      <label class="field-label">邮箱地址</label>
+      <input type="email" id="email-addr" class="input" placeholder="user@example.com">
+    </div>
+    <div class="field-group">
+      <div class="field-group-title">SMTP 发送服务器</div>
+      <div class="field-row">
+        <div class="field flex-2">
+          <label class="field-label">服务器地址</label>
+          <input type="text" id="smtp-host" class="input" placeholder="smtp.example.com">
+        </div>
+        <div class="field flex-1">
+          <label class="field-label">端口</label>
+          <input type="number" id="smtp-port" class="input" value="587">
+        </div>
+        <div class="field flex-1">
+          <label class="field-label">加密</label>
+          <select id="smtp-tls" class="input">
+            <option value="false" selected>STARTTLS (587)</option>
+            <option value="true">SSL/TLS (465)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="field-group">
+      <div class="field-group-title">IMAP 接收服务器</div>
+      <div class="field-row">
+        <div class="field flex-2">
+          <label class="field-label">服务器地址</label>
+          <input type="text" id="imap-host" class="input" placeholder="imap.example.com">
+        </div>
+        <div class="field flex-1">
+          <label class="field-label">端口</label>
+          <input type="number" id="imap-port" class="input" value="993">
+        </div>
+        <div class="field flex-1">
+          <label class="field-label">加密</label>
+          <select id="imap-tls" class="input">
+            <option value="true" selected>SSL/TLS (993)</option>
+            <option value="false">STARTTLS (143)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label">登录用户名</label>
+      <input type="text" id="login-user" class="input" placeholder="通常为邮箱地址">
+    </div>
+    <div class="field">
+      <label class="field-label">登录密码</label>
+      <div class="input-group">
+        <input type="password" id="login-password" class="input" placeholder="邮箱密码">
+        <button class="btn btn-outline" id="email-test-btn">测试连接</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="email-config-card" style="display:none">
+    <div class="card">
+      <div class="card-body">
+        <div class="card-row"><span class="card-label">邮箱：</span><span id="card-email"></span></div>
+        <div class="card-row"><span class="card-label">SMTP：</span><span id="card-smtp"></span></div>
+        <div class="card-row"><span class="card-label">IMAP：</span><span id="card-imap"></span></div>
+        <div class="card-row"><span class="card-label">状态：</span><span id="card-status"></span></div>
+        <div class="card-row"><span class="card-label">最后测试：</span><span id="card-test"></span></div>
+        <button class="btn btn-outline" id="email-edit-btn" style="margin-top:0.8rem">修改配置</button>
+      </div>
+    </div>
+  </div>
+</div>
