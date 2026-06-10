@@ -76,7 +76,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
     serveHTML(c, "initializing.html")
   })
 
-  manageSections := []string{"welcome", "chat", "skills", "channels", "files", "teamspace", "authorization", "password", "cron"}
+  manageSections := []string{"welcome", "chat", "skills", "channels", "email", "files", "teamspace", "authorization", "password", "cron"}
 
   // 新路径 /user/*
   r.GET("/user", func(c *gin.Context) {
