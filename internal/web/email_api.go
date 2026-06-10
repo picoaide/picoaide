@@ -100,6 +100,7 @@ func (s *Server) handleEmailSave(c *gin.Context) {
     IMAPTLS:       imapTls,
     LoginUser:     loginUser,
     LoginPassword: loginPassword,
+    Enabled:       true,
   }
 
   if err := store.UpsertUserEmail(ue); err != nil {
