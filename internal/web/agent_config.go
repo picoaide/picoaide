@@ -87,6 +87,7 @@ func (s *Server) handlePicoAgentConfig(c *gin.Context) {
     "browser":  {Socket: "/run/picoaide.sock"},
     "computer": {Socket: "/run/picoaide.sock"},
     "agent":    {Socket: "/run/picoaide.sock"},
+    "email":    {Socket: "/run/picoaide.sock"},
   }
   // 添加第三方 MCP 代理服务（如 web-search-mcp-server），有授权的才可见
   for _, name := range ListProxyServices() {

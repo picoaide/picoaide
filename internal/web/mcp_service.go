@@ -247,18 +247,17 @@ func (s *Server) handleMCPSSEServicePost(c *gin.Context) {
     tools := make([]map[string]interface{}, 0)
 
     if info.Hub == nil {
-      // 服务端服务：聚合所有来源的工具
-      // 1. PicoAide 平台工具
-      for _, t := range picoaideToolDefs {
+      // 服务端服务：返回本服务注册的工具 + 浏览器/桌面代理工具（如有）
+      for _, t := range info.Tools {
         tools = append(tools, toolToMap(t))
       }
-      // 2. 浏览器工具（如果已连接）
+      // 浏览器工具（如果已连接）
       if conn, ok := browserSvc.GetConnection(username); ok && conn != nil {
         for _, t := range browserToolDefs {
           tools = append(tools, toolToMap(t))
         }
       }
-      // 3. 桌面代理工具（如果已连接）
+      // 桌面代理工具（如果已连接）
       if conn, ok := computerSvc.GetConnection(username); ok && conn != nil {
         for _, t := range computerToolDefs {
           tools = append(tools, toolToMap(t))
