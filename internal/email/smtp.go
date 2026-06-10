@@ -15,6 +15,8 @@ import (
   "time"
 )
 
+const smtpTimeout = 5 * time.Second
+
 var htmlTagRe = regexp.MustCompile(`(?i)<[^>]*>`)
 var blockTagRe = regexp.MustCompile(`(?i)<\s*(br|/p|/div|/li|/h[1-6]|/tr|/blockquote)[^>]*>`)
 
@@ -234,7 +236,7 @@ func dialSMTPServer(cfg *Config) (*smtp.Client, error) {
   addr := net.JoinHostPort(cfg.SMTPHost, fmt.Sprintf("%d", cfg.SMTPPort))
 
   if cfg.SMTPTLS {
-    conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+    conn, err := net.DialTimeout("tcp", addr, smtpTimeout)
     if err != nil {
       return nil, &NetworkError{Err: fmt.Errorf("连接 SMTP 服务器失败: %w", err)}
     }
@@ -243,10 +245,22 @@ func dialSMTPServer(cfg *Config) (*smtp.Client, error) {
       conn.Close()
       return nil, &ProtocolError{Err: fmt.Errorf("创建 SMTP 客户端失败: %w", err)}
     }
+
+    // SSL/TLS 模式需要手工 TLS 握手
+    tlsConn := tls.Client(conn, &tls.Config{ServerName: cfg.SMTPHost})
+    if err := tlsConn.Handshake(); err != nil {
+      conn.Close()
+      return nil, &NetworkError{Err: fmt.Errorf("SMTP TLS 握手失败: %w", err)}
+    }
+    client, err = smtp.NewClient(tlsConn, cfg.SMTPHost)
+    if err != nil {
+      conn.Close()
+      return nil, &ProtocolError{Err: fmt.Errorf("创建 SMTP TLS 客户端失败: %w", err)}
+    }
     return client, nil
   }
 
-  conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+  conn, err := net.DialTimeout("tcp", addr, smtpTimeout)
   if err != nil {
     return nil, &NetworkError{Err: fmt.Errorf("连接 SMTP 服务器失败: %w", err)}
   }
