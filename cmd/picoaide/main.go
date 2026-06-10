@@ -73,6 +73,8 @@ func main() {
       fmt.Fprintf(os.Stderr, "初始化沙箱 rootfs 失败: %v\n", err)
       os.Exit(1)
     }
+    store.InitDB(workDir)
+    config.SetEngineProvider(store.GetEngine)
     if err := web.Serve(); err != nil {
       fmt.Fprintf(os.Stderr, "Web 服务启动失败: %v\n", err)
       os.Exit(1)
