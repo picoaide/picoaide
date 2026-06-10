@@ -82,6 +82,30 @@ type UserChannel struct {
 
 func (UserChannel) TableName() string { return "user_channels" }
 
+// ============================================================
+// UserEmail（邮件配置）
+// ============================================================
+
+type UserEmail struct {
+  ID            int64  `xorm:"pk autoincr 'id'"`
+  Username      string `xorm:"unique notnull 'username'"`
+  Email         string `xorm:"notnull 'email'"`
+  SMTPHost      string `xorm:"notnull 'smtp_host'"`
+  SMTPPort      int    `xorm:"notnull default 587 'smtp_port'"`
+  SMTPTLS       bool   `xorm:"default 1 'smtp_tls'"`
+  IMAPHost      string `xorm:"notnull 'imap_host'"`
+  IMAPPort      int    `xorm:"notnull default 993 'imap_port'"`
+  IMAPTLS       bool   `xorm:"default 1 'imap_tls'"`
+  LoginUser     string `xorm:"notnull 'login_user'"`
+  LoginPassword string `xorm:"notnull 'login_password'"`
+  Enabled       bool   `xorm:"default 0 'enabled'"`
+  TestResult    string `xorm:"'test_result'"`
+  CreatedAt     string `xorm:"notnull 'created_at'"`
+  UpdatedAt     string `xorm:"notnull 'updated_at'"`
+}
+
+func (UserEmail) TableName() string { return "user_emails" }
+
 // SharedFolder 共享文件夹
 type SharedFolder struct {
   ID          int64  `xorm:"pk autoincr 'id'" json:"id"`
