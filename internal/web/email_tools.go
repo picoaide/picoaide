@@ -3,6 +3,7 @@ package web
 import (
   "encoding/json"
   "fmt"
+  "math"
   "strconv"
 
   "github.com/gin-gonic/gin"
@@ -212,6 +213,18 @@ func parseIntArg(v interface{}, defaultVal int) int {
   return defaultVal
 }
 
+func safeUint32(v interface{}, defaultVal uint32) uint32 {
+  n := parseIntArg(v, int(defaultVal))
+  if n <= 0 {
+    return defaultVal
+  }
+  n64 := int64(n)
+  if n64 > math.MaxUint32 {
+    return defaultVal
+  }
+  return uint32(n64)
+}
+
 // ============================================================
 // 工具 Handler 实现
 // ============================================================
@@ -299,7 +312,7 @@ func handleEmailRead(s *Server, c *gin.Context, id json.Number, args map[string]
     return
   }
 
-  uid := uint32(parseIntArg(args["uid"], 0))
+  uid := safeUint32(args["uid"], 0)
   if uid == 0 {
     writeMCPError(c, id, "uid 必须为正整数")
     return
@@ -330,7 +343,7 @@ func handleEmailReply(s *Server, c *gin.Context, id json.Number, args map[string
     return
   }
 
-  uid := uint32(parseIntArg(args["uid"], 0))
+  uid := safeUint32(args["uid"], 0)
   if uid == 0 {
     writeMCPError(c, id, "uid 必须为正整数")
     return
@@ -361,7 +374,7 @@ func handleEmailForward(s *Server, c *gin.Context, id json.Number, args map[stri
     return
   }
 
-  uid := uint32(parseIntArg(args["uid"], 0))
+  uid := safeUint32(args["uid"], 0)
   if uid == 0 {
     writeMCPError(c, id, "uid 必须为正整数")
     return
@@ -425,7 +438,7 @@ func handleEmailDelete(s *Server, c *gin.Context, id json.Number, args map[strin
     return
   }
 
-  uid := uint32(parseIntArg(args["uid"], 0))
+  uid := safeUint32(args["uid"], 0)
   if uid == 0 {
     writeMCPError(c, id, "uid 必须为正整数")
     return
@@ -458,7 +471,7 @@ func handleEmailMove(s *Server, c *gin.Context, id json.Number, args map[string]
     return
   }
 
-  uid := uint32(parseIntArg(args["uid"], 0))
+  uid := safeUint32(args["uid"], 0)
   if uid == 0 {
     writeMCPError(c, id, "uid 必须为正整数")
     return

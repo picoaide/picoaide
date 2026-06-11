@@ -4,6 +4,7 @@ import (
   "crypto/tls"
   "fmt"
   "io"
+  "math"
   "mime"
   "strings"
 
@@ -19,6 +20,17 @@ import (
 // ============================================================
 
 // dialIMAP 连接并登录 IMAP 服务器
+func uint32FromInt(n int) (uint32, bool) {
+  if n < 0 {
+    return 0, false
+  }
+  n64 := int64(n)
+  if n64 > math.MaxUint32 {
+    return 0, false
+  }
+  return uint32(n64), true
+}
+
 func dialIMAP(cfg *Config) (*client.Client, error) {
   addr := fmt.Sprintf("%s:%d", cfg.IMAPHost, cfg.IMAPPort)
   var c *client.Client
@@ -179,20 +191,25 @@ func ListMessages(cfg *Config, folder string, limit, offset int) ([]*MessageSumm
   if limit > 100 {
     limit = 100
   }
+  if offset < 0 {
+    offset = 0
+  }
 
   start := uint32(1)
-  if total > uint32(offset) {
-    start = total - uint32(offset)
+  uOffset, _ := uint32FromInt(offset)
+  uLimit, _ := uint32FromInt(limit)
+  if total > uOffset {
+    start = total - uOffset
   }
-  if total > uint32(offset+limit) {
-    start = total - uint32(offset) - uint32(limit) + 1
+  if total > uOffset+uLimit {
+    start = total - uOffset - uLimit + 1
   }
   if start < 1 {
     start = 1
   }
 
   seqSet := new(imap.SeqSet)
-  seqSet.AddRange(start, total-uint32(offset))
+  seqSet.AddRange(start, total-uOffset)
 
   messages := make(chan *imap.Message, limit)
   done := make(chan error, 1)

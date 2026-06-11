@@ -18,6 +18,7 @@ import (
   "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/user"
+  "github.com/picoaide/picoaide/internal/util"
 )
 
 // ============================================================
@@ -482,6 +483,9 @@ func (s *Server) handleChatHistory(c *gin.Context) {
         continue
       }
       sid := entry.Name()
+      if err := util.SafePathSegment(sid); err != nil {
+        continue
+      }
       // 读 live.jsonl（消息历史）
       liveFile := filepath.Join(sessDir, sid, "live.jsonl")
       if strings.HasPrefix(filepath.Clean(liveFile), sessDir+string(os.PathSeparator)) {

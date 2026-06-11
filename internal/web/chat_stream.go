@@ -7,6 +7,7 @@ import (
   "encoding/json"
   "errors"
   "fmt"
+  "io/fs"
   "log/slog"
   "net/http"
   "os"
@@ -293,22 +294,31 @@ func (s *Server) persistRunEvents(username string, run *chatRun) {
   sessions := make([]string, 0, len(entries))
   for _, e := range entries {
     if e.IsDir() {
-      sessions = append(sessions, e.Name())
+      name := e.Name()
+      if strings.Contains(name, "/") || strings.Contains(name, "\\") || name == ".." {
+        continue
+      }
+      sessions = append(sessions, name)
     }
   }
   if len(sessions) == 0 {
     return
   }
   // 按修改时间降序排列，最新的在最前面
+  dirFS := os.DirFS(sessDir)
   sort.Slice(sessions, func(i, j int) bool {
-    fi, _ := os.Stat(filepath.Join(sessDir, sessions[i]))
-    fj, _ := os.Stat(filepath.Join(sessDir, sessions[j]))
-    if fi == nil || fj == nil {
-      return fi != nil
+    fi, errI := fs.Stat(dirFS, sessions[i])
+    fj, errJ := fs.Stat(dirFS, sessions[j])
+    if errI != nil || errJ != nil {
+      return errI == nil
     }
     return fi.ModTime().After(fj.ModTime())
   })
-  eventsFile := filepath.Join(sessDir, sessions[0], "events.jsonl")
+  sessionName := filepath.Base(sessions[0])
+  if strings.ContainsAny(sessionName, "/\\") || sessionName == "." || sessionName == ".." || sessionName == "" {
+    return
+  }
+  eventsFile := filepath.Join(sessDir, sessionName, "events.jsonl")
   if !strings.HasPrefix(filepath.Clean(eventsFile), sessDir+string(os.PathSeparator)) {
     return
   }
