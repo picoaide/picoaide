@@ -452,6 +452,10 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb fu
       chunkCount++
 
       if len(chunk.Choices) == 0 {
+        // DeepSeek 在流式最后发送 usage（含缓存统计）
+        if p.providerType == "deepseek" {
+          logDeepSeekCacheStats(p.model, chunk.RawJSON())
+        }
         continue
       }
       choice := chunk.Choices[0]
@@ -571,6 +575,53 @@ func buildOpenAIMessagesV2(system string, messages []LLMMessage, providerType st
     }
   }
   return msgs
+}
+
+func logDeepSeekCacheStats(model, chunkRaw string) {
+  var chunkObj struct {
+    Usage *struct {
+      PromptCacheHitTokens  int64 `json:"prompt_cache_hit_tokens"`
+      PromptCacheMissTokens int64 `json:"prompt_cache_miss_tokens"`
+    } `json:"usage"`
+  }
+  if err := json.Unmarshal([]byte(chunkRaw), &chunkObj); err != nil || chunkObj.Usage == nil {
+    return
+  }
+  u := chunkObj.Usage
+  if u.PromptCacheHitTokens > 0 || u.PromptCacheMissTokens > 0 {
+    slog.Debug("openai.cache_stats",
+      "model", model,
+      "cache_hit_tokens", u.PromptCacheHitTokens,
+      "cache_miss_tokens", u.PromptCacheMissTokens,
+    )
+  }
+}
+
+func extractDeepSeekCacheUsage(rawJSON string) string {
+  if rawJSON == "" {
+    return ""
+  }
+  var resp struct {
+    Usage map[string]json.RawMessage `json:"usage"`
+  }
+  if err := json.Unmarshal([]byte(rawJSON), &resp); err != nil {
+    return ""
+  }
+  if resp.Usage == nil {
+    return ""
+  }
+  // 只关心缓存相关字段
+  filtered := make(map[string]json.RawMessage)
+  for _, key := range []string{"prompt_cache_hit_tokens", "prompt_cache_miss_tokens"} {
+    if v, ok := resp.Usage[key]; ok {
+      filtered[key] = v
+    }
+  }
+  if len(filtered) == 0 {
+    return ""
+  }
+  data, _ := json.Marshal(filtered)
+  return string(data)
 }
 
 func buildDeepSeekMessages(messages []LLMMessage) []map[string]interface{} {
