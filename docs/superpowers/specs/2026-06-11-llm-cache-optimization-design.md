@@ -2,41 +2,62 @@
 
 ## 背景
 
-DeepSeek API 提供自动磁盘 KV Cache，无需修改 API 调用即可享受缓存收益。
-缓存命中与未命中价格差距极大（V4-Flash 50x，V4-Pro 120x）。
-
-当前 system prompt 在会话过程中可能因 `AppendToSystemPrompt` 等原因变化，
-导致 DeepSeek 缓存前缀不一致，无法充分利用缓存。
+DeepSeek API 提供自动磁盘 KV Cache，缓存命中与未命中价格差距极大：
+（V4-Flash 50x，V4-Pro 120x）。当前 system prompt 因 `AppendToSystemPrompt`
+等动态追加而频繁变化，导致缓存前缀不一致。
 
 ## 目标
 
 - 最大化 DeepSeek 自动 prefix caching 命中率
-- 跨用户共享 `AgentProtocol` 等公共前缀的缓存
-- 同用户会话内 system prompt 冻结，所有轮次命中缓存
+- system prompt 冻结，同用户会话内所有轮次命中缓存
 - Cron 等批量任务跨执行命中缓存
+- 仅对 DeepSeek provider 生效，不改变其他 provider 行为
 
-## DeepSeek Context Caching 机制
+## DeepSeek 官方 API 合规分析
 
-参考 https://api-docs.deepseek.com/guides/kv_cache
+对照 https://api-docs.deepseek.com/zh-cn/guides/ 检查当前实现。
 
-- **自动生效**：无需特殊 API 参数或 header
-- **命中规则**：后续请求必须**完全匹配**一个缓存前缀单元
-- **持久化时机**：
-  1. 请求边界：每次请求的用户输入末尾和模型输出末尾
-  2. 公共前缀检测：系统自动检测多个请求的公共前缀并缓存
-  3. 固定间隔：长输入/输出按固定 token 间隔创建缓存单元
-- **过期**：缓存不再使用后数小时到数天内自动清除
-- **验证**：响应 `usage.prompt_cache_hit_tokens` 和 `prompt_cache_miss_tokens`
-- **定价**：
+### 思考模式
 
-| | V4-Flash | V4-Pro |
-|---|---|---|
-| Cache HIT / 1M tokens | $0.0028 | $0.003625 |
-| Cache MISS / 1M tokens | $0.14 | $0.435 |
+| 要求 | 当前状态 | 需改动 |
+|------|---------|--------|
+| 默认 thinking mode 为 enabled | ✓ 不传参即为默认 | 无 |
+| 复杂 Agent 请求默认 effort=max | ✓ 服务端自动处理 | 无 |
+| temperature 在思考模式下不生效 | ✓ 传参不会报错 | 无 |
+| 有工具调用的轮次，reasoning_content 必须回传 | ✗ LLMMessage 无 ReasoningContent 字段 | 新增字段，DeepSeek 构建消息时包含 |
+| 无工具调用的轮次，reasoning_content 可忽略 | ✓ 不传即忽略 | 无 |
+
+### 多轮对话
+
+| 要求 | 当前状态 | 需改动 |
+|------|---------|--------|
+| 无状态 API，每次请求需拼接完整历史 | ✓ 已是此模式 | 无 |
+| assistant response 需 append 到 messages | ✓ 已正确拼接 | 无 |
+
+### 上下文硬盘缓存
+
+| 要求 | 当前状态 | 需改动 |
+|------|---------|--------|
+| 默认开启，无需修改代码 | ✓ | 无 |
+| system prompt 作为前缀被自动缓存 | ✗ 因动态追加导致变化 | system prompt 冻结 |
+
+### 限速与 user_id
+
+| 要求 | 当前状态 | 需改动 |
+|------|---------|--------|
+| 支持 user_id 参数做 KVCache 隔离 | ✗ 未传递 | ChatRequest 新增 UserID，DeepSeek 通过 extra_body 传递 |
+| 多用户场景下各用户 cache 隔离 | ✗ 未传递 | 同上一并使用 |
+| user_id 格式 `[a-zA-Z0-9\-_]+` | ✓ 用户名符合此格式 | 无 |
 
 ## 设计
 
-### system prompt 冻结
+### 原则：仅 DeepSeek 生效
+
+所有 DeepSeek 专项配置通过 `OpenAIProvider.providerType` 判断，
+仅在 `providerType == "deepseek"` 时生效。其他 OpenAI 兼容供应商
+（openai/openrouter/qwen/glm）行为不变。
+
+### 1. system prompt 冻结（所有 provider 通用）
 
 `Engine` 新增字段：
 
@@ -45,98 +66,125 @@ frozenSystem      string        // 构建一次后冻结的 system prompt
 pendingAdditions  []string      // AppendToSystemPrompt 累积的内容
 ```
 
-`Engine.Process()` 流程变更：
+流程：
 
 ```
 Engine 创建
-  └─ buildSystemPrompt(workspace内容)
-       └─ frozenSystem = AgentProtocol + "\n\n" + workspace内容
-                               + skills + MCP摘要
+  └─ buildSystemPrompt(workspace内容) → frozenSystem（冻结，不再变化）
 
 每次 AppendToSystemPrompt(text)
   └─ pendingAdditions = append(pendingAdditions, text)
 
 每次 LLM 调用
   ├─ System: frozenSystem                    ← 永远不变 → 缓存命中
-  ├─ Messages[0]: {role:"system", ...}       ← pendingAdditions（如存在）
+  ├─ Messages[0]: {role:"system", ...}       ← pendingAdditions 合并
   ├─ Messages[1]: {role:"user", ...}         ← 用户输入
   └─ Messages[2..n]: ... 对话历史
 ```
 
-### buildSystemPrompt 结构优化
+### 2. reasoning_content 持久化（仅 DeepSeek）
 
-顺序（从静态到动态，确保最大公共前缀）：
+`LLMMessage` 新增 `ReasoningContent string` 字段。
 
-1. **AgentProtocol** — 跨用户完全一致，DeepSeek 公共前缀检测自动缓存
-2. **技能描述 + MCP 服务器摘要** — 同用户会话内冻结
-3. **用户工作区文件（AGENT.md / SOUL.md / USER.md / MEMORY.md）** — 会话内稳定
+`Message` 结构体（用于 `live.jsonl`）同步增加 `ReasoningContent` 字段。
 
-### provider.go 改动
+`buildOpenAIMessagesV2` 增加 `providerType string` 参数：
+- 当 `providerType == "deepseek"` 且 assistant 消息有 ReasoningContent 时：
+  构建消息时包含 `reasoning_content` 字段
+- 其他 provider：忽略 ReasoningContent
 
-`ChatRequest` 新增 `SystemAdditions []string` 字段。
-`buildOpenAIMessagesV2` 处理后追加多条 system 消息：
+### 3. user_id 传递（仅 DeepSeek）
 
-```go
-func buildOpenAIMessagesV2(system string, additions []string, messages []LLMMessage) []openai.ChatCompletionMessageParamUnion {
-  var msgs []openai.ChatCompletionMessageParamUnion
-  if system != "" {
-    msgs = append(msgs, openai.SystemMessage(system))
-  }
-  for _, a := range additions {
-    msgs = append(msgs, openai.SystemMessage(a))
-  }
-  for _, m := range messages {
-    // ... 现有消息构建逻辑
-  }
-  return msgs
-}
+`ChatRequest` 新增 `UserID string` 字段。
+
+`OpenAIProvider` 新增 `providerType string` 字段，在工厂方法中设置：
+- "deepseek" → providerType = "deepseek"
+- 其他 → providerType = ""
+
+`StreamChat` 中，当 `providerType == "deepseek"` 且 `req.UserID != ""` 时：
+通过 `extra_body` 参数传递 `{"user_id": "xxx"}`。
+
+Anthropic 端通过 `metadata.user_id` 传递（DeepSeek 也支持 Anthropic 格式）。
+
+### 4. 缓存命中监控（仅 DeepSeek）
+
+DeepSeek API 响应中提取 `usage.prompt_cache_hit_tokens` 和
+`prompt_cache_miss_tokens`。通过 OpenAI SDK v3 的
+`RawJSON()` 方法解析响应中的 `usage` 字段。
+
+日志格式：
+```
+agent.cache_stats provider=deepseek cache_hit_tokens=1234 cache_miss_tokens=567
 ```
 
-### session.go 改动
+### 5. 压缩与缓存的关系
 
-`s.SystemAdditions` 字段持久化到会话元数据中（`live.jsonl` 第一行 session record），对话恢复时重新注入到 Engine 的 `pendingAdditions`。
-
-### 压缩与缓存的关系
-
-上下文的自动压缩（`internal/agent/compactor.go`）会替换旧消息为摘要，改变消息前缀：
+上下文的自动压缩（`internal/agent/compactor.go`）会替换旧消息为摘要：
 
 ```
 压缩前: [frozenSystem, msg1, msg2, ..., msg48, msg49, msg50]
 压缩后: [frozenSystem, [历史摘要], recent_round_1, recent_round_2]
 ```
 
-虽然 `[历史摘要]` 替代了 `msg1` 导致短时间 miss，但：
+压缩后前缀变化导致短暂 miss，但：
+1. frozenSystem 始终是前缀起点，DeepSeek 公共前缀检测会独立缓存它
+2. 压缩摘要统一以 `[历史摘要]` 开头，公共前缀 `frozenSystem + "[历史摘要]"` 也会被缓存
+3. compactor 不需要改动
 
-1. **frozenSystem 在所有请求中都是前缀的一部分**，DeepSeek 的公共前缀检测很快会把它独立缓存
-2. 压缩摘要统一以 `[历史摘要]` 开头，更深一层的公共前缀 `frozenSystem + "[历史摘要]"` 也会被检测和缓存
-3. **compactor 不需要改动** — frozen system prompt 策略天然与压缩兼容
+## 数据结构变更
 
-### 缓存命中监控
-
-日志记录每次 LLM 调用的缓存命中/miss token 数：
-
+### LLMMessage
+```go
+type LLMMessage struct {
+  Role             string     `json:"role"`
+  Content          string     `json:"content,omitempty"`
+  ReasoningContent string     `json:"reasoning_content,omitempty"` // 新增，仅 DeepSeek
+  ToolCallID       string     `json:"tool_call_id,omitempty"`
+  ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+}
 ```
-agent.cache_stats cache_hit_tokens=1234 cache_miss_tokens=567
+
+### ChatRequest
+```go
+type ChatRequest struct {
+  Model       string
+  System      string
+  Messages    []LLMMessage
+  Tools       []ToolDef
+  MaxTokens   int
+  Temperature float64
+  UserID      string     // 新增，仅 DeepSeek 使用
+}
 ```
 
-通过在 OpenAI SDK 的 response 解析中提取 `usage.prompt_cache_hit_tokens` 实现。
+### OpenAIProvider
+```go
+type OpenAIProvider struct {
+  apiKey       string
+  baseURL      string
+  model        string
+  providerType string     // 新增: "deepseek" 或 ""
+}
+```
 
 ## 文件变更清单
 
 | 文件 | 改动 |
 |------|------|
-| `internal/agent/engine.go` | Engine 结构体新增 frozenSystem/pendingAdditions；buildSystemPrompt 只执行一次；AppendToSystemPrompt 改为累积；LLM 调用前注入 pendingAdditions 到 messages |
-| `internal/agent/provider.go` | ChatRequest 新增 SystemAdditions；buildOpenAIMessagesV2 参数增加 additions；Anthropic/OpenAI 响应解析中提取 cache hit/miss token |
-| `internal/agent/session.go` | 会话元数据持久化 SystemAdditions |
+| `internal/agent/engine.go` | frozenSystem/pendingAdditions；buildSystemPrompt 只执行一次；AppendToSystemPrompt 改为累积 |
+| `internal/agent/provider.go` | OpenAIProvider 新增 providerType；ChatRequest 新增 UserID；StreamChat DeepSeek 分支处理 thinking/user_id/缓存监控 |
+| `internal/agent/session.go` | LLMMessage 新增 ReasoningContent；序列化/反序列化同步更新 |
+| `internal/agent/provider.go` | buildOpenAIMessagesV2 参数增加 providerType，DeepSeek 时处理 reasoning_content |
 
 ## 风险
 
-- `AppendToSystemPrompt` 的调用方期望内容在 system prompt 中，改为 messages 后语义不变但位置不同。需确保模型行为一致（DeepSeek 支持多条 system 消息）
-- `buildSystemPrompt` 依赖 `e.preloadedSystem`，冻结后外部修改 `preloadedSystem` 无效。需确保所有调用方改为使用 `AppendToSystemPrompt`
+- reasoning_content 持久化增加 live.jsonl 体积，但对含工具调用的轮次是 DeepSeek API 强制要求
+- user_id 传递后每个用户 cache 隔离，损失跨用户共享缓存收益，但符合隐私管理要求
+- 所有 DeepSeek 专项代码通过 providerType 隔离，不影响其他供应商
 
 ## 验证
 
-1. `go test ./internal/agent/` 通过
+1. `go test ./internal/agent/` 全部通过
 2. 日志中出现 `prompt_cache_hit_tokens` > 0 的记录
-3. 多用户场景下 AgentProtocol 命中缓存
-4. Cron 任务连续执行时 system prompt 命中缓存
+3. 非 DeepSeek provider 行为无变化
+4. DeepSeek 含工具调用的多轮对话正常（reasoning_content 正确回传）
