@@ -317,6 +317,17 @@ func FetchMessage(cfg *Config, uid uint32, markSeen bool) (*Message, error) {
 // 搜索邮件
 // ============================================================
 
+func asciiOnly(s string) string {
+  var b strings.Builder
+  b.Grow(len(s))
+  for _, r := range s {
+    if r <= 127 {
+      b.WriteRune(r)
+    }
+  }
+  return b.String()
+}
+
 func parseSearchQuery(query string) *imap.SearchCriteria {
   criteria := imap.NewSearchCriteria()
   parts := strings.Fields(query)
@@ -326,34 +337,34 @@ func parseSearchQuery(query string) *imap.SearchCriteria {
     case "FROM":
       if i+1 < len(parts) {
         i++
-        criteria.Header["From"] = []string{parts[i]}
+        criteria.Header["From"] = []string{asciiOnly(parts[i])}
       }
     case "SUBJECT":
       if i+1 < len(parts) {
         i++
-        criteria.Header["Subject"] = []string{parts[i]}
+        criteria.Header["Subject"] = []string{asciiOnly(parts[i])}
       }
     case "BODY":
       if i+1 < len(parts) {
         i++
-        criteria.Text = append(criteria.Text, parts[i])
+        criteria.Text = append(criteria.Text, asciiOnly(parts[i]))
       }
     case "TO":
       if i+1 < len(parts) {
         i++
-        criteria.Header["To"] = []string{parts[i]}
+        criteria.Header["To"] = []string{asciiOnly(parts[i])}
       }
     case "CC":
       if i+1 < len(parts) {
         i++
-        criteria.Header["Cc"] = []string{parts[i]}
+        criteria.Header["Cc"] = []string{asciiOnly(parts[i])}
       }
     case "UNSEEN":
       criteria.WithoutFlags = []string{imap.SeenFlag}
     case "SEEN":
       criteria.WithFlags = []string{imap.SeenFlag}
     default:
-      criteria.Text = append(criteria.Text, parts[i])
+      criteria.Text = append(criteria.Text, asciiOnly(parts[i]))
     }
   }
   return criteria

@@ -79,11 +79,11 @@ var emailToolDefs = []ToolDef{
   },
   {
     Name:        "search",
-    Description: "搜索邮件。",
+    Description: "搜索邮件（仅支持英文关键词，不支持中文）。",
     InputSchema: map[string]interface{}{
       "type": "object",
       "properties": map[string]interface{}{
-        "query":  map[string]interface{}{"type": "string", "description": "搜索关键词"},
+        "query":  map[string]interface{}{"type": "string", "description": "搜索关键词（仅支持英文）"},
         "folder": map[string]interface{}{"type": "string", "description": "文件夹名称", "default": "INBOX"},
         "limit":  map[string]interface{}{"type": "integer", "description": "返回数量上限", "default": 50},
       },
