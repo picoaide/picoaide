@@ -2,6 +2,8 @@ package email
 
 import (
   "bytes"
+  "encoding/base64"
+  "regexp"
   "strings"
   "testing"
 )
@@ -26,6 +28,56 @@ func TestStripHTML(t *testing.T) {
         t.Errorf("stripHTML(%q) = %q, want %q", tt.input, got, tt.want)
       }
     })
+  }
+}
+
+func TestBuildMIMEMessage_ContentPresent(t *testing.T) {
+  msg := &OutgoingMessage{
+    To:       []string{"test@example.com"},
+    Subject:  "Test Subject",
+    BodyHTML: "<h1>Hello World</h1><p>This is a test.</p>中文内容",
+  }
+  cfg := &Config{
+    Email:     "sender@example.com",
+    SMTPHost:  "smtp.example.com",
+    SMTPPort:  587,
+    LoginUser: "sender",
+    LoginPass: "pass",
+  }
+
+  data, err := BuildMIMEMessage(msg, cfg)
+  if err != nil {
+    t.Fatalf("BuildMIMEMessage failed: %v", err)
+  }
+
+  // Verify body content is present in base64-encoded form
+  re := regexp.MustCompile(`Content-Type: text/plain; charset="utf-8"\r\nContent-Transfer-Encoding: base64\r\n\r\n([A-Za-z0-9+/=\r\n]+)`)
+  m := re.FindSubmatch(data)
+  if len(m) < 2 {
+    t.Fatalf("Could not find plain text part in MIME output:\n%s", string(data))
+  }
+  decoded, err := base64.StdEncoding.DecodeString(string(regexp.MustCompile(`\s+`).ReplaceAllString(string(m[1]), "")))
+  if err != nil {
+    t.Fatalf("Failed to decode base64: %v", err)
+  }
+  if !bytes.Contains(decoded, []byte("Hello World")) {
+    t.Fatalf("Body content 'Hello World' not found in decoded text. Decoded: %q", string(decoded))
+  }
+  if !bytes.Contains(decoded, []byte("中文")) {
+    t.Fatalf("Chinese content '中文' not found in decoded text. Decoded: %q", string(decoded))
+  }
+
+  reHTML := regexp.MustCompile(`Content-Type: text/html; charset="utf-8"\r\nContent-Transfer-Encoding: base64\r\n\r\n([A-Za-z0-9+/=\r\n]+)`)
+  mHTML := reHTML.FindSubmatch(data)
+  if len(mHTML) < 2 {
+    t.Fatalf("Could not find HTML part in MIME output:\n%s", string(data))
+  }
+  decodedHTML, err := base64.StdEncoding.DecodeString(string(regexp.MustCompile(`\s+`).ReplaceAllString(string(mHTML[1]), "")))
+  if err != nil {
+    t.Fatalf("Failed to decode HTML base64: %v", err)
+  }
+  if !bytes.Contains(decodedHTML, []byte("<h1>Hello World</h1>")) {
+    t.Fatalf("HTML content not found. Decoded: %q", string(decodedHTML))
   }
 }
 

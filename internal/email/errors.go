@@ -17,8 +17,17 @@ func (e *NetworkError) Unwrap() error { return e.Err }
 
 type ProtocolError struct{ Err error }
 
-func (e *ProtocolError) Error() string { return fmt.Sprintf("邮件协议错误: %v", e.Err) }
+func (e *ProtocolError) Error() string { return e.Err.Error() }
 func (e *ProtocolError) Unwrap() error { return e.Err }
+
+type SMTPError struct {
+  Code    int
+  Message string
+}
+
+func (e *SMTPError) Error() string {
+  return fmt.Sprintf("SMTP %d: %s", e.Code, e.Message)
+}
 
 type TimeoutError struct{ Err error }
 

@@ -13,13 +13,14 @@ import (
 var emailToolDefs = []ToolDef{
   {
     Name:        "send",
-    Description: "发送邮件。需要用户已配置邮件账户。",
+    Description: "发送邮件。注意：正文使用 Markdown 格式编写，系统会自动转换为 HTML 发送。请善用标题、列表、表格等使内容清晰可读。",
     InputSchema: map[string]interface{}{
       "type": "object",
       "properties": map[string]interface{}{
         "to":      map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "收件人地址列表"},
-        "subject": map[string]interface{}{"type": "string", "description": "邮件主题"},
-        "body":    map[string]interface{}{"type": "string", "description": "邮件正文（支持 HTML）"},
+        "subject": map[string]interface{}{"type": "string", "description": "邮件主题，应简洁明确"},
+        "body":    map[string]interface{}{"type": "string", "description": "邮件正文，使用 Markdown 格式编写（系统自动转为 HTML），善用标题/列表/表格使内容清晰可读"},
+        "content": map[string]interface{}{"type": "string", "description": "邮件正文，使用 Markdown 格式编写（系统自动转为 HTML），与 body 字段等效"},
         "cc":      map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "抄送地址列表"},
         "bcc":     map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "密送地址列表"},
       },
@@ -52,12 +53,12 @@ var emailToolDefs = []ToolDef{
   },
   {
     Name:        "reply",
-    Description: "回复指定邮件。",
+    Description: "回复指定邮件。注意：正文使用 Markdown 格式编写，系统会自动转换为 HTML 发送。",
     InputSchema: map[string]interface{}{
       "type": "object",
       "properties": map[string]interface{}{
         "uid":      map[string]interface{}{"type": "integer", "description": "要回复的邮件 UID"},
-        "body":     map[string]interface{}{"type": "string", "description": "回复正文（支持 HTML）"},
+        "body":     map[string]interface{}{"type": "string", "description": "回复正文，使用 Markdown 格式编写（系统自动转为 HTML）"},
         "replyAll": map[string]interface{}{"type": "boolean", "description": "是否回复全部", "default": false},
       },
       "required": []string{"uid", "body"},
@@ -65,13 +66,13 @@ var emailToolDefs = []ToolDef{
   },
   {
     Name:        "forward",
-    Description: "转发指定邮件。",
+    Description: "转发指定邮件。注意：正文使用 Markdown 格式编写，系统会自动转换为 HTML 发送。",
     InputSchema: map[string]interface{}{
       "type": "object",
       "properties": map[string]interface{}{
         "uid":  map[string]interface{}{"type": "integer", "description": "要转发的邮件 UID"},
         "to":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "收件人地址列表"},
-        "body": map[string]interface{}{"type": "string", "description": "附加正文（支持 HTML）"},
+        "body": map[string]interface{}{"type": "string", "description": "附加正文，使用 Markdown 格式编写（系统自动转为 HTML）"},
       },
       "required": []string{"uid", "to"},
     },
@@ -225,6 +226,9 @@ func handleEmailSend(s *Server, c *gin.Context, id json.Number, args map[string]
   to := toStringSlice(args["to"])
   subject, _ := args["subject"].(string)
   body, _ := args["body"].(string)
+  if body == "" {
+    body, _ = args["content"].(string)
+  }
   cc := toStringSlice(args["cc"])
   bcc := toStringSlice(args["bcc"])
 
