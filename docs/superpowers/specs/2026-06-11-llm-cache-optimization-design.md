@@ -96,6 +96,21 @@ func buildOpenAIMessagesV2(system string, additions []string, messages []LLMMess
 
 `s.SystemAdditions` 字段持久化到会话元数据中（`live.jsonl` 第一行 session record），对话恢复时重新注入到 Engine 的 `pendingAdditions`。
 
+### 压缩与缓存的关系
+
+上下文的自动压缩（`internal/agent/compactor.go`）会替换旧消息为摘要，改变消息前缀：
+
+```
+压缩前: [frozenSystem, msg1, msg2, ..., msg48, msg49, msg50]
+压缩后: [frozenSystem, [历史摘要], recent_round_1, recent_round_2]
+```
+
+虽然 `[历史摘要]` 替代了 `msg1` 导致短时间 miss，但：
+
+1. **frozenSystem 在所有请求中都是前缀的一部分**，DeepSeek 的公共前缀检测很快会把它独立缓存
+2. 压缩摘要统一以 `[历史摘要]` 开头，更深一层的公共前缀 `frozenSystem + "[历史摘要]"` 也会被检测和缓存
+3. **compactor 不需要改动** — frozen system prompt 策略天然与压缩兼容
+
 ### 缓存命中监控
 
 日志记录每次 LLM 调用的缓存命中/miss token 数：
