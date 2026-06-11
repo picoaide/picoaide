@@ -39,6 +39,7 @@ type ChatRequest struct {
   Tools       []ToolDef
   MaxTokens   int
   Temperature float64
+  UserID      string
 }
 
 // ============================================================
@@ -49,7 +50,9 @@ func NewProvider(provider, modelID, baseURL, apiKey string) (Provider, error) {
   switch provider {
   case "anthropic":
     return NewAnthropicProvider(apiKey, baseURL, modelID), nil
-  case "openai", "openrouter", "deepseek", "qwen", "glm":
+  case "deepseek":
+    return NewDeepSeekProvider(apiKey, baseURL, modelID), nil
+  case "openai", "openrouter", "qwen", "glm":
     return NewOpenAIProvider(apiKey, baseURL, modelID), nil
   default:
     return NewOpenAIProvider(apiKey, baseURL, modelID), nil
@@ -360,9 +363,10 @@ func buildAnthropicContentBlocks(text string, toolCalls []ToolCall) []map[string
 // ============================================================
 
 type OpenAIProvider struct {
-  apiKey  string
-  baseURL string
-  model   string
+  apiKey       string
+  baseURL      string
+  model        string
+  providerType string
 }
 
 func NewOpenAIProvider(apiKey, baseURL, model string) *OpenAIProvider {
@@ -372,18 +376,29 @@ func NewOpenAIProvider(apiKey, baseURL, model string) *OpenAIProvider {
   return &OpenAIProvider{apiKey: apiKey, baseURL: baseURL, model: model}
 }
 
+func NewDeepSeekProvider(apiKey, baseURL, model string) *OpenAIProvider {
+  if baseURL == "" {
+    baseURL = "https://api.deepseek.com"
+  }
+  return &OpenAIProvider{apiKey: apiKey, baseURL: baseURL, model: model, providerType: "deepseek"}
+}
+
 func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb func(event StreamEvent)) error {
   client := openai.NewClient(
     option.WithAPIKey(p.apiKey),
     option.WithBaseURL(p.baseURL),
   )
 
-  msgs := buildOpenAIMessagesV2(req.System, req.Messages)
+  msgs := buildOpenAIMessagesV2(req.System, req.Messages, p.providerType)
 
   params := openai.ChatCompletionNewParams{
     Model:       p.model,
     Messages:    msgs,
     Temperature: openai.Opt(req.Temperature),
+  }
+
+  if p.providerType == "deepseek" && req.UserID != "" {
+    params.SetExtraFields(map[string]any{"user_id": req.UserID})
   }
   if req.MaxTokens > 0 {
     params.MaxTokens = openai.Opt(int64(req.MaxTokens))
@@ -509,7 +524,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb fu
   })
 }
 
-func buildOpenAIMessagesV2(system string, messages []LLMMessage) []openai.ChatCompletionMessageParamUnion {
+func buildOpenAIMessagesV2(system string, messages []LLMMessage, providerType string) []openai.ChatCompletionMessageParamUnion {
   var msgs []openai.ChatCompletionMessageParamUnion
   if system != "" {
     msgs = append(msgs, openai.SystemMessage(system))
@@ -532,20 +547,66 @@ func buildOpenAIMessagesV2(system string, messages []LLMMessage) []openai.ChatCo
             },
           })
         }
-        msgs = append(msgs, openai.ChatCompletionMessageParamUnion{
-          OfAssistant: &openai.ChatCompletionAssistantMessageParam{
-            Content:   openai.ChatCompletionAssistantMessageParamContentUnion{OfString: openai.Opt(m.Content)},
-            ToolCalls: tcs,
-          },
-        })
+        asst := &openai.ChatCompletionAssistantMessageParam{
+          Content:   openai.ChatCompletionAssistantMessageParamContentUnion{OfString: openai.Opt(m.Content)},
+          ToolCalls: tcs,
+        }
+        if providerType == "deepseek" && m.ReasoningContent != "" {
+          asst.SetExtraFields(map[string]any{"reasoning_content": m.ReasoningContent})
+        }
+        msgs = append(msgs, openai.ChatCompletionMessageParamUnion{OfAssistant: asst})
       } else {
-        msgs = append(msgs, openai.AssistantMessage(m.Content))
+        if providerType == "deepseek" && m.ReasoningContent != "" {
+          asst := &openai.ChatCompletionAssistantMessageParam{
+            Content: openai.ChatCompletionAssistantMessageParamContentUnion{OfString: openai.Opt(m.Content)},
+          }
+          asst.SetExtraFields(map[string]any{"reasoning_content": m.ReasoningContent})
+          msgs = append(msgs, openai.ChatCompletionMessageParamUnion{OfAssistant: asst})
+        } else {
+          msgs = append(msgs, openai.AssistantMessage(m.Content))
+        }
       }
     case "tool":
       msgs = append(msgs, openai.ToolMessage(m.Content, m.ToolCallID))
     }
   }
   return msgs
+}
+
+func buildDeepSeekMessages(messages []LLMMessage) []map[string]interface{} {
+  raw := make([]map[string]interface{}, 0, len(messages))
+  for _, m := range messages {
+    msg := map[string]interface{}{
+      "role": m.Role,
+    }
+    if m.Content != "" {
+      msg["content"] = m.Content
+    }
+    if m.ReasoningContent != "" {
+      msg["reasoning_content"] = m.ReasoningContent
+    }
+    if m.ToolCallID != "" {
+      msg["tool_call_id"] = m.ToolCallID
+    }
+    if len(m.ToolCalls) > 0 {
+      tcs := make([]map[string]interface{}, 0, len(m.ToolCalls))
+      for _, tc := range m.ToolCalls {
+        var args interface{}
+        json.Unmarshal([]byte(tc.Function.Arguments), &args)
+        tcs = append(tcs, map[string]interface{}{
+          "id":   tc.ID,
+          "type": tc.Type,
+          "function": map[string]interface{}{
+            "name":      tc.Function.Name,
+            "arguments": tc.Function.Arguments,
+          },
+        })
+      }
+      msg["tool_calls"] = tcs
+    }
+    raw = append(raw, msg)
+  }
+  return raw
 }
 
 

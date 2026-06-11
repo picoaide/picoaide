@@ -3,6 +3,7 @@ package agent
 import (
   "context"
   "encoding/json"
+  "strings"
   "sync"
   "testing"
   "time"
@@ -22,6 +23,52 @@ func (p *blockingProvider) StreamChat(ctx context.Context, _ *ChatRequest, _ fun
 // ============================================================
 // Engine.Process 正常对话流
 // ============================================================
+
+func TestAppendToSystemPrompt_AddsToPendingNotPreloaded(t *testing.T) {
+  e := NewEngine(testConfig(), nil, nil, nil)
+  e.AppendToSystemPrompt("tool hint")
+  if e.preloadedSystem != "" {
+    t.Errorf("preloadedSystem should remain empty, got %q", e.preloadedSystem)
+  }
+  if len(e.pendingAdditions) != 1 || e.pendingAdditions[0] != "tool hint" {
+    t.Errorf("pendingAdditions = %v, want [tool hint]", e.pendingAdditions)
+  }
+}
+
+func TestAppendToSystemPrompt_MultipleCalls(t *testing.T) {
+  e := NewEngine(testConfig(), nil, nil, nil)
+  e.AppendToSystemPrompt("first")
+  e.AppendToSystemPrompt("second")
+  if len(e.pendingAdditions) != 2 {
+    t.Errorf("pendingAdditions count = %d, want 2", len(e.pendingAdditions))
+  }
+}
+
+func TestBuildSystemPrompt_ExcludesPendingAdditions(t *testing.T) {
+  tools := NewToolRegistry()
+  e := NewEngine(testConfig(), nil, tools, nil)
+  e.preloadedServers = append(e.preloadedServers, "test") // prevent server summary
+  e.AppendToSystemPrompt("should not be here")
+  result := e.buildSystemPrompt("base content")
+  if strings.Contains(result, "should not be here") {
+    t.Errorf("system prompt should not contain pending additions: %s", result)
+  }
+  if !strings.Contains(result, "base content") {
+    t.Errorf("system prompt should contain base content")
+  }
+}
+
+func TestBuildSystemPrompt_FrozenAfterFirstBuild(t *testing.T) {
+  tools := NewToolRegistry()
+  e := NewEngine(testConfig(), nil, tools, nil)
+  e.preloadedServers = append(e.preloadedServers, "test")
+  first := e.buildSystemPrompt("base")
+  e.AppendToSystemPrompt("new hint")
+  second := e.buildSystemPrompt("base")
+  if first != second {
+    t.Errorf("system prompt should be frozen after first build: first=%q second=%q", first, second)
+  }
+}
 
 func TestEngine_NormalConversationFlow(t *testing.T) {
   provider := &mockProvider{responseText: "你好，有什么可以帮助你？"}

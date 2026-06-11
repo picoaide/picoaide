@@ -181,6 +181,18 @@ func TestToLLMMessage_emptyFields(t *testing.T) {
   }
 }
 
+func TestToLLMMessage_ReasoningContent(t *testing.T) {
+  msg := &Message{
+    Role:             RoleAssistant,
+    Content:          "visible text",
+    ReasoningContent: "thinking text",
+  }
+  llm := msg.ToLLMMessage()
+  if llm.ReasoningContent != "thinking text" {
+    t.Errorf("ReasoningContent = %q, want %q", llm.ReasoningContent, "thinking text")
+  }
+}
+
 // ============================================================
 // ModelConfig 直接使用
 // ============================================================
@@ -797,15 +809,16 @@ func TestRetryPolicy_DelayNegative(t *testing.T) {
 
 func TestNewProvider(t *testing.T) {
   tests := []struct {
-    provider   string
-    wantType   string
+    provider     string
+    wantType     string
+    wantDeepSeek bool
   }{
-    {"anthropic", "*agent.AnthropicProvider"},
-    {"openai", "*agent.OpenAIProvider"},
-    {"deepseek", "*agent.OpenAIProvider"},
-    {"qwen", "*agent.OpenAIProvider"},
-    {"glm", "*agent.OpenAIProvider"},
-    {"unknown", "*agent.OpenAIProvider"},
+    {"anthropic", "*agent.AnthropicProvider", false},
+    {"openai", "*agent.OpenAIProvider", false},
+    {"deepseek", "*agent.OpenAIProvider", true},
+    {"qwen", "*agent.OpenAIProvider", false},
+    {"glm", "*agent.OpenAIProvider", false},
+    {"unknown", "*agent.OpenAIProvider", false},
   }
   for _, tt := range tests {
     t.Run(tt.provider, func(t *testing.T) {
@@ -817,6 +830,12 @@ func TestNewProvider(t *testing.T) {
         fmt.Sprintf("%T", p), "*agent."), "&agent.")
       if got != strings.TrimPrefix(tt.wantType, "*agent.") {
         t.Errorf("NewProvider(%q) = %T, want %s", tt.provider, p, tt.wantType)
+      }
+      if op, ok := p.(*OpenAIProvider); ok {
+        isDeepSeek := op.providerType == "deepseek"
+        if isDeepSeek != tt.wantDeepSeek {
+          t.Errorf("NewProvider(%q) providerType = %q, want deepseek=%v", tt.provider, op.providerType, tt.wantDeepSeek)
+        }
       }
     })
   }

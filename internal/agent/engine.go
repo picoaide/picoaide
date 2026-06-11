@@ -106,11 +106,13 @@ type Engine struct {
   config            *AgentConfig
   skills            []*Skill
   subAgentMgr       *SubAgentManager
-  sessionKey        string   // 当前会话 key，压缩后写回 store
-  fsyncInterval     int      // 每隔 N 轮 fsync 一次会话，0 禁用
-  iterCount         int      // 当前 Process 的迭代计数
-  preloadedServers  []string // 子代理预加载的 MCP 服务器
-  preloadedSystem   string   // 追加到 system prompt 的内容（如工具指引）
+  sessionKey        string     // 当前会话 key，压缩后写回 store
+  fsyncInterval     int        // 每隔 N 轮 fsync 一次会话，0 禁用
+  iterCount         int        // 当前 Process 的迭代计数
+  preloadedServers  []string   // 子代理预加载的 MCP 服务器
+  preloadedSystem   string     // 追加到 system prompt 的内容（如工具指引）
+  frozenSystem      string     // 构建一次后冻结的 system prompt
+  pendingAdditions  []string   // AppendToSystemPrompt 累积的内容
 }
 
 func NewEngine(cfg *AgentConfig, provider Provider, tools *ToolRegistry, store *SessionStore) *Engine {
@@ -155,12 +157,10 @@ func (e *Engine) PreloadServer(serverName string) {
 }
 
 // AppendToSystemPrompt 追加内容到 system prompt 末尾
+// 内容不会修改 system prompt 本身，而是累积到 pendingAdditions，
+// 在 LLM 调用时作为 system 角色消息注入 messages 开头。
 func (e *Engine) AppendToSystemPrompt(text string) {
-  if e.preloadedSystem != "" {
-    e.preloadedSystem += "\n" + text
-  } else {
-    e.preloadedSystem = text
-  }
+  e.pendingAdditions = append(e.pendingAdditions, text)
 }
 
 // buildServerSummary 从工具注册表中生成 MCP 服务器摘要
@@ -340,10 +340,20 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         "temperature", temperature,
       )
 
+      // 注入 pendingAdditions 到 messages 开头（仅 DeepSeek 场景用于缓存优化，所有 provider 兼容）
+      msgsForLLM := llmMsgs
+      if len(e.pendingAdditions) > 0 {
+        additions := make([]LLMMessage, 0, len(e.pendingAdditions))
+        for _, a := range e.pendingAdditions {
+          additions = append(additions, LLMMessage{Role: "system", Content: a})
+        }
+        msgsForLLM = append(additions, llmMsgs...)
+      }
+
       llmErr = e.provider.StreamChat(iterCtx, &ChatRequest{
         Model:       modelID,
         System:      sysPrompt,
-        Messages:    llmMsgs,
+        Messages:    msgsForLLM,
         Tools:       toolDefs,
         MaxTokens:   maxTokens,
         Temperature: temperature,
@@ -608,8 +618,14 @@ func (e *Engine) prepareModelConfig(m ModelConfig) (maxIter, contextWindow, maxT
   return
 }
 
-// buildSystemPrompt 构建完整系统提示词（注入协议 + 技能 + MCP 摘要 + 预置内容）
+// buildSystemPrompt 构建完整系统提示词（注入协议 + 技能 + MCP 摘要）
+// 首次构建后冻结结果，后续调用返回缓存值。
+// AppendToSystemPrompt 追加的内容不在 system prompt 中，而是改为 messages。
 func (e *Engine) buildSystemPrompt(base string) string {
+  if e.frozenSystem != "" {
+    return e.frozenSystem
+  }
+
   result := AgentProtocol + "\n\n" + base
 
   if len(e.skills) > 0 {
@@ -631,6 +647,7 @@ func (e *Engine) buildSystemPrompt(base string) string {
     result = result + "\n\n" + e.preloadedSystem
   }
 
+  e.frozenSystem = result
   slog.Debug("agent.system_prompt_built", "sys_prompt_length", len(result))
   return result
 }
