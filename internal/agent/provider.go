@@ -397,8 +397,21 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb fu
     Temperature: openai.Opt(req.Temperature),
   }
 
-  if p.providerType == "deepseek" && req.UserID != "" {
-    params.SetExtraFields(map[string]any{"user_id": req.UserID})
+  if p.providerType == "deepseek" {
+    if req.UserID != "" {
+      params.SetExtraFields(map[string]any{"user_id": req.UserID})
+    }
+    // DeepSeek 思考模式强制 max 强度
+    _, hasEffort := params.ExtraFields()["reasoning_effort"]
+    if !hasEffort {
+      // 通过 extra_fields 注入，因为 SDK 的 ReasoningEffort 枚举不含 "max"
+      existing := params.ExtraFields()
+      if existing == nil {
+        existing = map[string]any{}
+      }
+      existing["reasoning_effort"] = "max"
+      params.SetExtraFields(existing)
+    }
   }
   if req.MaxTokens > 0 {
     params.MaxTokens = openai.Opt(int64(req.MaxTokens))
