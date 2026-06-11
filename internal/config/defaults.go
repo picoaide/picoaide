@@ -2,8 +2,6 @@ package config
 
 import (
   "fmt"
-
-  "github.com/picoaide/picoaide/internal/auth"
 )
 
 func DefaultGlobalConfig() *GlobalConfig {
@@ -62,7 +60,7 @@ func DefaultGlobalConfig() *GlobalConfig {
 func InitDBDefaults() error {
   cfg := DefaultGlobalConfig()
 
-  engine, err := auth.GetEngine()
+  engine, err := getEngine()
   if err != nil {
     return fmt.Errorf("获取数据库引擎失败: %w", err)
   }

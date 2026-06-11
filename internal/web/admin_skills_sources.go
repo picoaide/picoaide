@@ -12,7 +12,7 @@ import (
   "time"
 
   "github.com/gin-gonic/gin"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/skill"
   "github.com/picoaide/picoaide/internal/user"
@@ -200,8 +200,8 @@ func (s *Server) handleAdminSkillsSourcesRemove(c *gin.Context) {
   // 解绑所有来自该源的技能
   skills, _ := skill.ListSourceSkills(name)
   for _, sk := range skills {
-    auth.DeleteSkill(sk.Name)
-    users, _ := auth.GetUsersForSkill(sk.Name)
+    store.DeleteSkill(sk.Name)
+    users, _ := store.GetUsersForSkill(sk.Name)
     for _, username := range users {
       targetDir := filepath.Join(user.UserDir(s.loadConfig(), username), "skills", sk.Name)
       os.RemoveAll(targetDir)
@@ -506,7 +506,7 @@ func (s *Server) saveSkillsConfig() {
     slog.Error("序列化技能配置失败", "error", err)
     return
   }
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     slog.Error("获取数据库连接失败", "error", err)
     return

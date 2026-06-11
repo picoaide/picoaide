@@ -8,7 +8,7 @@ import (
   "sort"
   "time"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/util"
 )
@@ -35,12 +35,12 @@ func ValidateUsername(username string) error {
 
 // LoadWhitelist 从数据库读取白名单，返回用户名集合
 func LoadWhitelist() (map[string]bool, error) {
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     return nil, nil
   }
 
-  var entries []auth.WhitelistEntry
+  var entries []store.WhitelistEntry
   if err := engine.Find(&entries); err != nil {
     return nil, nil
   }
@@ -99,7 +99,7 @@ func EnsureUsersRoot(cfg *config.GlobalConfig) error {
 
 // GetUserList 获取所有用户列表（从数据库读取）
 func GetUserList(cfg *config.GlobalConfig) ([]string, error) {
-  localUsers, err := auth.GetAllLocalUsers()
+  localUsers, err := store.GetAllLocalUsers()
   if err != nil {
     return nil, err
   }
@@ -148,8 +148,8 @@ func InitUser(cfg *config.GlobalConfig, username string) error {
   }
 
   // 确保 MCP token 存在（不覆盖已有 token）
-  if existingToken, _ := auth.GetMCPToken(username); existingToken == "" {
-    if _, err := auth.GenerateMCPToken(username); err != nil {
+  if existingToken, _ := store.GetMCPToken(username); existingToken == "" {
+    if _, err := store.GenerateMCPToken(username); err != nil {
       fmt.Printf("  [警告] %s: 生成 MCP token 失败: %v\n", username, err)
     }
   }
@@ -226,7 +226,7 @@ func SyncCookies(cfg *config.GlobalConfig, username, domain, cookieStr string) e
   if err := ValidateUsername(username); err != nil {
     return err
   }
-  if err := auth.SetCookie(username, domain, cookieStr); err != nil {
+  if err := store.SetCookie(username, domain, cookieStr); err != nil {
     return fmt.Errorf("同步 Cookie 到数据库失败: %w", err)
   }
   return nil

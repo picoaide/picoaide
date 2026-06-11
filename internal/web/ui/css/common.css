@@ -60,13 +60,39 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.1rem 0; }
 
 /* ===== Forms ===== */
 .field { margin-bottom: .8rem; }
-.field label {
+.field label,
+.field-label {
   display: block;
   margin-bottom: .38rem;
   font-size: .82rem;
   color: #334155;
   font-weight: 650;
 }
+.field-group { margin-bottom: 1.2rem; }
+.field-group-title {
+  font-size: .85rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: .6rem;
+  padding-bottom: .3rem;
+  border-bottom: 1px solid var(--border);
+}
+.field-row {
+  display: flex;
+  gap: .6rem;
+  align-items: flex-start;
+}
+.input-group {
+  display: flex;
+  gap: .4rem;
+  align-items: flex-start;
+}
+.input-group .input,
+.input-group input,
+.input-group select {
+  flex: 1;
+}
+.flex-1 { flex: 1 !important; }
 
 input, select, textarea {
   width: 100%;
@@ -247,6 +273,17 @@ label.toggle-switch,
   border-bottom: 1px solid var(--border-light);
 }
 .card-footer { margin-top: .85rem; padding-top: .7rem; border-top: 1px solid var(--border-light); }
+.card-row {
+  display: flex;
+  padding: .3rem 0;
+  font-size: .88rem;
+  line-height: 1.5;
+}
+.card-label {
+  flex: 0 0 6rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
 
 /* ===== Task / Action Layout ===== */
 .section-stack { display: flex; flex-direction: column; gap: .9rem; }

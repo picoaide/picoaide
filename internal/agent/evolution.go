@@ -91,14 +91,27 @@ func (e *MemoryEvolution) Evolve(ctx context.Context, sessionKey string) (res *E
   }()
   slog.Debug("evolution.start", "session_key", sessionKey)
 
-  // 1. 收集会话消息（archive + live）
-  msgs := collectSessionMessages(e.store, sessionKey, e.maxMsgs)
-  if len(msgs) < 5 {
+  // 1. 收集会话消息（archive + live），跳过已进化的
+  allMsgs := collectSessionMessages(e.store, sessionKey, e.maxMsgs)
+  meta, _ := e.store.LoadMeta(sessionKey)
+  evolvedCount := 0
+  if meta != nil {
+    evolvedCount = meta.EvolvedCount
+  }
+  msgs := allMsgs
+  if evolvedCount > 0 && evolvedCount < len(allMsgs) {
+    msgs = allMsgs[evolvedCount:]
+  }
+  if len(msgs) < 5 && evolvedCount == 0 {
     slog.Debug("evolution.skip", "reason", "too_few_messages", "count", len(msgs))
     return &EvolutionResult{}, nil
   }
+  if len(msgs) == 0 {
+    slog.Debug("evolution.skip", "reason", "no_new_messages", "total", len(allMsgs), "evolved", evolvedCount)
+    return &EvolutionResult{}, nil
+  }
 
-  // 2. 检查是否有工具调用（排除纯对话 session）
+  // 2. 检查新消息中是否有工具调用
   hasToolCalls := false
   for _, m := range msgs {
     if m.Role == RoleAssistant && len(m.ToolCalls) > 0 {
@@ -107,7 +120,7 @@ func (e *MemoryEvolution) Evolve(ctx context.Context, sessionKey string) (res *E
     }
   }
   if !hasToolCalls {
-    slog.Debug("evolution.skip", "reason", "no_tool_calls")
+    slog.Debug("evolution.skip", "reason", "no_tool_calls_in_new_msgs", "new_count", len(msgs))
     return &EvolutionResult{}, nil
   }
 
@@ -160,10 +173,20 @@ func (e *MemoryEvolution) Evolve(ctx context.Context, sessionKey string) (res *E
 
   result.HasChanges = true
 
+  // 8. 更新进化标记
+  if meta == nil {
+    meta = &SessionMeta{Key: sessionKey}
+  }
+  meta.EvolvedCount = len(allMsgs)
+  if err := e.store.SaveMeta(sessionKey, meta); err != nil {
+    slog.Warn("evolution.save_meta_error", "error", err.Error())
+  }
+
   slog.Debug("evolution.complete",
     "decisions", len(result.Decisions),
     "knowledge", len(result.Knowledge),
     "preferences", len(result.Preferences),
+    "evolved_count", meta.EvolvedCount,
   )
 
   return &result, nil
@@ -565,6 +588,9 @@ func roughTokenCount(s string) int {
 }
 
 func enforceMemoryBudget(content string, maxTokens int) string {
+  if maxTokens <= 0 {
+    return content
+  }
   for roughTokenCount(content) > maxTokens {
     sections := parseMemorySections(content)
 
@@ -596,6 +622,9 @@ func enforceMemoryBudget(content string, maxTokens int) string {
 }
 
 func enforceUserBudget(content string, maxTokens int) string {
+  if maxTokens <= 0 {
+    return content
+  }
   for roughTokenCount(content) > maxTokens {
     sections := parseUserSections(content)
 

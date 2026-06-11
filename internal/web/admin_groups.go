@@ -10,7 +10,7 @@ import (
   "strings"
 
   "github.com/gin-gonic/gin"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
@@ -29,13 +29,13 @@ func (s *Server) handleAdminGroups(c *gin.Context) {
     writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
     return
   }
-  groups, err := auth.ListGroups()
+  groups, err := store.ListGroups()
   if err != nil {
     writeError(c, http.StatusInternalServerError, err.Error())
     return
   }
   if groups == nil {
-    groups = []auth.GroupInfo{}
+    groups = []store.GroupInfo{}
   }
   pager := parsePagination(c, 50, 200)
   if pager.Search != "" {
@@ -53,7 +53,7 @@ func (s *Server) handleAdminGroups(c *gin.Context) {
   writeJSON(c, http.StatusOK, struct {
     Success     bool             `json:"success"`
     UnifiedAuth bool             `json:"unified_auth"`
-    Groups      []auth.GroupInfo `json:"groups"`
+    Groups      []store.GroupInfo `json:"groups"`
     Page        int              `json:"page,omitempty"`
     PageSize    int              `json:"page_size,omitempty"`
     Total       int              `json:"total,omitempty"`
@@ -95,7 +95,7 @@ func (s *Server) handleAdminGroupCreate(c *gin.Context) {
     parentID = &pid
   }
   logger.DebugProcess("create_group", "group", name, "parent_id", parentID)
-  if err := auth.CreateGroup(name, "local", description, parentID); err != nil {
+  if err := store.CreateGroup(name, "local", description, parentID); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
@@ -125,20 +125,17 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "组名不能为空")
     return
   }
-  gid, err := auth.GetGroupID(name)
-  if err == nil {
-    auth.GetGroupMembersForDeploy(name)
-  }
+  gid, _ := store.GetGroupID(name)
 
   logger.DebugProcess("delete_group", "group", name)
-  if err := auth.DeleteGroup(name); err != nil {
+  if err := store.DeleteGroup(name); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
 
   // 共享文件夹清理：移除该组的关联
   if gid > 0 {
-    auth.RemoveGroupFromAllSharedFolders(gid)
+    store.RemoveGroupFromAllSharedFolders(gid)
   }
 
   logger.DebugSend("POST", "/api/admin/groups/delete", http.StatusOK, "group", name)
@@ -176,7 +173,7 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  if err := auth.AddUsersToGroup(groupName, usernames); err != nil {
+  if err := store.AddUsersToGroup(groupName, usernames); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
@@ -192,10 +189,10 @@ func validateLocalGroupMembers(usernames []string) error {
     if err := user.ValidateUsername(username); err != nil {
       return fmt.Errorf("用户 %s 不合法: %w", username, err)
     }
-    if !auth.UserExists(username) {
+    if !store.UserExists(username) {
       return fmt.Errorf("用户 %s 不存在", username)
     }
-    if auth.GetUserRole(username) != "user" || auth.GetUserSource(username) != "local" {
+    if store.GetUserRole(username) != "user" || store.GetUserSource(username) != "local" {
       return fmt.Errorf("用户 %s 不是本地普通用户", username)
     }
   }
@@ -227,7 +224,7 @@ func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
   // 审计日志：记录谁从组移除了用户
   logger.Audit("group.members.remove", "group", groupName, "username", username, "operator", s.getSessionUser(c))
 
-  if err := auth.RemoveUserFromGroup(groupName, username); err != nil {
+  if err := store.RemoveUserFromGroup(groupName, username); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
@@ -259,14 +256,14 @@ func (s *Server) handleAdminGroupSkillsBind(c *gin.Context) {
   }
 
   // 展开组成员，部署成功后绑定到每个用户
-  members, err := auth.GetGroupMembersForDeploy(groupName)
+  members, err := store.GetGroupMembersForDeploy(groupName)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "获取组成员失败: "+err.Error())
     return
   }
   userCount := 0
   for _, username := range members {
-    if err := auth.BindSkillToUser(username, skillName, "group"); err == nil {
+    if err := store.BindSkillToUser(username, skillName, "group"); err == nil {
       userCount++
     } else {
       slog.Warn("绑定技能到组成员失败", "skill", skillName, "group", groupName, "username", username, "error", err)
@@ -304,14 +301,14 @@ func (s *Server) handleAdminGroupSkillsUnbind(c *gin.Context) {
   }
 
   // 展开组成员，仅对 source 为 "group" 的记录解绑 + 清理文件
-  members, _ := auth.GetGroupMembersForDeploy(groupName)
+  members, _ := store.GetGroupMembersForDeploy(groupName)
   cleanedCount := 0
   for _, username := range members {
-    src, _ := auth.GetUserSkillSource(username, skillName)
+    src, _ := store.GetUserSkillSource(username, skillName)
     if src != "group" {
       continue
     }
-    if err := auth.UnbindSkillFromUser(username, skillName); err != nil {
+    if err := store.UnbindSkillFromUser(username, skillName); err != nil {
       slog.Error("解绑技能失败", "skill", skillName, "username", username, "error", err)
     }
     targetDir := filepath.Join(user.UserDir(s.loadConfig(), username), "skills", skillName)
@@ -340,7 +337,7 @@ func (s *Server) handleAdminGroupMembers(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "组名不能为空")
     return
   }
-  members, inheritedMembers, err := auth.GetGroupMembersWithSubGroups(groupName)
+  members, inheritedMembers, err := store.GetGroupMembersWithSubGroups(groupName)
   if err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
@@ -410,7 +407,7 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
   groupCount := 0
   userCount := 0
   groupResult, err := authsource.SyncGroups(authMode, s.loadConfig(), func(username string) error {
-    if !auth.UserExists(username) {
+    if !store.UserExists(username) {
       return s.initializeUser(username)
     }
     return nil
@@ -433,16 +430,16 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
 
 // getGroupSkills 查询指定组绑定的技能（通过 user_skills.source='group' 去重）
 func getGroupSkills(groupName string) []string {
-  members, _, err := auth.GetGroupMembersWithSubGroups(groupName)
+  members, _, err := store.GetGroupMembersWithSubGroups(groupName)
   if err != nil || len(members) == 0 {
     return nil
   }
   // 查询这些成员中 source='group' 的技能
   skillMap := make(map[string]bool)
   for _, username := range members {
-    skills, _ := auth.GetUserSkills(username)
+    skills, _ := store.GetUserSkills(username)
     for _, sk := range skills {
-      src, _ := auth.GetUserSkillSource(username, sk)
+      src, _ := store.GetUserSkillSource(username, sk)
       if src == "group" {
         skillMap[sk] = true
       }

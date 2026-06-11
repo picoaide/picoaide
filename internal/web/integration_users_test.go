@@ -4,7 +4,7 @@ import (
   "net/url"
   "testing"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 func TestAdminUsers_List(t *testing.T) {
@@ -63,7 +63,7 @@ func TestAdminUsers_ForbiddenForRegularUser(t *testing.T) {
 
 func TestDeletedUserSessionInvalidated(t *testing.T) {
   env := setupTestServer(t)
-  if err := auth.DeleteUser("testuser"); err != nil {
+  if err := store.DeleteUser("testuser"); err != nil {
     t.Fatalf("DeleteUser: %v", err)
   }
 
@@ -84,7 +84,7 @@ func TestAdminUsers_LDAPModeUsesSyncedLocalUsers(t *testing.T) {
   env.Cfg.Web.AuthMode = "ldap"
   env.Cfg.LDAP.Host = ""
 
-  if err := auth.EnsureExternalUser("ldapuser", "user", "ldap"); err != nil {
+  if err := store.EnsureExternalUser("ldapuser", "user", "ldap"); err != nil {
     t.Fatalf("EnsureExternalUser: %v", err)
   }
 
@@ -118,7 +118,7 @@ func TestAdminAuthLDAPUsers_UnifiedModeUsesSyncedLocalUsers(t *testing.T) {
   env.Cfg.Web.AuthMode = "ldap"
   env.Cfg.LDAP.Host = ""
 
-  if err := auth.EnsureExternalUser("ldapuser", "user", "ldap"); err != nil {
+  if err := store.EnsureExternalUser("ldapuser", "user", "ldap"); err != nil {
     t.Fatalf("EnsureExternalUser: %v", err)
   }
 
@@ -172,7 +172,7 @@ func TestAdminUserCreate_LocalModeSuccess(t *testing.T) {
   if result.Password == "" {
     t.Fatal("should return initial password")
   }
-  if !auth.UserExists("newuser") {
+  if !store.UserExists("newuser") {
     t.Fatal("newuser should exist")
   }
 }
@@ -218,7 +218,7 @@ func TestAdminUserBatchCreate_LocalModeMixedResults(t *testing.T) {
   if result.Created != 2 || result.Failed != 2 {
     t.Fatalf("created=%d failed=%d, want 2/2", result.Created, result.Failed)
   }
-  if !auth.UserExists("batch1") || !auth.UserExists("batch2") {
+  if !store.UserExists("batch1") || !store.UserExists("batch2") {
     t.Fatal("successful batch users should exist")
   }
 }
@@ -239,7 +239,7 @@ func TestAdminUserDelete_LocalModeSuccess(t *testing.T) {
   form := url.Values{"username": {"testuser"}}
   resp := env.postForm(t, "/api/admin/users/delete", "testadmin", form)
   assertStatus(t, resp, 200)
-  if auth.UserExists("testuser") {
+  if store.UserExists("testuser") {
     t.Fatal("testuser should be deleted")
   }
 }
@@ -249,7 +249,7 @@ func TestAdminUserDelete_LocalModeRejectsSuperadmin(t *testing.T) {
   form := url.Values{"username": {"testadmin"}}
   resp := env.postForm(t, "/api/admin/users/delete", "testadmin", form)
   assertStatus(t, resp, 400)
-  if !auth.IsSuperadmin("testadmin") {
+  if !store.IsSuperadmin("testadmin") {
     t.Fatal("testadmin should still exist")
   }
 }
@@ -260,7 +260,7 @@ func TestAdminUserDelete_UnifiedModeForbidden(t *testing.T) {
   form := url.Values{"username": {"testuser"}}
   resp := env.postForm(t, "/api/admin/users/delete", "testadmin", form)
   assertStatus(t, resp, 403)
-  if !auth.UserExists("testuser") {
+  if !store.UserExists("testuser") {
     t.Fatal("testuser should not be deleted in unified mode")
   }
 }
@@ -296,7 +296,7 @@ func TestSuperadminCreate_Success(t *testing.T) {
     t.Error("should return password")
   }
   // 验证角色
-  if !auth.IsSuperadmin("newadmin") {
+  if !store.IsSuperadmin("newadmin") {
     t.Error("should be superadmin")
   }
 }
@@ -321,13 +321,13 @@ func TestSuperadminDelete_SelfDeletion(t *testing.T) {
 func TestSuperadminDelete_Success(t *testing.T) {
   env := setupTestServer(t)
   // 先创建另一个超管
-  if err := auth.CreateUser("otheradmin", "pass123", "superadmin"); err != nil {
+  if err := store.CreateUser("otheradmin", "pass123", "superadmin"); err != nil {
     t.Fatalf("CreateUser: %v", err)
   }
   form := url.Values{"username": {"otheradmin"}}
   resp := env.postForm(t, "/api/admin/superadmins/delete", "testadmin", form)
   assertStatus(t, resp, 200)
-  if auth.IsSuperadmin("otheradmin") {
+  if store.IsSuperadmin("otheradmin") {
     t.Error("should be deleted")
   }
 }

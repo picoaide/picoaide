@@ -246,7 +246,10 @@ func CompactAndRewrite(ctx context.Context, store *SessionStore, key string, com
     return err
   }
   if len(compacted) < len(msgs) {
-    store.ReplaceLive(key, compacted)
+    if err := store.ReplaceLive(key, compacted); err != nil {
+      slog.Warn("compactor.replace_live_error", "error", err.Error())
+      return err
+    }
     store.SaveMeta(key, &SessionMeta{
       Summary: extractSummary(compacted),
       Count:   len(compacted),

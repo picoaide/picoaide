@@ -19,12 +19,13 @@ import (
 )
 
 type MCPToolManager struct {
-  mu            sync.Mutex
-  sessions      map[string]*mcp.ClientSession
-  tools         map[string]*mcpToolEntry
-  serverConfigs map[string]MCPServer
-  mcpToken      string
-  WorkspaceDir  string // 沙箱工作区路径，用于保存文件等
+  mu              sync.Mutex
+  sessions        map[string]*mcp.ClientSession
+  tools           map[string]*mcpToolEntry
+  serverConfigs   map[string]MCPServer
+  serverSummaries map[string]string // 服务器名 → 一行摘要
+  mcpToken        string
+  WorkspaceDir    string // 沙箱工作区路径，用于保存文件等
 }
 
 type mcpToolEntry struct {
@@ -34,9 +35,10 @@ type mcpToolEntry struct {
 
 func NewMCPToolManager() *MCPToolManager {
   return &MCPToolManager{
-    sessions:      make(map[string]*mcp.ClientSession),
-    tools:         make(map[string]*mcpToolEntry),
-    serverConfigs: make(map[string]MCPServer),
+    sessions:        make(map[string]*mcp.ClientSession),
+    tools:           make(map[string]*mcpToolEntry),
+    serverConfigs:   make(map[string]MCPServer),
+    serverSummaries: make(map[string]string),
   }
 }
 
@@ -118,10 +120,31 @@ func (m *MCPToolManager) connectOnce(ctx context.Context, name string, server *M
         delete(m.tools, existingName)
       }
     }
+    // 工具归属到对应的 MCP 服务器（browser/computer/agent/web-search-mcp-server 等）
     m.tools[entry.Name] = &mcpToolEntry{serverName: name, tool: entry}
   }
 
+  // 连接成功后自动生成服务器摘要
+  serverTools := m.collectServerTools(name)
+  m.serverSummaries[name] = generateServerSummary(name, serverTools)
+
   return nil
+}
+
+// collectServerTools 收集指定服务器的工具定义列表
+func (m *MCPToolManager) collectServerTools(serverName string) []ToolDef {
+  var defs []ToolDef
+  for displayName, entry := range m.tools {
+    if entry.serverName == serverName {
+      schema, _ := entry.tool.InputSchema.(map[string]interface{})
+      defs = append(defs, ToolDef{
+        Name:        displayName,
+        Description: entry.tool.Description,
+        InputSchema: schema,
+      })
+    }
+  }
+  return defs
 }
 
 // tryReconnect 尝试重新连接指定 MCP 服务器
@@ -141,15 +164,16 @@ func (m *MCPToolManager) tryReconnect(ctx context.Context, name string) error {
 func (m *MCPToolManager) RegisterAll(registry *ToolRegistry) {
   m.mu.Lock()
   defer m.mu.Unlock()
-  for _, entry := range m.tools {
+  for name, entry := range m.tools {
     registry.Register(&mcpToolExecutor{
-      name:         entry.tool.Name,
+      name:         name,
       desc:         entry.tool.Description,
       schema:       entry.tool.InputSchema,
       serverName:   entry.serverName,
       manager:      m,
       workspaceDir: m.WorkspaceDir,
     })
+    registry.SetServer(name, entry.serverName)
   }
 }
 
@@ -293,6 +317,148 @@ func saveImage(m map[string]interface{}, workspace string) string {
     return ""
   }
   return path
+}
+
+// Summary 返回指定 MCP 服务器的一行摘要
+func (m *MCPToolManager) Summary(serverName string) string {
+  m.mu.Lock()
+  defer m.mu.Unlock()
+  return m.serverSummaries[serverName]
+}
+
+// ============================================================
+// 服务器摘要生成
+// ============================================================
+
+// extractCapability 从工具描述中提取核心能力短语
+func extractCapability(desc string) string {
+  if desc == "" {
+    return ""
+  }
+  // 取第一个分句
+  if idx := strings.IndexAny(desc, "，。；,"); idx > 0 {
+    desc = desc[:idx]
+  }
+  // 去掉中文动词前缀
+  for _, prefix := range []string{"获取", "查询", "搜索", "调用", "读取"} {
+    if strings.HasPrefix(desc, prefix) {
+      desc = desc[len(prefix):]
+      break
+    }
+  }
+  desc = strings.TrimSpace(desc)
+  runes := []rune(desc)
+  if len(runes) > 20 {
+    desc = string(runes[:20])
+  }
+  return desc
+}
+
+// describeToolFromName 从工具名生成可读描述（英文 fallback）
+func describeToolFromName(name string) string {
+  // 取最后一个 _ 后面的部分（动词），去掉 get_/search_/list_ 前缀
+  name = strings.TrimPrefix(name, "get_")
+  name = strings.TrimPrefix(name, "set_")
+  name = strings.TrimPrefix(name, "search_")
+  name = strings.TrimPrefix(name, "list_")
+  name = strings.TrimPrefix(name, "create_")
+  name = strings.TrimPrefix(name, "delete_")
+  name = strings.ReplaceAll(name, "_", " ")
+  if len(name) > 30 {
+    name = name[:30]
+  }
+  return strings.TrimSpace(name)
+}
+
+// generateServerSummary 为 MCP 服务器生成一行摘要，含工具名供 AI 调用 query_server 时使用
+func generateServerSummary(serverName string, tools []ToolDef) string {
+  count := len(tools)
+  if count == 0 {
+    return fmt.Sprintf("%s（0 个工具）", serverName)
+  }
+
+  seen := map[string]bool{}
+  var caps []string
+
+  for _, t := range tools {
+    c := extractCapability(t.Description)
+    if c == "" {
+      c = describeToolFromName(t.Name)
+    }
+    if c != "" && !seen[c] {
+      // 提取工具名（去掉 mcp_<server>_ 前缀）
+      toolName := t.Name
+      parts := strings.SplitN(toolName, "_", 3)
+      if len(parts) == 3 {
+        toolName = parts[2]
+      }
+      caps = append(caps, fmt.Sprintf("%s(%s)", c, toolName))
+      seen[c] = true
+    }
+  }
+
+  if len(caps) > 5 {
+    caps = caps[:5]
+  }
+
+  return fmt.Sprintf("%s: %s（%d 个工具）", serverName, strings.Join(caps, "、"), count)
+}
+
+// ============================================================
+// QueryServerTool — MCP 代理调用工具
+// ============================================================
+
+type QueryServerTool struct {
+  Registry *ToolRegistry
+}
+
+func (t *QueryServerTool) Name() string { return "query_server" }
+
+func (t *QueryServerTool) Description() string {
+  return "快速调用 MCP 服务器的工具。适用于单次查询。批量任务请使用 subagent_task。参数 server 从「可用 MCP 服务器」列表中选取。"
+}
+
+func (t *QueryServerTool) Schema() map[string]interface{} {
+  return map[string]interface{}{
+    "type": "object",
+    "properties": map[string]interface{}{
+      "server": map[string]interface{}{
+        "type":        "string",
+        "description": "MCP 服务器名，如 tyc-mcp、browser",
+      },
+      "tool": map[string]interface{}{
+        "type":        "string",
+        "description": "工具名（不含 mcp_servers_ 前缀），如 get_company_info",
+      },
+      "args": map[string]interface{}{
+        "type":                 "object",
+        "description":          "工具参数",
+        "additionalProperties": true,
+      },
+    },
+    "required": []string{"server", "tool", "args"},
+  }
+}
+
+func (t *QueryServerTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
+  var params struct {
+    Server string                 `json:"server"`
+    Tool   string                 `json:"tool"`
+    Args   map[string]interface{} `json:"args"`
+  }
+  if err := json.Unmarshal(args, &params); err != nil {
+    return &ToolResult{Success: false, Data: "参数解析失败"}, nil
+  }
+  if params.Server == "" || params.Tool == "" {
+    return &ToolResult{Success: false, Data: "server 和 tool 不能为空"}, nil
+  }
+
+  executor := t.Registry.LookupByServer(params.Server, params.Tool)
+  if executor == nil {
+    return nil, fmt.Errorf("服务器 %s 上未找到工具 %s", params.Server, params.Tool)
+  }
+  rawArgs, _ := json.Marshal(params.Args)
+  return executor.Execute(ctx, rawArgs)
 }
 
 func keysOfMap(m map[string]interface{}) []string {

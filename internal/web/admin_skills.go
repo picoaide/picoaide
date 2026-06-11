@@ -10,7 +10,7 @@ import (
   "strings"
 
   "github.com/gin-gonic/gin"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/skill"
   "github.com/picoaide/picoaide/internal/user"
@@ -81,7 +81,7 @@ func (s *Server) handleAdminSkills(c *gin.Context) {
   }
 
   // 默认技能排前面
-  defaults, _ := auth.LoadDefaultSkills()
+  defaults, _ := store.LoadDefaultSkills()
   defaultSet := make(map[string]bool, len(defaults))
   for _, d := range defaults {
     defaultSet[d] = true
@@ -146,7 +146,7 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
   }
 
   deployFn := func(username string) error {
-    return auth.BindSkillToUser(username, skillName, skillSource)
+    return store.BindSkillToUser(username, skillName, skillSource)
   }
 
   if targetUser != "" {
@@ -168,7 +168,7 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
   var targets []string
   var getErr error
   if targetGroup != "" {
-    targets, getErr = auth.GetGroupMembersForDeploy(targetGroup)
+    targets, getErr = store.GetGroupMembersForDeploy(targetGroup)
     if getErr != nil {
       writeError(c, http.StatusBadRequest, "获取组成员失败: "+getErr.Error())
       return
@@ -261,7 +261,7 @@ func (s *Server) handleAdminSkillsRemove(c *gin.Context) {
     foundDir = name
   }
 
-  affectedUsers, _ := auth.GetUsersForSkill(name)
+  affectedUsers, _ := store.GetUsersForSkill(name)
 
   skillPath := filepath.Join(skill.SkillsRootDir(), foundSource, foundDir)
   if err := os.RemoveAll(skillPath); err != nil {
@@ -269,12 +269,12 @@ func (s *Server) handleAdminSkillsRemove(c *gin.Context) {
     return
   }
 
-  if err := auth.DeleteSkill(name); err != nil {
+  if err := store.DeleteSkill(name); err != nil {
     slog.Error("删除技能 DB 记录失败（目录已删除）", "skill", name, "error", err)
   }
 
   // 从默认技能列表中移除
-  if err := auth.RemoveFromDefaultSkills(name); err != nil {
+  if err := store.RemoveFromDefaultSkills(name); err != nil {
     slog.Error("从默认列表移除失败", "skill", name, "error", err)
   }
 
@@ -324,7 +324,7 @@ func (s *Server) handleAdminSkillsUserBind(c *gin.Context) {
     return
   }
 
-  if err := auth.BindSkillToUser(username, skillName, skillSource); err != nil {
+  if err := store.BindSkillToUser(username, skillName, skillSource); err != nil {
     slog.Error("绑定记录写入失败", "skill", skillName, "username", username, "error", err)
     writeError(c, http.StatusInternalServerError, "绑定失败: "+err.Error())
     return
@@ -362,7 +362,7 @@ func (s *Server) handleAdminSkillsUserUnbind(c *gin.Context) {
     return
   }
 
-  if err := auth.UnbindSkillFromUser(username, skillName); err != nil {
+  if err := store.UnbindSkillFromUser(username, skillName); err != nil {
     writeError(c, http.StatusInternalServerError, "解绑失败: "+err.Error())
     return
   }
@@ -384,7 +384,7 @@ func (s *Server) handleAdminSkillsUserSources(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "username 和 skill_name 不能为空")
     return
   }
-  sources, _ := auth.GetUserAllSkillSources(username, skillName)
+  sources, _ := store.GetUserAllSkillSources(username, skillName)
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success": true,
     "sources": sources,
@@ -399,7 +399,7 @@ func (s *Server) handleAdminSkillsDefaults(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  skills, err := auth.LoadDefaultSkills()
+  skills, err := store.LoadDefaultSkills()
   if err != nil {
     writeJSON(c, http.StatusOK, map[string]interface{}{
       "success": true,
@@ -430,7 +430,7 @@ func (s *Server) handleAdminSkillsDefaultsToggle(c *gin.Context) {
     writeError(c, http.StatusBadRequest, "技能名称不能为空")
     return
   }
-  skills, err := auth.ToggleDefaultSkill(name)
+  skills, err := store.ToggleDefaultSkill(name)
   if err != nil {
     writeError(c, http.StatusInternalServerError, err.Error())
     return
@@ -443,7 +443,7 @@ func (s *Server) handleAdminSkillsDefaultsToggle(c *gin.Context) {
 
 // applyDefaultSkillsToUser 为新用户绑定默认技能（不再复制到用户目录，启动沙箱时只读挂载）
 func (s *Server) applyDefaultSkillsToUser(username string) {
-  skills, err := auth.LoadDefaultSkills()
+  skills, err := store.LoadDefaultSkills()
   if err != nil {
     return
   }
@@ -451,7 +451,7 @@ func (s *Server) applyDefaultSkillsToUser(username string) {
     if err := util.SafePathSegment(skillName); err != nil {
       continue
     }
-    if err := auth.BindSkillToUser(username, skillName, "default"); err != nil {
+    if err := store.BindSkillToUser(username, skillName, "default"); err != nil {
       slog.Error("绑定默认技能失败", "skill", skillName, "username", username, "error", err)
     }
   }

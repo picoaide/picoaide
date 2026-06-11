@@ -30,13 +30,17 @@ const AgentProtocol = `# Agent Protocol
 - 所有事实性信息必须基于工具返回的结果。禁止凭训练数据编造具体数据、日期、引用、统计数据或人名
 - 工具返回空结果或错误时，如实告知用户，不要自行补充缺失的内容
 - 引用来源时只引用工具明确返回的内容，不添加推测
+- **禁止猜测自己的身份和模型名称**。被问及"你是什么模型"时回答"我是一个 AI 助手"即可，不要冒充特定模型
 
 ### 2. 工具优先
 - 回答事实性问题前，必须优先使用相关工具获取信息
 - 文件操作使用文件工具（read_file / write_file / edit_file / glob / grep）
-- 网络搜索使用 web_search，获取具体页面使用 web_fetch
+- 网络搜索使用 web-search-mcp-server（通过 query_server），获取具体页面使用 web_fetch
 - shell 命令使用 command 工具
 - 不要在自己的回答中猜测文件内容或命令输出，先使用工具确认
+- **说了就要做**：如果你在思考中说"我要调用 X 工具"，则**必须**在当轮实际调用该工具，禁止只在脑中规划而不执行
+- **禁止幻想工具调用**：如果你实际上没有调用某个工具（例如工具调用被拒绝或超时），禁止在回答中假装已经获取到了工具返回的数据。没有返回就是没有返回，如实告知用户
+- **验证工具结果**：工具返回后先检查结果是否合理，如果返回空或错误，不要自行编造数据填补
 
 ### 3. 输出规范
 - 回答使用中文，结构清晰
@@ -50,20 +54,17 @@ const AgentProtocol = `# Agent Protocol
 - 禁止读取或泄露敏感文件（/etc/shadow、.env、密钥文件、配置文件中的密码等）
 - 禁止向外部发送敏感数据
 
-## 子代理使用规范
+## 子代理（独立 AI）使用规范
 
-- 使用 subagent_task 工具启动子代理执行并行任务
-- 子代理适合文件搜索、数据处理、批量操作等后台任务
-- 子代理命名应当清晰描述其任务（如 file-search、data-transform）
-- 主代理负责等待子代理完成并整合其结果
-- **批量任务必须使用 subagent 并行处理**：当需要处理 N 个同类条目时，立即创建多个 subagent 并行执行，每个负责一批。**禁止逐个串行处理**
-
-## 大规模数据处理
-
-- **批量任务直接用 subagent 拆分**：将 N 个条目均分为多个批次，每个批次启动一个 subagent。例如 20 个客户查舆情 → 拆 4 个 subagent 各查 5 家
-- **主 agent 不做具体查询工作**：只负责拆分任务、分发批次、等所有 subagent 完成后汇总结果
-- 每个 subagent 完成后返回关键摘要，主 agent 不保留原始数据
-- 如果某个 subagent 失败，主 agent 重新分发该批次即可
+- 使用 subagent_spawn 工具创建子代理（独立 AI 实例），使用 subagent_collect 工具收集结果
+- 每个子代理拥有独立的 LLM 上下文、会话历史和全部工具调用能力（含 MCP 工具）
+- 子代理与主 agent 使用相同的模型和超时配置
+- 适合：批量客户查舆情、多文件并行处理、数据提取等需要 AI 判断的复杂任务
+- **批量任务必须使用子代理并行处理**：先 spawn 所有子代理，再逐一 collect，实现真正的并行执行
+  例如 50 个客户查舆情 → 拆 5 个子代理各查 10 家：
+  1. 依次调用 subagent_spawn(name="batch1", task="查前 10 家"), subagent_spawn(name="batch2", task="查下 10 家")...
+  2. 然后逐一调用 subagent_collect(name="batch1"), subagent_collect(name="batch2")... 获取结果
+- 如果某个子代理失败，主 agent 重新分发该批次即可
 
 ## 技能使用规范
 
@@ -73,7 +74,8 @@ const AgentProtocol = `# Agent Protocol
 
 ## 错误处理
 
-- 工具调用失败时，先重试一次，再换用其他方式
+- 工具调用失败时，重试一次；再次失败则如实告知用户错误信息
+- **禁止在任务完成后继续执行无关操作**：当主要任务（如发送邮件、查询信息）已执行完毕，直接输出结论给用户，不要继续调用其他工具
 - LLM 调用失败或超时时，保存已完成的进度，告知用户已完成的步骤
 - 所有错误信息如实反馈给用户
 
@@ -98,16 +100,20 @@ const AgentProtocol = `# Agent Protocol
 // ============================================================
 
 type Engine struct {
-  provider      Provider
-  tools         *ToolRegistry
-  store         *SessionStore
-  compactor     *Compactor
-  config        *AgentConfig
-  skills        []*Skill
-  subAgentMgr   *SubAgentManager
-  sessionKey    string // 当前会话 key，压缩后写回 store
-  fsyncInterval int    // 每隔 N 轮 fsync 一次会话，0 禁用
-  iterCount     int    // 当前 Process 的迭代计数
+  provider          Provider
+  tools             *ToolRegistry
+  store             *SessionStore
+  compactor         *Compactor
+  config            *AgentConfig
+  skills            []*Skill
+  subAgentMgr       *SubAgentManager
+  sessionKey        string     // 当前会话 key，压缩后写回 store
+  fsyncInterval     int        // 每隔 N 轮 fsync 一次会话，0 禁用
+  iterCount         int        // 当前 Process 的迭代计数
+  preloadedServers  []string   // 子代理预加载的 MCP 服务器
+  preloadedSystem   string     // 追加到 system prompt 的内容（如工具指引）
+  frozenSystem      string     // 构建一次后冻结的 system prompt
+  pendingAdditions  []string   // AppendToSystemPrompt 累积的内容
 }
 
 func NewEngine(cfg *AgentConfig, provider Provider, tools *ToolRegistry, store *SessionStore) *Engine {
@@ -117,7 +123,6 @@ func NewEngine(cfg *AgentConfig, provider Provider, tools *ToolRegistry, store *
     store:         store,
     compactor:     NewCompactor(DefaultCompactionConfig()),
     config:        cfg,
-    subAgentMgr:   NewSubAgentManager(),
     fsyncInterval: 5,
   }
 }
@@ -136,6 +141,43 @@ func (e *Engine) SetSkills(skills []*Skill) {
 
 func (e *Engine) SubAgentManager() *SubAgentManager {
   return e.subAgentMgr
+}
+
+func (e *Engine) SetSubAgentManager(mgr *SubAgentManager) {
+  e.subAgentMgr = mgr
+}
+
+// PreloadServer 预加载指定 MCP 服务器的工具到引擎工具列表
+func (e *Engine) PreloadServer(serverName string) {
+  for _, s := range e.preloadedServers {
+    if s == serverName {
+      return
+    }
+  }
+  e.preloadedServers = append(e.preloadedServers, serverName)
+}
+
+// AppendToSystemPrompt 追加内容到 system prompt 末尾
+// 内容不会修改 system prompt 本身，而是累积到 pendingAdditions，
+// 在 LLM 调用时作为 system 角色消息注入 messages 开头。
+func (e *Engine) AppendToSystemPrompt(text string) {
+  e.pendingAdditions = append(e.pendingAdditions, text)
+}
+
+// buildServerSummary 从工具注册表中生成 MCP 服务器摘要
+func (e *Engine) buildServerSummary() string {
+  servers := e.tools.ListServers()
+  if len(servers) == 0 {
+    return ""
+  }
+  var lines []string
+  for _, s := range servers {
+    // 尝试从 MCP 工具管理中获取摘要，如果没有则从工具列表生成
+    tools := e.tools.ListByServer(s)
+    summary := generateServerSummary(s, tools)
+    lines = append(lines, "- "+summary)
+  }
+  return strings.Join(lines, "\n")
 }
 
 // fsyncSession 持久化当前消息列表到 live.jsonl
@@ -187,69 +229,22 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
   }
   llmMsgs = append(llmMsgs, msg.ToLLMMessage())
 
-  // 注入 Agent Protocol 到系统提示词首部
-  sysPrompt = AgentProtocol + "\n\n" + sysPrompt
-
-  // 追加技能内容到系统提示词
-  if len(e.skills) > 0 {
-    skillsPrompt := BuildSkillsPrompt(e.skills)
-    if skillsPrompt != "" {
-      sysPrompt = sysPrompt + "\n\n" + skillsPrompt
-    }
-  }
-
-  slog.Debug("agent.system_prompt_built", "sys_prompt_length", len(sysPrompt))
+  sysPrompt = e.buildSystemPrompt(sysPrompt)
 
   var fullResponse string
   var toolCallsExecuted bool
 
   m := e.config.Model
   modelID := m.ModelID
-  maxIter := m.MaxIter
-  contextWindow := m.ContextWindow
-  if contextWindow <= 0 {
-    contextWindow = 200000
-  }
-
-  // 系统提示词太长时截断，保证回复空间
+  maxIter, contextWindow, maxTokens, temperature := e.prepareModelConfig(m)
   sysPrompt = truncatePrompt(sysPrompt, llmMsgs, e.compactor, contextWindow)
-  if maxIter <= 0 {
-    maxIter = e.config.MaxIter
-    if maxIter <= 0 {
-      maxIter = 20
-    }
-  }
-  // 使用管理员配置的 max_tokens，未设置时默认为 100000（不硬截断，通过 prompt 控制）
-  maxTokens := m.MaxTokens
-  if maxTokens <= 0 {
-    maxTokens = 100000
-  }
-  temperature := m.Temperature
-  if temperature <= 0 {
-    temperature = 0.7
+
+  if e.subAgentMgr != nil {
+    e.subAgentMgr.SetParentCb(cb)
   }
 
-  slog.Debug("agent.model_config",
-    "model_id", modelID,
-    "max_iter", maxIter,
-    "context_window", contextWindow,
-    "max_tokens", maxTokens,
-    "temperature", temperature,
-  )
-
-  // 父 ctx（来自 main.go）用于整体取消（用户停止）
-  // 但它的超时是整个 Process 累计的（request_timeout 秒）。
-  // 多轮工具调用很容易超时，所以用独立 context 做单轮超时：
-  // cancelCtx 由父 ctx 的 cancel 传播而来，迭代超时从 cancelCtx 派生。
-  cancelCtx, cancelAll := context.WithCancel(context.Background())
+  cancelCtx, cancelAll := e.setupExecContext(ctx)
   defer cancelAll()
-  go func() {
-    select {
-    case <-ctx.Done():
-      cancelAll()
-    case <-cancelCtx.Done():
-    }
-  }()
   perIterTimeout := m.RequestTimeout
   if perIterTimeout <= 0 {
     perIterTimeout = 120
@@ -277,7 +272,9 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     // 主动压缩：多轮压缩直至 token 数低于可用预算
     if e.compactor != nil && overflow {
       slog.Debug("agent.proactive_compact", "token_count", tokenCount, "budget", usableTokens)
+      cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "start"})})
       for pass := 0; pass < 10; pass++ {
+        time.Sleep(10 * time.Millisecond) // 让出调度，使 events 能送达浏览器
         compacted, err := compactLLMMessages(iterCtx, e.compactor, llmMsgs, usableTokens)
         if err != nil {
           slog.Debug("agent.compact_fallback", "error", err.Error())
@@ -309,6 +306,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         }
       }
       slog.Debug("agent.after_proactive_compact", "token_count", tokenCount, "message_count", len(llmMsgs))
+      cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "done"})})
     }
 
     // 发送上下文进度事件
@@ -322,7 +320,11 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       }),
     })
 
-    toolDefs := e.tools.Resolve(iterCtx)
+    // 构建工具列表：基础工具 + 预加载的 MCP 服务器工具
+    toolDefs := e.tools.ListBasic()
+    for _, srv := range e.preloadedServers {
+      toolDefs = append(toolDefs, e.tools.ListByServer(srv)...)
+    }
     var pendingTools []ToolCallData
     var currentResp string
 
@@ -339,10 +341,20 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         "temperature", temperature,
       )
 
+      // 注入 pendingAdditions 到 messages 开头（仅 DeepSeek 场景用于缓存优化，所有 provider 兼容）
+      msgsForLLM := llmMsgs
+      if len(e.pendingAdditions) > 0 {
+        additions := make([]LLMMessage, 0, len(e.pendingAdditions))
+        for _, a := range e.pendingAdditions {
+          additions = append(additions, LLMMessage{Role: "system", Content: a})
+        }
+        msgsForLLM = append(additions, llmMsgs...)
+      }
+
       llmErr = e.provider.StreamChat(iterCtx, &ChatRequest{
         Model:       modelID,
         System:      sysPrompt,
-        Messages:    llmMsgs,
+        Messages:    msgsForLLM,
         Tools:       toolDefs,
         MaxTokens:   maxTokens,
         Temperature: temperature,
@@ -364,6 +376,8 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         case "finish":
           cb(event)
         case "error":
+          cb(event)
+        case "reasoning":
           cb(event)
         }
       })
@@ -399,6 +413,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       if llmRetry < maxLLMRetries {
         llmRetry++
         slog.Warn("agent.llm_retry", "retry", llmRetry, "max", maxLLMRetries, "error", llmErr.Error())
+        cb(StreamEvent{Type: "llm_retry", Data: mustJSON(map[string]int{"retry": llmRetry, "max": maxLLMRetries})})
         iterCancel()
         iterCtx, iterCancel = context.WithTimeout(cancelCtx, time.Duration(perIterTimeout)*time.Second)
         pendingTools = nil
@@ -413,6 +428,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       iterCancel()
       taskDoneReason = "error"
       slog.Error("agent.llm_error", "error", llmErr.Error())
+      cb(StreamEvent{Type: "error", Data: mustJSON(fmt.Sprintf("LLM 调用失败: %s", llmErr.Error()))})
       err = fmt.Errorf("LLM 调用失败: %w", llmErr)
       return
     }
@@ -469,22 +485,13 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         inputPreview = inputPreview[:200] + "..."
       }
       slog.Debug("agent.tool_execute_start", "tool", tc.Name, "id", tc.ID, "input_preview", inputPreview)
+      cb(StreamEvent{Type: "tool_progress", Data: mustJSON(map[string]interface{}{"tool": tc.Name, "status": "running"})})
 
       result, execErr := e.tools.Execute(iterCtx, tc.Name, tc.Input)
       if execErr != nil {
         result = &ToolResult{Success: false, Data: fmt.Sprintf("工具执行失败: %s", execErr)}
         slog.Debug("agent.tool_execute_error", "tool", tc.Name, "error", execErr.Error())
       } else {
-        // 工具结果太大时自动压缩摘要，避免撑爆上下文
-        autoCompact := len(result.Data) > 2000 && e.compactor != nil
-        if autoCompact {
-          compactPrompt := fmt.Sprintf("用一句话概括以下工具返回结果的核心信息（保持关键数据）：\n%s", result.Data)
-          compacted, compactErr := e.compactor.SummarizeText(iterCtx, compactPrompt)
-          if compactErr == nil && len(compacted) > 0 && len(compacted) < len(result.Data) {
-            slog.Debug("agent.tool_result_compacted", "tool", tc.Name, "before", len(result.Data), "after", len(compacted))
-            result.Data = "[自动摘要] " + compacted
-          }
-        }
         resultPreview := result.Data
         if len(resultPreview) > 200 {
           resultPreview = resultPreview[:200] + "..."
@@ -509,25 +516,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     }
     pendingTools = nil
     toolCallsExecuted = true
-    // 回合后压缩：工具执行后 token 超 50% 则预压缩，避免下轮溢出
-    if e.compactor != nil {
-      postCount := estimateTokens(sysPrompt, llmMsgs)
-      if postCount >= usableTokens/2 {
-        slog.Debug("agent.post_turn_compact", "token_count", postCount, "threshold", usableTokens*3/4)
-        for pass := 0; pass < 10; pass++ {
-          compacted, err := compactLLMMessages(context.Background(), e.compactor, llmMsgs, usableTokens)
-          if err != nil {
-            llmMsgs = trimMessages(llmMsgs)
-            break
-          }
-          llmMsgs = compacted
-          if estimateTokens(sysPrompt, llmMsgs) < usableTokens {
-            break
-          }
-        }
-        slog.Debug("agent.post_turn_compact_done", "token_count", estimateTokens(sysPrompt, llmMsgs))
-      }
-    }
+    e.postTurnCompaction(sysPrompt, &llmMsgs, usableTokens, cb)
 
     // 定期 fsync 会话
     e.iterCount++
@@ -543,6 +532,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     if !toolCallsExecuted {
       taskDoneReason = "error"
       slog.Debug("agent.empty_response")
+      cb(StreamEvent{Type: "error", Data: mustJSON("LLM 返回空响应，请重试")})
       err = fmt.Errorf("LLM 返回空响应")
       return
     }
@@ -559,6 +549,108 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
 
   cb(FinishEvent(fullResponse, map[string]int{}))
   return nil
+}
+
+// postTurnCompaction 工具执行后进行 token 压缩，防止下轮溢出
+func (e *Engine) postTurnCompaction(sysPrompt string, llmMsgs *[]LLMMessage, usableTokens int, cb func(StreamEvent)) {
+  if e.compactor == nil {
+    return
+  }
+  postCount := estimateTokens(sysPrompt, *llmMsgs)
+  if postCount < usableTokens/2 {
+    return
+  }
+  slog.Debug("agent.post_turn_compact", "token_count", postCount, "threshold", usableTokens*3/4)
+  cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "start"})})
+  for pass := 0; pass < 10; pass++ {
+    time.Sleep(10 * time.Millisecond)
+    compacted, err := compactLLMMessages(context.Background(), e.compactor, *llmMsgs, usableTokens)
+    if err != nil {
+      *llmMsgs = trimMessages(*llmMsgs)
+      break
+    }
+    *llmMsgs = compacted
+    if estimateTokens(sysPrompt, *llmMsgs) < usableTokens {
+      break
+    }
+  }
+  cb(StreamEvent{Type: "compressing", Data: mustJSON(map[string]string{"status": "done"})})
+  slog.Debug("agent.post_turn_compact_done", "token_count", estimateTokens(sysPrompt, *llmMsgs))
+}
+
+// setupExecContext 创建独立执行 context，父 ctx 取消时传播
+func (e *Engine) setupExecContext(ctx context.Context) (context.Context, context.CancelFunc) {
+  cancelCtx, cancelAll := context.WithCancel(context.Background())
+  go func() {
+    <-ctx.Done()
+    cancelAll()
+  }()
+  return cancelCtx, cancelAll
+}
+
+// prepareModelConfig 提取并兜底模型配置参数
+func (e *Engine) prepareModelConfig(m ModelConfig) (maxIter, contextWindow, maxTokens int, temperature float64) {
+  maxIter = m.MaxIter
+  contextWindow = m.ContextWindow
+  if contextWindow <= 0 {
+    contextWindow = 200000
+  }
+  if maxIter <= 0 {
+    maxIter = e.config.MaxIter
+    if maxIter <= 0 {
+      maxIter = 20
+    }
+  }
+  maxTokens = m.MaxTokens
+  if maxTokens <= 0 {
+    maxTokens = 16384
+  }
+  temperature = m.Temperature
+  if temperature <= 0 {
+    temperature = 0.7
+  }
+  slog.Debug("agent.model_config",
+    "model_id", m.ModelID,
+    "max_iter", maxIter,
+    "context_window", contextWindow,
+    "max_tokens", maxTokens,
+    "temperature", temperature,
+  )
+  return
+}
+
+// buildSystemPrompt 构建完整系统提示词（注入协议 + 技能 + MCP 摘要）
+// 首次构建后冻结结果，后续调用返回缓存值。
+// AppendToSystemPrompt 追加的内容不在 system prompt 中，而是改为 messages。
+func (e *Engine) buildSystemPrompt(base string) string {
+  if e.frozenSystem != "" {
+    return e.frozenSystem
+  }
+
+  result := AgentProtocol + "\n\n" + base
+
+  if len(e.skills) > 0 {
+    skillsPrompt := BuildSkillsPrompt(e.skills)
+    if skillsPrompt != "" {
+      result = result + "\n\n" + skillsPrompt
+    }
+  }
+
+  if len(e.preloadedServers) == 0 {
+    serverSummary := e.buildServerSummary()
+    if serverSummary != "" {
+      result = result + "\n\n## 可用 MCP 服务器\n" + serverSummary +
+        "\n\n使用 query_server 工具快速调用某个 MCP 服务器的工具。批量任务请使用 subagent_spawn + subagent_collect。"
+    }
+  }
+
+  if e.preloadedSystem != "" {
+    result = result + "\n\n" + e.preloadedSystem
+  }
+
+  e.frozenSystem = result
+  slog.Debug("agent.system_prompt_built", "sys_prompt_length", len(result))
+  return result
 }
 
 // ============================================================

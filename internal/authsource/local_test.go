@@ -3,7 +3,7 @@ package authsource
 import (
   "testing"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 func TestLocalProviderDisplayName(t *testing.T) {
@@ -21,14 +21,14 @@ func TestLocalProviderConfigFields(t *testing.T) {
 }
 
 func TestLocalProviderAuthenticate(t *testing.T) {
-  auth.ResetDB()
+  store.ResetDB()
   tmpDir := t.TempDir()
-  if err := auth.InitDB(tmpDir); err != nil {
+  if err := store.InitDB(tmpDir); err != nil {
     t.Fatalf("InitDB: %v", err)
   }
-  defer auth.ResetDB()
+  defer store.ResetDB()
 
-  if err := auth.CreateUser("testuser", "password123", "user"); err != nil {
+  if err := store.CreateUser("testuser", "password123", "user"); err != nil {
     t.Fatalf("CreateUser: %v", err)
   }
 

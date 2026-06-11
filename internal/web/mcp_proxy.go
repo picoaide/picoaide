@@ -13,7 +13,7 @@ import (
   "strings"
   "sync"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 // ============================================================
@@ -50,7 +50,7 @@ var globalMCPManager = &MCPProxyManager{proxies: make(map[string]*MCPProxy)}
 
 // LoadMCPServers 从数据库加载所有启用的 MCP 服务器并启动代理
 func LoadMCPServers(ctx context.Context) error {
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     return fmt.Errorf("获取数据库连接失败: %w", err)
   }
@@ -124,10 +124,16 @@ func LoadMCPServers(ctx context.Context) error {
   globalMCPManager.proxies = m.proxies
   globalMCPManager.mu.Unlock()
 
-  // 停止不再使用（从新配置中移除）的旧代理子进程
+  // 为每个代理注册独立的 MCP SSE 服务（像 browser/computer 一样）
+  for name, proxy := range m.proxies {
+    registerProxyService(name, proxy.tools)
+  }
+
+  // 注销已被移除的代理服务
   for name, old := range oldProxies {
     if _, keep := m.proxies[name]; !keep {
       old.stop()
+      unregisterService(name)
     }
   }
 
@@ -149,33 +155,17 @@ func fetchProxyTools(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
 
 // fetchStdioTools 通过子进程 stdio 获取工具列表
 func fetchStdioTools(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
-  tools, err := mcpStdioHandshake(ctx, proxy)
-  if err != nil {
-    return nil, fmt.Errorf("stdio 握手失败: %w", err)
-  }
-  return prefixToolNames(proxy.Name, tools), nil
+  return mcpStdioHandshake(ctx, proxy)
 }
 
 // fetchHTTPTools 通过 HTTP 请求获取工具列表
 func fetchHTTPTools(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
-  tools, err := mcpHTTPHandshake(ctx, proxy)
-  if err != nil {
-    return nil, fmt.Errorf("HTTP 握手失败: %w", err)
-  }
-  return prefixToolNames(proxy.Name, tools), nil
+  return mcpHTTPHandshake(ctx, proxy)
 }
 
-// prefixToolNames 为工具名添加 mcp_<server_name>_ 前缀（幂等）
-func prefixToolNames(serverName string, tools []ToolDef) []ToolDef {
-  prefix := "mcp_" + serverName + "_"
-  prefixed := make([]ToolDef, len(tools))
-  for i, t := range tools {
-    prefixed[i] = t
-    if !strings.HasPrefix(t.Name, prefix) {
-      prefixed[i].Name = prefix + t.Name
-    }
-  }
-  return prefixed
+// registerProxyService 为 MCP 代理注册独立的 SSE 服务
+func registerProxyService(name string, tools []ToolDef) {
+  RegisterPicoaideService(name, tools, "picoaide-"+name)
 }
 
 // ============================================================
@@ -213,6 +203,25 @@ func (m *MCPProxyManager) ToolCount(name string) int {
   proxy.mu.Lock()
   defer proxy.mu.Unlock()
   return len(proxy.tools)
+}
+
+// ListProxyServices 返回所有已注册的第三方 MCP 代理服务名列表
+func ListProxyServices() []string {
+  globalMCPManager.mu.RLock()
+  defer globalMCPManager.mu.RUnlock()
+  names := make([]string, 0, len(globalMCPManager.proxies))
+  for name := range globalMCPManager.proxies {
+    names = append(names, name)
+  }
+  return names
+}
+
+// GetProxy 按名称获取 MCP 代理
+func (m *MCPProxyManager) GetProxy(name string) (*MCPProxy, bool) {
+  m.mu.RLock()
+  defer m.mu.RUnlock()
+  p, ok := m.proxies[name]
+  return p, ok
 }
 
 // GetServerTools 返回指定 MCP 服务器的全部工具列表
@@ -448,53 +457,62 @@ func mcpHTTPHandshake(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
     if err != nil {
       return nil, "", fmt.Errorf("创建 HTTP 请求失败: %w", err)
     }
-    httpReq.Header.Set("Content-Type", "application/json")
-    for k, v := range proxy.Headers {
-      httpReq.Header.Set(k, v)
-    }
-    if sessionID != "" {
-      httpReq.Header.Set("Mcp-Session-Id", sessionID)
-    }
+  httpReq.Header.Set("Content-Type", "application/json")
+  httpReq.Header.Set("Mcp-Protocol-Version", "2024-11-05")
+  for k, v := range proxy.Headers {
+    httpReq.Header.Set(k, v)
+  }
+  if sessionID != "" {
+    httpReq.Header.Set("Mcp-Session-Id", sessionID)
+  }
 
-    httpResp, err := client.Do(httpReq)
-    if err != nil {
-      return nil, "", fmt.Errorf("HTTP 请求失败: %w", err)
-    }
-    defer httpResp.Body.Close()
+  httpResp, err := client.Do(httpReq)
+  if err != nil {
+    return nil, "", fmt.Errorf("HTTP 请求失败: %w", err)
+  }
+  defer httpResp.Body.Close()
 
-    // 检查响应中的 Session ID
-    newSessionID := httpResp.Header.Get("Mcp-Session-Id")
-    if newSessionID != "" {
-      sessionID = newSessionID
-    }
+  // 检查响应中的 Session ID
+  newSessionID := httpResp.Header.Get("Mcp-Session-Id")
+  if newSessionID != "" {
+    sessionID = newSessionID
+  }
 
-    body, err := io.ReadAll(httpResp.Body)
-    if err != nil {
-      return nil, "", fmt.Errorf("读取 HTTP 响应失败: %w", err)
-    }
+  // 读取响应体
+  body, err := io.ReadAll(httpResp.Body)
+  if err != nil {
+    return nil, "", fmt.Errorf("读取 HTTP 响应失败: %w", err)
+  }
 
-    var resp struct {
-      JSONRPC string          `json:"jsonrpc"`
-      ID      json.Number     `json:"id"`
-      Result  json.RawMessage `json:"result"`
-      Error   *struct {
-        Code    int    `json:"code"`
-        Message string `json:"message"`
-      } `json:"error"`
-    }
-    if err := json.Unmarshal(body, &resp); err != nil {
-      return nil, "", fmt.Errorf("解析 HTTP 响应 JSON 失败: %w (body: %s)", err, string(body))
-    }
+  // 尝试解析为 JSON-RPC（普通 HTTP 或 SSE data 行内嵌 JSON）
+  // 对于 SSE 响应，body 是 "data: {...}\n\ndata: {...}" 格式
+  parseBody := body
+  if httpResp.Header.Get("Content-Type") == "text/event-stream" || bytes.HasPrefix(bytes.TrimSpace(body), []byte("data: ")) {
+    parseBody = extractSSEJSON(body)
+  }
 
-    if resp.Error != nil {
-      return nil, "", fmt.Errorf("MCP 错误 (code=%d): %s", resp.Error.Code, resp.Error.Message)
-    }
+  var resp struct {
+    JSONRPC string          `json:"jsonrpc"`
+    ID      json.Number     `json:"id"`
+    Result  json.RawMessage `json:"result"`
+    Error   *struct {
+      Code    int    `json:"code"`
+      Message string `json:"message"`
+    } `json:"error"`
+  }
+  if err := json.Unmarshal(parseBody, &resp); err != nil {
+    return nil, "", fmt.Errorf("解析 HTTP 响应 JSON 失败: %w (body: %s)", err, string(parseBody))
+  }
 
-    var result map[string]interface{}
-    if err := json.Unmarshal(resp.Result, &result); err != nil {
-      return nil, "", fmt.Errorf("解析 result 失败: %w", err)
-    }
-    return result, sessionID, nil
+  if resp.Error != nil {
+    return nil, "", fmt.Errorf("MCP 错误 (code=%d): %s", resp.Error.Code, resp.Error.Message)
+  }
+
+  var result map[string]interface{}
+  if err := json.Unmarshal(resp.Result, &result); err != nil {
+    return nil, "", fmt.Errorf("解析 result 失败: %w", err)
+  }
+  return result, sessionID, nil
   }
 
   // 发送 initialize
@@ -650,6 +668,7 @@ func (p *MCPProxy) callHTTP(ctx context.Context, toolName string, args map[strin
     return nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
   }
   httpReq.Header.Set("Content-Type", "application/json")
+  httpReq.Header.Set("Mcp-Protocol-Version", "2024-11-05")
   for k, v := range p.Headers {
     httpReq.Header.Set(k, v)
   }
@@ -665,16 +684,21 @@ func (p *MCPProxy) callHTTP(ctx context.Context, toolName string, args map[strin
   defer httpResp.Body.Close()
 
   // 更新 session ID（某些服务器可能每次请求都更新）
+  // callHTTP 仅从 call() 调用，call() 已持有 p.mu，无需重复加锁
   newSessionID := httpResp.Header.Get("Mcp-Session-Id")
   if newSessionID != "" && newSessionID != p.sessionID {
-    p.mu.Lock()
     p.sessionID = newSessionID
-    p.mu.Unlock()
   }
 
   body, err := io.ReadAll(httpResp.Body)
   if err != nil {
     return nil, fmt.Errorf("读取 HTTP 响应失败: %w", err)
+  }
+
+  // 处理 SSE 响应
+  parseBody := body
+  if httpResp.Header.Get("Content-Type") == "text/event-stream" || bytes.HasPrefix(bytes.TrimSpace(body), []byte("data: ")) {
+    parseBody = extractSSEJSON(body)
   }
 
   var resp struct {
@@ -686,8 +710,8 @@ func (p *MCPProxy) callHTTP(ctx context.Context, toolName string, args map[strin
       Message string `json:"message"`
     } `json:"error"`
   }
-  if err := json.Unmarshal(body, &resp); err != nil {
-    return nil, fmt.Errorf("解析 HTTP 响应 JSON 失败: %w", err)
+  if err := json.Unmarshal(parseBody, &resp); err != nil {
+    return nil, fmt.Errorf("解析 HTTP 响应 JSON 失败: %w (body: %s)", err, string(parseBody))
   }
 
   if resp.Error != nil {
@@ -723,6 +747,18 @@ func (p *MCPProxy) stop() {
   p.tools = nil
 }
 
+// extractSSEJSON 从 SSE 响应体中提取第一个 data: 行的 JSON
+func extractSSEJSON(body []byte) []byte {
+  scanner := bufio.NewScanner(bytes.NewReader(body))
+  for scanner.Scan() {
+    line := scanner.Text()
+    if strings.HasPrefix(line, "data: ") {
+      return []byte(line[6:])
+    }
+  }
+  return body
+}
+
 // mapToEnvSlice 将 map[string]string 转换为 ["KEY=VAL", ...] 格式
 func mapToEnvSlice(env map[string]string) []string {
   result := make([]string, 0, len(env))
@@ -738,7 +774,7 @@ func mapToEnvSlice(env map[string]string) []string {
 
 // hasMCPGrant 检查用户是否有权访问指定的 MCP 服务器
 func hasMCPGrant(serverName, username string) bool {
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     return false
   }

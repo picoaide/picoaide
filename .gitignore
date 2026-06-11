@@ -30,6 +30,9 @@ vendor/
 # SSH 端口映射
 .ssh_ports.json
 
+# Playwright MCP 测试产物
+.playwright-mcp/
+
 # Claude Code 配置
 .claude/
 .superpowers/

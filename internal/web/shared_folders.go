@@ -4,7 +4,7 @@ import (
   "net/http"
 
   "github.com/gin-gonic/gin"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 // handleSharedFolders 返回当前用户可访问的共享文件夹列表
@@ -18,7 +18,7 @@ func (s *Server) handleSharedFolders(c *gin.Context) {
     return
   }
 
-  folders, err := auth.GetAccessibleSharedFolders(username)
+  folders, err := store.GetAccessibleSharedFolders(username)
   if err != nil {
     writeError(c, http.StatusInternalServerError, err.Error())
     return
@@ -39,8 +39,8 @@ func (s *Server) handleSharedFolders(c *gin.Context) {
 
   result := make([]userFolderView, 0, len(folders))
   for _, f := range folders {
-    members, _ := auth.GetSharedFolderMembers(f.ID)
-    mountStatuses, _ := auth.GetMountStatusesForFolder(f.ID)
+    members, _ := store.GetSharedFolderMembers(f.ID)
+    mountStatuses, _ := store.GetMountStatusesForFolder(f.ID)
     memberViews := make([]userMemberView, 0, len(members))
     for _, m := range members {
       memberViews = append(memberViews, userMemberView{

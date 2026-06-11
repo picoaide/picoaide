@@ -64,14 +64,15 @@ type SessionScope struct {
 }
 
 type SessionMeta struct {
-  Key       string        `json:"key"`
-  Summary   string        `json:"summary"`
-  Skip      int           `json:"skip"`
-  Count     int           `json:"count"`
-  CreatedAt string        `json:"created_at"`
-  UpdatedAt string        `json:"updated_at"`
-  Scope     *SessionScope `json:"scope,omitempty"`
-  Aliases   []string      `json:"aliases,omitempty"`
+  Key           string        `json:"key"`
+  Summary       string        `json:"summary"`
+  Skip          int           `json:"skip"`
+  Count         int           `json:"count"`
+  CreatedAt     string        `json:"created_at"`
+  UpdatedAt     string        `json:"updated_at"`
+  EvolvedCount  int           `json:"evolved_count"` // 已进化分析的消息数
+  Scope         *SessionScope `json:"scope,omitempty"`
+  Aliases       []string      `json:"aliases,omitempty"`
 }
 
 // ============================================================
@@ -110,18 +111,20 @@ func SanitizeKey(key string) string {
 // ============================================================
 
 type LLMMessage struct {
-  Role       string     `json:"role"`
-  Content    string     `json:"content,omitempty"`
-  ToolCallID string     `json:"tool_call_id,omitempty"`
-  ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+  Role             string     `json:"role"`
+  Content          string     `json:"content,omitempty"`
+  ReasoningContent string     `json:"reasoning_content,omitempty"`
+  ToolCallID       string     `json:"tool_call_id,omitempty"`
+  ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
 func (m *Message) ToLLMMessage() LLMMessage {
   return LLMMessage{
-    Role:       string(m.Role),
-    Content:    m.Content,
-    ToolCallID: m.ToolCallID,
-    ToolCalls:  m.ToolCalls,
+    Role:             string(m.Role),
+    Content:          m.Content,
+    ReasoningContent: m.ReasoningContent,
+    ToolCallID:       m.ToolCallID,
+    ToolCalls:        m.ToolCalls,
   }
 }
 

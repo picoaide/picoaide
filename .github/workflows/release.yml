@@ -149,6 +149,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 读取已有的 release body（用户手动编写的更新日志）
+          existing=$(gh release view "${{ github.ref_name }}" --json body --jq '.body' 2>/dev/null || echo "")
+
           cat > body.md << 'BODY'
           ## 📥 下载指南
 
@@ -174,14 +177,15 @@ jobs:
 
           ---
 
-          ## 📋 更新内容
-
           BODY
 
-          gh api "repos/${{ github.repository }}/releases/generate-notes" \
-            -f tag_name='${{ github.ref_name }}' \
-            -f target_commitish='${{ github.sha }}' \
-            --jq '.body' >> body.md
+          if [ -n "$existing" ]; then
+            echo "$existing" >> body.md
+          else
+            echo "## 📋 更新内容" >> body.md
+            echo "" >> body.md
+            echo "（请手动编写更新日志）" >> body.md
+          fi
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v3

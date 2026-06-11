@@ -6,7 +6,7 @@ import (
   "path/filepath"
   "testing"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/skill"
 )
@@ -41,33 +41,33 @@ func TestGroupCreate_LocalModeSuccess(t *testing.T) {
   }
   resp := env.postForm(t, "/api/admin/groups/create", "testadmin", form)
   assertStatus(t, resp, 200)
-  if _, err := auth.GetGroupID("dev-team"); err != nil {
+  if _, err := store.GetGroupID("dev-team"); err != nil {
     t.Fatalf("group should exist: %v", err)
   }
 }
 
 func TestGroupDelete_LocalModeSuccess(t *testing.T) {
   env := setupTestServer(t)
-  if err := auth.CreateGroup("to-delete", "local", "", nil); err != nil {
+  if err := store.CreateGroup("to-delete", "local", "", nil); err != nil {
     t.Fatalf("CreateGroup: %v", err)
   }
   form := url.Values{"name": {"to-delete"}}
   resp := env.postForm(t, "/api/admin/groups/delete", "testadmin", form)
   assertStatus(t, resp, 200)
-  if _, err := auth.GetGroupID("to-delete"); err == nil {
+  if _, err := store.GetGroupID("to-delete"); err == nil {
     t.Fatal("group should be deleted")
   }
 }
 
 func TestGroupMembers_ListAndMutationLocalModeSuccess(t *testing.T) {
   env := setupTestServer(t)
-  if err := auth.CreateGroup("team-a", "local", "", nil); err != nil {
+  if err := store.CreateGroup("team-a", "local", "", nil); err != nil {
     t.Fatalf("CreateGroup: %v", err)
   }
-  if err := auth.AddUsersToGroup("team-a", []string{"testuser"}); err != nil {
+  if err := store.AddUsersToGroup("team-a", []string{"testuser"}); err != nil {
     t.Fatalf("AddUsersToGroup: %v", err)
   }
-  if err := auth.CreateUser("another-user", "pass123", "user"); err != nil {
+  if err := store.CreateUser("another-user", "pass123", "user"); err != nil {
     t.Fatalf("CreateUser another-user: %v", err)
   }
 
@@ -107,7 +107,7 @@ func TestGroupMembers_ListAndMutationLocalModeSuccess(t *testing.T) {
   }
   resp = env.postForm(t, "/api/admin/groups/members/remove", "testadmin", form)
   assertStatus(t, resp, 200)
-  members, err := auth.GetGroupMembers("team-a")
+  members, err := store.GetGroupMembers("team-a")
   if err != nil {
     t.Fatalf("GetGroupMembers: %v", err)
   }
@@ -120,7 +120,7 @@ func TestGroupMembers_ListAndMutationLocalModeSuccess(t *testing.T) {
 
 func TestGroupMembersAdd_LocalModeRejectsUnknownUser(t *testing.T) {
   env := setupTestServer(t)
-  if err := auth.CreateGroup("team-a", "local", "", nil); err != nil {
+  if err := store.CreateGroup("team-a", "local", "", nil); err != nil {
     t.Fatalf("CreateGroup: %v", err)
   }
 
@@ -131,7 +131,7 @@ func TestGroupMembersAdd_LocalModeRejectsUnknownUser(t *testing.T) {
   resp := env.postForm(t, "/api/admin/groups/members/add", "testadmin", form)
   assertStatus(t, resp, 400)
 
-  members, err := auth.GetGroupMembers("team-a")
+  members, err := store.GetGroupMembers("team-a")
   if err != nil {
     t.Fatalf("GetGroupMembers: %v", err)
   }
@@ -142,7 +142,7 @@ func TestGroupMembersAdd_LocalModeRejectsUnknownUser(t *testing.T) {
 
 func TestGroupMembersAdd_LocalModeRejectsSuperadmin(t *testing.T) {
   env := setupTestServer(t)
-  if err := auth.CreateGroup("team-a", "local", "", nil); err != nil {
+  if err := store.CreateGroup("team-a", "local", "", nil); err != nil {
     t.Fatalf("CreateGroup: %v", err)
   }
 
@@ -153,7 +153,7 @@ func TestGroupMembersAdd_LocalModeRejectsSuperadmin(t *testing.T) {
   resp := env.postForm(t, "/api/admin/groups/members/add", "testadmin", form)
   assertStatus(t, resp, 400)
 
-  members, err := auth.GetGroupMembers("team-a")
+  members, err := store.GetGroupMembers("team-a")
   if err != nil {
     t.Fatalf("GetGroupMembers: %v", err)
   }
@@ -165,10 +165,10 @@ func TestGroupMembersAdd_LocalModeRejectsSuperadmin(t *testing.T) {
 func TestGroupMutations_ForbiddenInUnifiedAuthExceptWhitelist(t *testing.T) {
   env := setupTestServer(t)
   env.Cfg.Web.AuthMode = "ldap"
-  if err := auth.CreateGroup("ldap-team", "ldap", "", nil); err != nil {
+  if err := store.CreateGroup("ldap-team", "ldap", "", nil); err != nil {
     t.Fatalf("CreateGroup: %v", err)
   }
-  if err := auth.AddUsersToGroup("ldap-team", []string{"testuser"}); err != nil {
+  if err := store.AddUsersToGroup("ldap-team", []string{"testuser"}); err != nil {
     t.Fatalf("AddUsersToGroup: %v", err)
   }
 
@@ -196,20 +196,20 @@ func TestGroupMutations_ForbiddenInUnifiedAuthExceptWhitelist(t *testing.T) {
 
 func TestGroupMembers_IncludesInheritedSubGroupMembers(t *testing.T) {
   env := setupTestServer(t)
-  if err := auth.CreateGroup("parent-team", "local", "", nil); err != nil {
+  if err := store.CreateGroup("parent-team", "local", "", nil); err != nil {
     t.Fatalf("CreateGroup parent: %v", err)
   }
-  parentID, err := auth.GetGroupID("parent-team")
+  parentID, err := store.GetGroupID("parent-team")
   if err != nil {
     t.Fatalf("GetGroupID parent: %v", err)
   }
-  if err := auth.CreateGroup("child-team", "local", "", &parentID); err != nil {
+  if err := store.CreateGroup("child-team", "local", "", &parentID); err != nil {
     t.Fatalf("CreateGroup child: %v", err)
   }
-  if err := auth.AddUsersToGroup("parent-team", []string{"direct-user"}); err != nil {
+  if err := store.AddUsersToGroup("parent-team", []string{"direct-user"}); err != nil {
     t.Fatalf("AddUsersToGroup parent: %v", err)
   }
-  if err := auth.AddUsersToGroup("child-team", []string{"child-user"}); err != nil {
+  if err := store.AddUsersToGroup("child-team", []string{"child-user"}); err != nil {
     t.Fatalf("AddUsersToGroup child: %v", err)
   }
 
@@ -231,10 +231,10 @@ func TestGroupMembers_IncludesInheritedSubGroupMembers(t *testing.T) {
 
 func TestSyncGroupParentsUpdatesListHierarchy(t *testing.T) {
   env := setupTestServer(t)
-  if err := auth.CreateGroup("ldap-parent", "ldap", "", nil); err != nil {
+  if err := store.CreateGroup("ldap-parent", "ldap", "", nil); err != nil {
     t.Fatalf("CreateGroup parent: %v", err)
   }
-  if err := auth.CreateGroup("ldap-child", "ldap", "", nil); err != nil {
+  if err := store.CreateGroup("ldap-child", "ldap", "", nil); err != nil {
     t.Fatalf("CreateGroup child: %v", err)
   }
 
@@ -243,7 +243,7 @@ func TestSyncGroupParentsUpdatesListHierarchy(t *testing.T) {
     "ldap-child":  {},
   })
 
-  groups, err := auth.ListGroups()
+  groups, err := store.ListGroups()
   if err != nil {
     t.Fatalf("ListGroups: %v", err)
   }
@@ -268,10 +268,10 @@ func TestSyncGroupParentsUpdatesListHierarchy(t *testing.T) {
 
 func TestGroupSkills_BindExpandsToMembers(t *testing.T) {
   env := setupTestServer(t)
-  if err := auth.CreateGroup("team-b", "local", "", nil); err != nil {
+  if err := store.CreateGroup("team-b", "local", "", nil); err != nil {
     t.Fatalf("CreateGroup: %v", err)
   }
-  if err := auth.AddUsersToGroup("team-b", []string{"testuser"}); err != nil {
+  if err := store.AddUsersToGroup("team-b", []string{"testuser"}); err != nil {
     t.Fatalf("AddUsersToGroup: %v", err)
   }
 
@@ -289,7 +289,7 @@ func TestGroupSkills_BindExpandsToMembers(t *testing.T) {
   assertStatus(t, resp, 200)
 
   // user_skills 记录应被创建（组成员获得了直接绑定）
-  src, err := auth.GetUserSkillSource("testuser", "test-skill")
+  src, err := store.GetUserSkillSource("testuser", "test-skill")
   if err != nil {
     t.Fatalf("GetUserSkillSource: %v", err)
   }
@@ -309,7 +309,7 @@ func TestGroupSkills_BindExpandsToMembers(t *testing.T) {
   assertStatus(t, resp, 200)
 
   // user_skills 记录应被删除
-  src, _ = auth.GetUserSkillSource("testuser", "test-skill")
+  src, _ = store.GetUserSkillSource("testuser", "test-skill")
   if src != "" {
     t.Error("testuser should NOT have user_skills after unbind")
   }
@@ -381,7 +381,7 @@ func TestDefaultSkills_AppliedToNewUser(t *testing.T) {
   assertStatus(t, resp, 200)
 
   // 验证新用户被绑定了默认技能
-  src, err := auth.GetUserSkillSource("newuser", "default-skill")
+  src, err := store.GetUserSkillSource("newuser", "default-skill")
   if err != nil {
     t.Fatalf("GetUserSkillSource: %v", err)
   }

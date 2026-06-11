@@ -1,18 +1,18 @@
 package agent
 
 import (
-  "bytes"
   "context"
   "encoding/json"
   "fmt"
-  "os/exec"
-  "strings"
+  "log/slog"
+  "os"
+  "path/filepath"
   "sync"
   "time"
 )
 
 // ============================================================
-// SubAgent — 轻量子代理，在 goroutine 中执行任务
+// SubAgent — 独立上下文和 LLM 能力的真正子代理
 // ============================================================
 
 type SubAgentResult struct {
@@ -21,75 +21,153 @@ type SubAgentResult struct {
   Data    string
 }
 
-type SubAgent struct {
-  Name string
-  task func(ctx context.Context) (string, error)
-}
-
-func NewSubAgent(name string, task func(ctx context.Context) (string, error)) *SubAgent {
-  return &SubAgent{Name: name, task: task}
-}
-
-func (a *SubAgent) Run(ctx context.Context) *SubAgentResult {
-  data, err := a.task(ctx)
-  if err != nil {
-    return &SubAgentResult{Name: a.Name, Success: false, Data: fmt.Sprintf("子代理执行失败: %s", err.Error())}
-  }
-  if data == "" {
-    return &SubAgentResult{Name: a.Name, Success: false, Data: "子代理返回空结果"}
-  }
-  return &SubAgentResult{Name: a.Name, Success: true, Data: data}
-}
-
-// ============================================================
-// SubAgentManager — 子代理管理器
-// ============================================================
-
 type managedAgent struct {
-  agent  *SubAgent
-  result *SubAgentResult
-  done   chan struct{}
-  cancel context.CancelFunc
+  taskDesc   string
+  serverName string // MCP 服务器名，子代理只会加载该服务器的工具
+  toolsHint  string // 主代理提供的工具使用指引
+  result     *SubAgentResult
+  done       chan struct{}
+  cancel     context.CancelFunc
 }
 
+// SubAgentManager 持有父引擎的配置和依赖，用于创建子引擎
 type SubAgentManager struct {
-  mu     sync.Mutex
-  agents map[string]*managedAgent
+  mu        sync.Mutex
+  agents    map[string]*managedAgent
+  config    *AgentConfig
+  provider  Provider
+  tools     *ToolRegistry
+  parentCb  func(StreamEvent) // 转发子代理事件到父引擎 cb
 }
 
-func NewSubAgentManager() *SubAgentManager {
+func (m *SubAgentManager) SetParentCb(cb func(StreamEvent)) {
+  m.parentCb = cb
+}
+
+func NewSubAgentManager(cfg *AgentConfig, provider Provider, tools *ToolRegistry) *SubAgentManager {
   return &SubAgentManager{
-    agents: make(map[string]*managedAgent),
+    agents:   make(map[string]*managedAgent),
+    config:   cfg,
+    provider: provider,
+    tools:    tools,
   }
 }
 
-func (m *SubAgentManager) Spawn(ctx context.Context, agent *SubAgent) error {
-  if agent == nil {
-    return fmt.Errorf("子代理不能为 nil")
+// SpawnAgent 创建独立的子代理（完整 LLM + 工具能力），在 goroutine 中运行。
+// ctx 仅用于在入口处检查父上下文是否已取消（见 SubAgentSpawnTool.Execute）；
+// 子代理内部的上下文使用独立的 Background，不继承调用方的超时/取消，取消通过 Cancel/CancelAll 管理。
+// serverName 指定 MCP 服务器名，子代理自动加载该服务器的全部工具；toolsHint 是主代理提供的工具使用指引。
+func (m *SubAgentManager) SpawnAgent(ctx context.Context, name string, taskDesc string, serverName string, toolsHint string) error {
+  if name == "" || taskDesc == "" {
+    return fmt.Errorf("name 和 task 不能为空")
   }
   m.mu.Lock()
-  if _, ok := m.agents[agent.Name]; ok {
+  if _, ok := m.agents[name]; ok {
     m.mu.Unlock()
-    return fmt.Errorf("子代理 %s 已在运行", agent.Name)
+    return fmt.Errorf("子代理 %s 已在运行", name)
   }
 
-  ctx, cancel := context.WithCancel(ctx)
+  subCtx, cancel := context.WithCancel(context.Background())
   ma := &managedAgent{
-    agent:  agent,
-    done:   make(chan struct{}),
-    cancel: cancel,
+    taskDesc:   taskDesc,
+    serverName: serverName,
+    toolsHint:  toolsHint,
+    done:       make(chan struct{}),
+    cancel:     cancel,
   }
-  m.agents[agent.Name] = ma
+  m.agents[name] = ma
   m.mu.Unlock()
 
   go func() {
-    ma.result = ma.agent.Run(ctx)
-    close(ma.done)
+    defer close(ma.done)
+    defer func() {
+      if r := recover(); r != nil {
+        ma.result = &SubAgentResult{
+          Name:    name,
+          Success: false,
+          Data:    fmt.Sprintf("子代理内部 panic: %v", r),
+        }
+      }
+    }()
+    ma.result = m.runSubAgent(subCtx, name, taskDesc, serverName, toolsHint)
   }()
 
   return nil
 }
 
+// runSubAgent 创建子引擎并执行任务
+func (m *SubAgentManager) runSubAgent(ctx context.Context, name, taskDesc, serverName, toolsHint string) *SubAgentResult {
+  // 子代理使用临时目录存储会话，父进程结束后自动清理
+  workDir, err := os.MkdirTemp("", "picoaide-subagent-*")
+  if err != nil {
+    return &SubAgentResult{Name: name, Success: false, Data: fmt.Sprintf("创建子代理工作目录失败: %v", err)}
+  }
+  defer os.RemoveAll(workDir)
+
+  store := NewSessionStore(filepath.Join(workDir, "session"))
+  engine := NewEngine(m.config, m.provider, m.tools, store)
+  engine.subAgentMgr = nil
+
+  // 如果指定了 MCP 服务器，预加载该服务器的工具
+  if serverName != "" {
+    engine.PreloadServer(serverName)
+  }
+
+  // 如果主代理提供了工具指引，追加到 system prompt
+  sysPrompt := ""
+  if toolsHint != "" {
+    sysPrompt = fmt.Sprintf("## 工具使用指引（由主代理指定）\n%s\n\n请严格按照上述指引使用工具。", toolsHint)
+  }
+
+  var response string
+  msg := &Message{Role: RoleUser, Content: taskDesc}
+  err = engine.Process(ctx, sysPrompt, nil, msg, func(ev StreamEvent) {
+    // 转发关键事件到父引擎（tool_call_start、reasoning、error）
+    if m.parentCb != nil {
+      switch ev.Type {
+      case "tool_call_start", "reasoning", "error":
+        m.parentCb(StreamEvent{
+          Type: "subagent_event",
+          Data: mustJSONData(map[string]interface{}{
+            "name": name,
+            "sub_type": ev.Type,
+            "data": string(ev.Data),
+          }),
+        })
+      }
+    }
+    switch ev.Type {
+    case "text_delta":
+      var text string
+      if json.Unmarshal(ev.Data, &text) == nil {
+        response += text
+      }
+    case "finish":
+      if response == "" {
+        var finishData struct {
+          Content string `json:"content"`
+        }
+        if json.Unmarshal(ev.Data, &finishData) == nil && finishData.Content != "" {
+          response = finishData.Content
+        }
+      }
+    }
+  })
+
+  if err != nil {
+    return &SubAgentResult{
+      Name:    name,
+      Success: false,
+      Data:    fmt.Sprintf("子代理 %s 执行失败: %v", name, err),
+    }
+  }
+  if response == "" {
+    return &SubAgentResult{Name: name, Success: false, Data: "子代理返回空结果"}
+  }
+  return &SubAgentResult{Name: name, Success: true, Data: response}
+}
+
+// Collect 等待子代理完成并返回结果，超过 timeout 则取消并返回超时错误
 func (m *SubAgentManager) Collect(name string, timeout time.Duration) *SubAgentResult {
   m.mu.Lock()
   ma, ok := m.agents[name]
@@ -99,13 +177,20 @@ func (m *SubAgentManager) Collect(name string, timeout time.Duration) *SubAgentR
     return &SubAgentResult{Name: name, Success: false, Data: "子代理不存在"}
   }
 
+  if timeout <= 0 {
+    timeout = 600 * time.Second
+  }
+
+  timer := time.NewTimer(timeout)
+  defer timer.Stop()
+
   select {
   case <-ma.done:
     m.mu.Lock()
     delete(m.agents, name)
     m.mu.Unlock()
     return ma.result
-  case <-time.After(timeout):
+  case <-timer.C:
     ma.cancel()
     m.mu.Lock()
     delete(m.agents, name)
@@ -142,90 +227,135 @@ func (m *SubAgentManager) List() []string {
 }
 
 // ============================================================
-// SubAgentTool — 注册到 ToolRegistry 的子代理工具
+// SubAgentSpawnTool — 创建子代理并立即返回（用于并行启动多个子代理）
 // ============================================================
 
-type SubAgentTool struct {
+type SubAgentSpawnTool struct {
   Manager *SubAgentManager
 }
 
-func (t *SubAgentTool) Name() string { return "subagent_task" }
+func (t *SubAgentSpawnTool) Name() string { return "subagent_spawn" }
 
-func (t *SubAgentTool) Description() string {
-  return "启动子代理并行执行任务。适合不需要主 LLM 直接参与的后台任务（如文件搜索、数据处理）。"
+func (t *SubAgentSpawnTool) Description() string {
+  return "启动子代理（独立 AI）并行执行任务。子代理拥有独立的 LLM 上下文和工具调用能力。创建后立即返回，使用 subagent_collect 工具收集结果。批量任务时先 spawn 所有子代理，再逐一 collect，实现真正的并行执行。"
 }
 
-func (t *SubAgentTool) Schema() map[string]interface{} {
+func (t *SubAgentSpawnTool) Schema() map[string]interface{} {
   return map[string]interface{}{
     "type": "object",
     "properties": map[string]interface{}{
       "name": map[string]interface{}{
         "type":        "string",
-        "description": "子代理名称，用于后续收集结果",
+        "description": "子代理名称，用于后续 collect 时指定",
       },
-      "command": map[string]interface{}{
+      "task": map[string]interface{}{
         "type":        "string",
-        "description": "子代理要执行的 shell 命令",
+        "description": "子代理要执行的任务描述，作为独立 AI 的输入消息",
       },
-      "timeout": map[string]interface{}{
-        "type":        "integer",
-        "description": "超时秒数，默认 30",
+      "server": map[string]interface{}{
+        "type":        "string",
+        "description": "MCP 服务器名（可选）。指定后子代理自动加载该服务器的全部工具。从「可用 MCP 服务器」列表中选取。",
+      },
+      "tools_hint": map[string]interface{}{
+        "type":        "string",
+        "description": "工具使用指引（可选）。主代理告知子代理如何调用工具，例如「使用 get_news_sentiment 查询，searchKey 传公司名」。",
       },
     },
-    "required": []string{"name", "command"},
+    "required": []string{"name", "task"},
   }
 }
 
-func (t *SubAgentTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
+func (t *SubAgentSpawnTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
+  var params struct {
+    Name      string `json:"name"`
+    Task      string `json:"task"`
+    Server    string `json:"server"`
+    ToolsHint string `json:"tools_hint"`
+  }
+  if err := json.Unmarshal(args, &params); err != nil {
+    return &ToolResult{Success: false, Data: "参数解析失败"}, nil
+  }
+  if params.Name == "" || params.Task == "" {
+    return &ToolResult{Success: false, Data: "name 和 task 不能为空"}, nil
+  }
+
+  if t.Manager == nil {
+    return &ToolResult{Success: false, Data: "子代理管理器不可用（子代理中不能再次创建子代理）"}, nil
+  }
+
+  if ctx.Err() != nil {
+    return &ToolResult{Success: false, Data: "父上下文已取消，无法创建子代理"}, nil
+  }
+
+  slog.Debug("subagent.spawn", "name", params.Name, "task_length", len(params.Task), "server", params.Server)
+
+  if err := t.Manager.SpawnAgent(ctx, params.Name, params.Task, params.Server, params.ToolsHint); err != nil {
+    return &ToolResult{Success: false, Data: err.Error()}, nil
+  }
+
+  data, _ := json.Marshal(map[string]string{"name": params.Name, "status": "spawned"})
+  return &ToolResult{Success: true, Data: string(data)}, nil
+}
+
+// ============================================================
+// SubAgentCollectTool — 收集子代理的执行结果
+// ============================================================
+
+type SubAgentCollectTool struct {
+  Manager *SubAgentManager
+}
+
+func (t *SubAgentCollectTool) Name() string { return "subagent_collect" }
+
+func (t *SubAgentCollectTool) Description() string {
+  return "收集子代理的执行结果。与 subagent_spawn 配合使用。先在批量任务中 spawn 所有子代理，然后逐一 collect 获取每个子代理的结果。"
+}
+
+func (t *SubAgentCollectTool) Schema() map[string]interface{} {
+  return map[string]interface{}{
+    "type": "object",
+    "properties": map[string]interface{}{
+      "name": map[string]interface{}{
+        "type":        "string",
+        "description": "要收集结果的子代理名称",
+      },
+      "timeout": map[string]interface{}{
+        "type":        "integer",
+        "description": "等待超时秒数，默认 600 秒（10 分钟）",
+      },
+    },
+    "required": []string{"name"},
+  }
+}
+
+func (t *SubAgentCollectTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
   var params struct {
     Name    string `json:"name"`
-    Command string `json:"command"`
     Timeout int    `json:"timeout"`
   }
   if err := json.Unmarshal(args, &params); err != nil {
     return &ToolResult{Success: false, Data: "参数解析失败"}, nil
   }
-  if params.Name == "" || params.Command == "" {
-    return &ToolResult{Success: false, Data: "name 和 command 不能为空"}, nil
-  }
-  if params.Timeout <= 0 {
-    params.Timeout = 30
+  if params.Name == "" {
+    return &ToolResult{Success: false, Data: "name 不能为空"}, nil
   }
 
-  agent := NewSubAgent(params.Name, func(ctx context.Context) (string, error) {
-    cmd := exec.CommandContext(ctx, "sh", "-c", params.Command)
-    var stdout, stderr bytes.Buffer
-    cmd.Stdout = &stdout
-    cmd.Stderr = &stderr
-    if err := cmd.Run(); err != nil {
-      output := strings.TrimSpace(stdout.String())
-      errOutput := strings.TrimSpace(stderr.String())
-      msg := fmt.Sprintf("命令执行失败: %v", err)
-      if errOutput != "" {
-        msg += "\n" + errOutput
-      }
-      if output != "" {
-        msg += "\n" + output
-      }
-      return msg, nil
-    }
-    output := strings.TrimSpace(stdout.String())
-    if output == "" {
-      output = strings.TrimSpace(stderr.String())
-    }
-    if output == "" {
-      return "(无输出)", nil
-    }
-    return output, nil
-  })
-
-  ctx, cancel := context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
-  defer cancel()
-
-  if err := t.Manager.Spawn(ctx, agent); err != nil {
-    return &ToolResult{Success: false, Data: err.Error()}, nil
+  if t.Manager == nil {
+    return &ToolResult{Success: false, Data: "子代理管理器不可用（子代理中不能再次创建子代理）"}, nil
   }
 
-  result := t.Manager.Collect(params.Name, time.Duration(params.Timeout)*time.Second)
+  timeout := time.Duration(params.Timeout) * time.Second
+  if timeout <= 0 {
+    timeout = 600 * time.Second
+  }
+
+  slog.Debug("subagent.collect", "name", params.Name, "timeout_seconds", params.Timeout)
+
+  result := t.Manager.Collect(params.Name, timeout)
   return &ToolResult{Success: result.Success, Data: result.Data}, nil
+}
+
+func mustJSONData(v interface{}) json.RawMessage {
+  data, _ := json.Marshal(v)
+  return data
 }

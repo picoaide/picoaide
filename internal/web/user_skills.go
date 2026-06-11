@@ -9,7 +9,7 @@ import (
   "strings"
 
   "github.com/gin-gonic/gin"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/skill"
   "github.com/picoaide/picoaide/internal/user"
@@ -43,13 +43,13 @@ func (s *Server) handleUserSkills(c *gin.Context) {
     status := "available"
     userInstalled := false
 
-    src, _ := auth.GetUserSkillSource(username, sk.Name)
+    src, _ := store.GetUserSkillSource(username, sk.Name)
     if src == "self" {
       status = "installed"
       userInstalled = true
     } else if src != "" {
       status = "installed"
-    } else if has, _ := auth.UserHasSkillFromAnySource(username, sk.Name); has {
+    } else if has, _ := store.UserHasSkillFromAnySource(username, sk.Name); has {
       status = "group"
     }
 
@@ -91,13 +91,13 @@ func (s *Server) handleUserSkillsInstall(c *gin.Context) {
     return
   }
 
-  has, _ := auth.UserHasSkillFromAnySource(username, skillName)
+  has, _ := store.UserHasSkillFromAnySource(username, skillName)
   if has {
     writeError(c, http.StatusBadRequest, "你已拥有此技能")
     return
   }
 
-  if err := auth.BindSkillToUser(username, skillName, "self"); err != nil {
+  if err := store.BindSkillToUser(username, skillName, "self"); err != nil {
     slog.Error("绑定记录写入失败", "skill", skillName, "username", username, "error", err)
     writeError(c, http.StatusInternalServerError, "安装失败: "+err.Error())
     return
@@ -129,7 +129,7 @@ func (s *Server) handleUserSkillsUninstall(c *gin.Context) {
     return
   }
 
-  src, err := auth.GetUserSkillSource(username, skillName)
+  src, err := store.GetUserSkillSource(username, skillName)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "查询技能状态失败")
     return
@@ -143,7 +143,7 @@ func (s *Server) handleUserSkillsUninstall(c *gin.Context) {
     return
   }
 
-  if err := auth.UnbindSkillFromUser(username, skillName); err != nil {
+  if err := store.UnbindSkillFromUser(username, skillName); err != nil {
     writeError(c, http.StatusInternalServerError, "解绑失败: "+err.Error())
     return
   }

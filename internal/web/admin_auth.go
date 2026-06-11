@@ -7,7 +7,7 @@ import (
   "strings"
 
   "github.com/gin-gonic/gin"
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
@@ -91,7 +91,7 @@ func (s *Server) handleAdminAuthLDAPUsers(c *gin.Context) {
       return
     }
   } else {
-    localUsers, err := auth.GetExternalUsers(source)
+    localUsers, err := store.GetExternalUsers(source)
     if err != nil {
       writeError(c, http.StatusInternalServerError, err.Error())
       return
@@ -259,7 +259,7 @@ func (s *Server) handleAdminWhitelistPost(c *gin.Context) {
   operator := s.getSessionUser(c)
 
   // 写入数据库（使用 xorm）
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     writeError(c, http.StatusInternalServerError, "数据库连接失败")
     return

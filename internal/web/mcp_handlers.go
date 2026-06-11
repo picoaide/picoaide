@@ -8,7 +8,7 @@ import (
   "github.com/gin-gonic/gin"
   "github.com/gorilla/websocket"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 var upgrader = websocket.Upgrader{
@@ -37,13 +37,13 @@ func (s *Server) handleMCPToken(c *gin.Context) {
     return
   }
 
-  token, err := auth.GetMCPToken(username)
+  token, err := store.GetMCPToken(username)
   if err != nil {
     writeError(c, http.StatusInternalServerError, err.Error())
     return
   }
   if token == "" {
-    token, err = auth.GenerateMCPToken(username)
+    token, err = store.GenerateMCPToken(username)
     if err != nil {
       writeError(c, http.StatusInternalServerError, "生成 MCP token 失败: "+err.Error())
       return

@@ -6,7 +6,7 @@ import (
 
   "github.com/gin-gonic/gin"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 // ============================================================
@@ -24,7 +24,7 @@ func (s *Server) handleMCPCookiesGet(c *gin.Context) {
   domain := strings.TrimSpace(c.Query("domain"))
 
   if domain != "" {
-    cookies, err := auth.GetCookie(username, domain)
+    cookies, err := store.GetCookie(username, domain)
     if err != nil {
       writeError(c, http.StatusInternalServerError, "读取失败")
       return
@@ -37,7 +37,7 @@ func (s *Server) handleMCPCookiesGet(c *gin.Context) {
     return
   }
 
-  all, err := auth.GetAllCookies(username)
+  all, err := store.GetAllCookies(username)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "读取失败")
     return
@@ -64,7 +64,7 @@ func (s *Server) handleMCPCookiesPost(c *gin.Context) {
     return
   }
 
-  if err := auth.SetCookie(username, domain, cookieStr); err != nil {
+  if err := store.SetCookie(username, domain, cookieStr); err != nil {
     writeError(c, http.StatusInternalServerError, "写入失败: "+err.Error())
     return
   }

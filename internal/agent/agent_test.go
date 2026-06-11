@@ -181,6 +181,18 @@ func TestToLLMMessage_emptyFields(t *testing.T) {
   }
 }
 
+func TestToLLMMessage_ReasoningContent(t *testing.T) {
+  msg := &Message{
+    Role:             RoleAssistant,
+    Content:          "visible text",
+    ReasoningContent: "thinking text",
+  }
+  llm := msg.ToLLMMessage()
+  if llm.ReasoningContent != "thinking text" {
+    t.Errorf("ReasoningContent = %q, want %q", llm.ReasoningContent, "thinking text")
+  }
+}
+
 // ============================================================
 // ModelConfig 直接使用
 // ============================================================
@@ -298,10 +310,11 @@ func TestMustJSON(t *testing.T) {
 }
 
 // ============================================================
-// overflow.go
+// Compactor
 // ============================================================
 
-func TestIsOverflow(t *testing.T) {
+func TestCompactorIsOverflow(t *testing.T) {
+  c := NewCompactor(DefaultCompactionConfig())
   tests := []struct {
     name         string
     tokenCount   int
@@ -309,22 +322,23 @@ func TestIsOverflow(t *testing.T) {
     want         bool
   }{
     {"below_limit", 100000, 200000, false},
-    {"at_usable_boundary", 180000, 200000, true},  // usable=180000, 180000>=180000
+    {"at_usable_boundary", 180000, 200000, true},
     {"exceeds_usable", 180001, 200000, true},
     {"zero_context_default", 180001, 0, true},
-    {"small_context_overflow", 5000, 20000, true},  // usable=0
+    {"small_context_overflow", 5000, 20000, true},
   }
   for _, tt := range tests {
     t.Run(tt.name, func(t *testing.T) {
-      got := IsOverflow(tt.tokenCount, tt.contextLimit)
+      got := c.IsOverflowWithLimit(tt.tokenCount, tt.contextLimit)
       if got != tt.want {
-        t.Errorf("IsOverflow(%d, %d) = %v, want %v", tt.tokenCount, tt.contextLimit, got, tt.want)
+        t.Errorf("IsOverflowWithLimit(%d, %d) = %v, want %v", tt.tokenCount, tt.contextLimit, got, tt.want)
       }
     })
   }
 }
 
-func TestUsableTokens(t *testing.T) {
+func TestCompactorUsableTokens(t *testing.T) {
+  c := NewCompactor(DefaultCompactionConfig())
   tests := []struct {
     contextLimit int
     want         int
@@ -334,7 +348,7 @@ func TestUsableTokens(t *testing.T) {
     {50000, 30000},
   }
   for _, tt := range tests {
-    got := UsableTokens(tt.contextLimit)
+    got := c.UsableTokens(tt.contextLimit)
     if got != tt.want {
       t.Errorf("UsableTokens(%d) = %d, want %d", tt.contextLimit, got, tt.want)
     }
@@ -790,43 +804,21 @@ func TestRetryPolicy_DelayNegative(t *testing.T) {
 }
 
 // ============================================================
-// BuildStructuredOutputTool
-// ============================================================
-
-func TestBuildStructuredOutputTool(t *testing.T) {
-  schema := map[string]interface{}{
-    "type": "object",
-    "properties": map[string]interface{}{
-      "answer": map[string]interface{}{"type": "string"},
-    },
-  }
-  tool := BuildStructuredOutputTool(schema)
-  if tool.Name != "StructuredOutput" {
-    t.Errorf("Name = %q", tool.Name)
-  }
-  if tool.Description == "" {
-    t.Errorf("empty description")
-  }
-  if tool.InputSchema == nil {
-    t.Errorf("nil schema")
-  }
-}
-
-// ============================================================
 // NewProvider factory
 // ============================================================
 
 func TestNewProvider(t *testing.T) {
   tests := []struct {
-    provider   string
-    wantType   string
+    provider     string
+    wantType     string
+    wantDeepSeek bool
   }{
-    {"anthropic", "*agent.AnthropicProvider"},
-    {"openai", "*agent.OpenAIProvider"},
-    {"deepseek", "*agent.OpenAIProvider"},
-    {"qwen", "*agent.OpenAIProvider"},
-    {"glm", "*agent.OpenAIProvider"},
-    {"unknown", "*agent.OpenAIProvider"},
+    {"anthropic", "*agent.AnthropicProvider", false},
+    {"openai", "*agent.OpenAIProvider", false},
+    {"deepseek", "*agent.OpenAIProvider", true},
+    {"qwen", "*agent.OpenAIProvider", false},
+    {"glm", "*agent.OpenAIProvider", false},
+    {"unknown", "*agent.OpenAIProvider", false},
   }
   for _, tt := range tests {
     t.Run(tt.provider, func(t *testing.T) {
@@ -838,6 +830,12 @@ func TestNewProvider(t *testing.T) {
         fmt.Sprintf("%T", p), "*agent."), "&agent.")
       if got != strings.TrimPrefix(tt.wantType, "*agent.") {
         t.Errorf("NewProvider(%q) = %T, want %s", tt.provider, p, tt.wantType)
+      }
+      if op, ok := p.(*OpenAIProvider); ok {
+        isDeepSeek := op.providerType == "deepseek"
+        if isDeepSeek != tt.wantDeepSeek {
+          t.Errorf("NewProvider(%q) providerType = %q, want deepseek=%v", tt.provider, op.providerType, tt.wantDeepSeek)
+        }
       }
     })
   }

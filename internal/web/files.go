@@ -12,7 +12,7 @@ import (
 
   "github.com/gin-gonic/gin"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
@@ -88,7 +88,7 @@ func isInstalledSkillPath(username, safePath string) bool {
   if err := util.SafePathSegment(skillName); err != nil {
     return false
   }
-  src, _ := auth.GetUserSkillSource(username, skillName)
+  src, _ := store.GetUserSkillSource(username, skillName)
   if src == "" {
     return false
   }
@@ -132,16 +132,19 @@ func (s *Server) resolveFileRoot(username, relPath string) (*fileRoot, error) {
   parts := strings.SplitN(relPath, "/", 3)
 
   if parts[0] == "share" {
+    if len(parts) < 2 {
+      return nil, fmt.Errorf("路径格式错误")
+    }
     // 访问共享文件夹
     shareName := filepath.Base(parts[1])
     if err := util.SafePathSegment(shareName); err != nil {
       return nil, fmt.Errorf("非法共享文件夹名称")
     }
-    sf, err := auth.GetSharedFolderByName(shareName)
+    sf, err := store.GetSharedFolderByName(shareName)
     if err != nil {
       return nil, fmt.Errorf("共享文件夹不存在")
     }
-    ok, err := auth.IsUserInSharedFolder(sf.ID, username)
+    ok, err := store.IsUserInSharedFolder(sf.ID, username)
     if err != nil || !ok {
       return nil, fmt.Errorf("无权限访问此共享文件夹")
     }
@@ -194,7 +197,7 @@ func (s *Server) handleFiles(c *gin.Context) {
     }
 
     // 获取用户可访问的共享文件夹
-    folders, _ := auth.GetAccessibleSharedFolders(username)
+    folders, _ := store.GetAccessibleSharedFolders(username)
     hasShares := len(folders) > 0
 
     var fileEntries []FileEntry
@@ -269,7 +272,7 @@ func (s *Server) handleFiles(c *gin.Context) {
   // 技能目录：自建技能可进可编辑，技能中心安装 readonly
   if cleanedRelPath == "skills" {
     skillMap := make(map[string]string) // skillName → source
-    skills, _ := auth.GetUserSkillsWithSource(username)
+    skills, _ := store.GetUserSkillsWithSource(username)
     for _, s := range skills {
       skillMap[s.Name] = s.Source
     }
@@ -341,7 +344,7 @@ func (s *Server) handleFiles(c *gin.Context) {
     parts := strings.SplitN(cleanedRelPath, "/", 3)
     if len(parts) >= 2 {
       skillName := parts[1]
-      src, _ := auth.GetUserSkillSource(username, skillName)
+      src, _ := store.GetUserSkillSource(username, skillName)
       isCenter := false
       if src == "self" {
         isCenter = findSkillSource(skillName) != ""
@@ -430,6 +433,10 @@ func (s *Server) handleFileUpload(c *gin.Context) {
     return
   }
   defer fr.root.Close()
+  if fr.isShare {
+    writeError(c, http.StatusForbidden, "共享文件夹为只读")
+    return
+  }
   if isInstalledSkillPath(username, fr.safePath) {
     writeError(c, http.StatusBadRequest, "技能目录为只读，无法上传")
     return
@@ -522,6 +529,10 @@ func (s *Server) handleFileDelete(c *gin.Context) {
   }
   defer fr.root.Close()
 
+  if fr.isShare {
+    writeError(c, http.StatusForbidden, "共享文件夹为只读")
+    return
+  }
   if fr.safePath == "." {
     writeError(c, http.StatusBadRequest, "不能删除工作区根目录")
     return
@@ -579,6 +590,10 @@ func (s *Server) handleFileMkdir(c *gin.Context) {
     return
   }
   defer fr.root.Close()
+  if fr.isShare {
+    writeError(c, http.StatusForbidden, "共享文件夹为只读")
+    return
+  }
   if isInstalledSkillPath(username, filepath.Join(fr.safePath, name)) {
     writeError(c, http.StatusBadRequest, "技能目录为只读，无法创建目录")
     return
@@ -666,6 +681,10 @@ func (s *Server) handleFileEditSave(c *gin.Context) {
     return
   }
   defer fr.root.Close()
+  if fr.isShare {
+    writeError(c, http.StatusForbidden, "共享文件夹为只读")
+    return
+  }
   if isInstalledSkillPath(username, fr.safePath) {
     writeError(c, http.StatusBadRequest, "技能目录为只读，无法编辑")
     return

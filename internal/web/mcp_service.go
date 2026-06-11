@@ -42,6 +42,7 @@ func init() {
   RegisterService("browser", browserSvc, browserToolDefs, "picoaide-browser")
   RegisterService("computer", computerSvc, computerToolDefs, "picoaide-computer")
   RegisterPicoaideService("agent", picoaideToolDefs, "picoaide-agent")
+  RegisterPicoaideService("email", emailToolDefs, "picoaide-email")
 }
 
 // getService 并发安全地获取已注册的 MCP 服务
@@ -61,6 +62,13 @@ func RegisterPicoaideService(name string, tools []ToolDef, serverName string) {
     ServerName: serverName,
     Version:    "1.0.0",
   }
+  serviceRegistryMu.Unlock()
+}
+
+// unregisterService 注销一个 MCP SSE 服务
+func unregisterService(name string) {
+  serviceRegistryMu.Lock()
+  delete(serviceRegistry, name)
   serviceRegistryMu.Unlock()
 }
 
@@ -239,27 +247,21 @@ func (s *Server) handleMCPSSEServicePost(c *gin.Context) {
     tools := make([]map[string]interface{}, 0)
 
     if info.Hub == nil {
-      // 服务端服务：聚合所有来源的工具
-      // 1. PicoAide 平台工具
-      for _, t := range picoaideToolDefs {
+      // 服务端服务：返回本服务注册的工具 + 浏览器/桌面代理工具（如有）
+      for _, t := range info.Tools {
         tools = append(tools, toolToMap(t))
       }
-      // 2. 浏览器工具（如果已连接）
+      // 浏览器工具（如果已连接）
       if conn, ok := browserSvc.GetConnection(username); ok && conn != nil {
         for _, t := range browserToolDefs {
           tools = append(tools, toolToMap(t))
         }
       }
-      // 3. 桌面代理工具（如果已连接）
+      // 桌面代理工具（如果已连接）
       if conn, ok := computerSvc.GetConnection(username); ok && conn != nil {
         for _, t := range computerToolDefs {
           tools = append(tools, toolToMap(t))
         }
-      }
-      // 4. 第三方 MCP 工具
-      mcpTools := globalMCPManager.GetTools(username)
-      for _, t := range mcpTools {
-        tools = append(tools, toolToMap(t))
       }
     } else {
       for _, t := range info.Tools {
@@ -302,16 +304,24 @@ func (s *Server) handleMCPToolCall(c *gin.Context, id json.Number, params json.R
 
   // 服务端 handler（无 Hub 的服务）
   if info.Hub == nil {
+    serviceName := c.Param("service")
+    // 邮件工具调用（服务端本地处理）
+    if serviceName == "email" {
+      emailHandleMCPToolCall(s, c, id, p.Name, p.Arguments, username)
+      return
+    }
     // 先检查 PicoAide 平台工具 handler
     if _, ok := picoaideHandlers[p.Name]; ok {
       picoaideHandleMCPToolCall(s, c, id, p.Name, p.Arguments, username)
       return
     }
-    // 再尝试第三方 MCP 工具
-    result, err := globalMCPManager.CallTool(c.Request.Context(), p.Name, p.Arguments)
-    if err == nil {
-      writeMCPResult(c.Writer, id, formatMCPResult(result))
-      return
+    // 第三方 MCP 代理服务：按服务名查找代理，直接转发
+    if proxy, ok := globalMCPManager.GetProxy(serviceName); ok {
+      result, err := proxy.call(c.Request.Context(), p.Name, p.Arguments)
+      if err == nil {
+        writeMCPResult(c.Writer, id, formatMCPResult(result))
+        return
+      }
     }
     // 转发到浏览器 Hub
     if strings.HasPrefix(p.Name, "browser_") {

@@ -16,6 +16,14 @@ import (
   "github.com/openai/openai-go/v3/shared"
 )
 
+// reasoningEvent 发出推理/思考内容增量事件
+func reasoningEvent(text string) StreamEvent {
+  return StreamEvent{
+    Type: "reasoning",
+    Data: mustJSON(text),
+  }
+}
+
 // ============================================================
 // LLM Provider 接口
 // ============================================================
@@ -31,6 +39,7 @@ type ChatRequest struct {
   Tools       []ToolDef
   MaxTokens   int
   Temperature float64
+  UserID      string
 }
 
 // ============================================================
@@ -41,7 +50,9 @@ func NewProvider(provider, modelID, baseURL, apiKey string) (Provider, error) {
   switch provider {
   case "anthropic":
     return NewAnthropicProvider(apiKey, baseURL, modelID), nil
-  case "openai", "openrouter", "deepseek", "qwen", "glm":
+  case "deepseek":
+    return NewDeepSeekProvider(apiKey, baseURL, modelID), nil
+  case "openai", "openrouter", "qwen", "glm":
     return NewOpenAIProvider(apiKey, baseURL, modelID), nil
   default:
     return NewOpenAIProvider(apiKey, baseURL, modelID), nil
@@ -295,14 +306,22 @@ func parseAnthropicSSE(ctx context.Context, r io.Reader, cb func(event StreamEve
 
     case "content_block_delta":
       var ev struct {
+        Index int `json:"index"`
         Delta struct {
           Type string `json:"type"`
           Text string `json:"text"`
         } `json:"delta"`
       }
       json.Unmarshal(raw, &ev)
-      if ev.Delta.Type == "text_delta" && ev.Delta.Text != "" {
-        cb(TextDelta(ev.Delta.Text))
+      switch ev.Delta.Type {
+      case "text_delta":
+        if ev.Delta.Text != "" {
+          cb(TextDelta(ev.Delta.Text))
+        }
+      case "thinking_delta":
+        if ev.Delta.Text != "" {
+          cb(reasoningEvent(ev.Delta.Text))
+        }
       }
 
     case "message_stop":
@@ -344,9 +363,10 @@ func buildAnthropicContentBlocks(text string, toolCalls []ToolCall) []map[string
 // ============================================================
 
 type OpenAIProvider struct {
-  apiKey  string
-  baseURL string
-  model   string
+  apiKey       string
+  baseURL      string
+  model        string
+  providerType string
 }
 
 func NewOpenAIProvider(apiKey, baseURL, model string) *OpenAIProvider {
@@ -356,18 +376,42 @@ func NewOpenAIProvider(apiKey, baseURL, model string) *OpenAIProvider {
   return &OpenAIProvider{apiKey: apiKey, baseURL: baseURL, model: model}
 }
 
+func NewDeepSeekProvider(apiKey, baseURL, model string) *OpenAIProvider {
+  if baseURL == "" {
+    baseURL = "https://api.deepseek.com"
+  }
+  return &OpenAIProvider{apiKey: apiKey, baseURL: baseURL, model: model, providerType: "deepseek"}
+}
+
 func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb func(event StreamEvent)) error {
   client := openai.NewClient(
     option.WithAPIKey(p.apiKey),
     option.WithBaseURL(p.baseURL),
   )
 
-  msgs := buildOpenAIMessagesV2(req.System, req.Messages)
+  msgs := buildOpenAIMessagesV2(req.System, req.Messages, p.providerType)
 
   params := openai.ChatCompletionNewParams{
     Model:       p.model,
     Messages:    msgs,
     Temperature: openai.Opt(req.Temperature),
+  }
+
+  if p.providerType == "deepseek" {
+    if req.UserID != "" {
+      params.SetExtraFields(map[string]any{"user_id": req.UserID})
+    }
+    // DeepSeek 思考模式强制 max 强度
+    _, hasEffort := params.ExtraFields()["reasoning_effort"]
+    if !hasEffort {
+      // 通过 extra_fields 注入，因为 SDK 的 ReasoningEffort 枚举不含 "max"
+      existing := params.ExtraFields()
+      if existing == nil {
+        existing = map[string]any{}
+      }
+      existing["reasoning_effort"] = "max"
+      params.SetExtraFields(existing)
+    }
   }
   if req.MaxTokens > 0 {
     params.MaxTokens = openai.Opt(int64(req.MaxTokens))
@@ -421,9 +465,29 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb fu
       chunkCount++
 
       if len(chunk.Choices) == 0 {
+        // DeepSeek 在流式最后发送 usage（含缓存统计）
+        if p.providerType == "deepseek" {
+          logDeepSeekCacheStats(p.model, chunk.RawJSON())
+        }
         continue
       }
       choice := chunk.Choices[0]
+
+      // 推理/思考内容（OpenAI-compatible reasoning_content）
+      reasoningRaw := choice.RawJSON()
+      if reasoningRaw != "" {
+        var rcChoice struct {
+          Delta map[string]json.RawMessage `json:"delta"`
+        }
+        if json.Unmarshal([]byte(reasoningRaw), &rcChoice) == nil {
+          if rcData, ok := rcChoice.Delta["reasoning_content"]; ok && len(rcData) > 0 && !bytes.Equal(rcData, []byte("null")) && !bytes.Equal(rcData, []byte(`""`)) {
+            var rcStr string
+            if json.Unmarshal(rcData, &rcStr) == nil && rcStr != "" {
+              cb(reasoningEvent(rcStr))
+            }
+          }
+        }
+      }
 
       // 内容增量
       if choice.Delta.Content != "" {
@@ -477,7 +541,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb fu
   })
 }
 
-func buildOpenAIMessagesV2(system string, messages []LLMMessage) []openai.ChatCompletionMessageParamUnion {
+func buildOpenAIMessagesV2(system string, messages []LLMMessage, providerType string) []openai.ChatCompletionMessageParamUnion {
   var msgs []openai.ChatCompletionMessageParamUnion
   if system != "" {
     msgs = append(msgs, openai.SystemMessage(system))
@@ -500,20 +564,113 @@ func buildOpenAIMessagesV2(system string, messages []LLMMessage) []openai.ChatCo
             },
           })
         }
-        msgs = append(msgs, openai.ChatCompletionMessageParamUnion{
-          OfAssistant: &openai.ChatCompletionAssistantMessageParam{
-            Content:   openai.ChatCompletionAssistantMessageParamContentUnion{OfString: openai.Opt(m.Content)},
-            ToolCalls: tcs,
-          },
-        })
+        asst := &openai.ChatCompletionAssistantMessageParam{
+          Content:   openai.ChatCompletionAssistantMessageParamContentUnion{OfString: openai.Opt(m.Content)},
+          ToolCalls: tcs,
+        }
+        if providerType == "deepseek" && m.ReasoningContent != "" {
+          asst.SetExtraFields(map[string]any{"reasoning_content": m.ReasoningContent})
+        }
+        msgs = append(msgs, openai.ChatCompletionMessageParamUnion{OfAssistant: asst})
       } else {
-        msgs = append(msgs, openai.AssistantMessage(m.Content))
+        if providerType == "deepseek" && m.ReasoningContent != "" {
+          asst := &openai.ChatCompletionAssistantMessageParam{
+            Content: openai.ChatCompletionAssistantMessageParamContentUnion{OfString: openai.Opt(m.Content)},
+          }
+          asst.SetExtraFields(map[string]any{"reasoning_content": m.ReasoningContent})
+          msgs = append(msgs, openai.ChatCompletionMessageParamUnion{OfAssistant: asst})
+        } else {
+          msgs = append(msgs, openai.AssistantMessage(m.Content))
+        }
       }
     case "tool":
       msgs = append(msgs, openai.ToolMessage(m.Content, m.ToolCallID))
     }
   }
   return msgs
+}
+
+func logDeepSeekCacheStats(model, chunkRaw string) {
+  var chunkObj struct {
+    Usage *struct {
+      PromptCacheHitTokens  int64 `json:"prompt_cache_hit_tokens"`
+      PromptCacheMissTokens int64 `json:"prompt_cache_miss_tokens"`
+    } `json:"usage"`
+  }
+  if err := json.Unmarshal([]byte(chunkRaw), &chunkObj); err != nil || chunkObj.Usage == nil {
+    return
+  }
+  u := chunkObj.Usage
+  if u.PromptCacheHitTokens > 0 || u.PromptCacheMissTokens > 0 {
+    slog.Debug("openai.cache_stats",
+      "model", model,
+      "cache_hit_tokens", u.PromptCacheHitTokens,
+      "cache_miss_tokens", u.PromptCacheMissTokens,
+    )
+  }
+}
+
+func extractDeepSeekCacheUsage(rawJSON string) string {
+  if rawJSON == "" {
+    return ""
+  }
+  var resp struct {
+    Usage map[string]json.RawMessage `json:"usage"`
+  }
+  if err := json.Unmarshal([]byte(rawJSON), &resp); err != nil {
+    return ""
+  }
+  if resp.Usage == nil {
+    return ""
+  }
+  // 只关心缓存相关字段
+  filtered := make(map[string]json.RawMessage)
+  for _, key := range []string{"prompt_cache_hit_tokens", "prompt_cache_miss_tokens"} {
+    if v, ok := resp.Usage[key]; ok {
+      filtered[key] = v
+    }
+  }
+  if len(filtered) == 0 {
+    return ""
+  }
+  data, _ := json.Marshal(filtered)
+  return string(data)
+}
+
+func buildDeepSeekMessages(messages []LLMMessage) []map[string]interface{} {
+  raw := make([]map[string]interface{}, 0, len(messages))
+  for _, m := range messages {
+    msg := map[string]interface{}{
+      "role": m.Role,
+    }
+    if m.Content != "" {
+      msg["content"] = m.Content
+    }
+    if m.ReasoningContent != "" {
+      msg["reasoning_content"] = m.ReasoningContent
+    }
+    if m.ToolCallID != "" {
+      msg["tool_call_id"] = m.ToolCallID
+    }
+    if len(m.ToolCalls) > 0 {
+      tcs := make([]map[string]interface{}, 0, len(m.ToolCalls))
+      for _, tc := range m.ToolCalls {
+        var args interface{}
+        json.Unmarshal([]byte(tc.Function.Arguments), &args)
+        tcs = append(tcs, map[string]interface{}{
+          "id":   tc.ID,
+          "type": tc.Type,
+          "function": map[string]interface{}{
+            "name":      tc.Function.Name,
+            "arguments": tc.Function.Arguments,
+          },
+        })
+      }
+      msg["tool_calls"] = tcs
+    }
+    raw = append(raw, msg)
+  }
+  return raw
 }
 
 

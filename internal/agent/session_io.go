@@ -86,14 +86,14 @@ func (s *SessionStore) LoadArchive(key string, date ...string) ([]*Message, erro
   }
   msgs, err := readJSONL(path)
   if err != nil {
+    if os.IsNotExist(err) && len(date) == 0 {
+      // 兼容旧版单文件 archive.jsonl
+      oldPath := filepath.Join(s.sessionDir(key), "archive.jsonl")
+      return readJSONL(oldPath)
+    }
     return nil, err
   }
-  if os.IsNotExist(err) && len(date) == 0 {
-    // 兼容旧版单文件 archive.jsonl
-    oldPath := filepath.Join(s.sessionDir(key), "archive.jsonl")
-    return readJSONL(oldPath)
-  }
-  return msgs, err
+  return msgs, nil
 }
 
 // ListArchives 列出所有归档日期（按文件名中的日期排序）
@@ -136,13 +136,14 @@ func (s *SessionStore) ArchiveSize(key string) int {
     if err != nil {
       continue
     }
+    defer f.Close()
     scanner := bufio.NewScanner(f)
+    scanner.Buffer(make([]byte, 512*1024), 512*1024)
     for scanner.Scan() {
       if len(scanner.Bytes()) > 0 {
         total++
       }
     }
-    f.Close()
   }
   return total
 }
@@ -223,6 +224,7 @@ func readJSONL(path string) ([]*Message, error) {
   defer f.Close()
   var msgs []*Message
   scanner := bufio.NewScanner(f)
+  scanner.Buffer(make([]byte, 512*1024), 512*1024)
   for scanner.Scan() {
     line := scanner.Bytes()
     if len(line) == 0 {

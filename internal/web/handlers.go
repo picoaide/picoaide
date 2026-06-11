@@ -16,6 +16,7 @@ import (
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/logger"
+  "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/user"
 )
 
@@ -65,7 +66,7 @@ func (s *Server) requireNonSuperadmin(c *gin.Context) string {
   if username == "" {
     return ""
   }
-  if auth.IsSuperadmin(username) {
+  if store.IsSuperadmin(username) {
     writeError(c, http.StatusForbidden, "超管用户不允许登录插件，使用普通用户登录")
     return ""
   }
@@ -77,7 +78,7 @@ func (s *Server) requireRegularUser(c *gin.Context) string {
   if username == "" {
     return ""
   }
-  if auth.IsSuperadmin(username) {
+  if store.IsSuperadmin(username) {
     writeError(c, http.StatusForbidden, "管理员没有普通用户配置权限，请进入管理后台")
     return ""
   }
@@ -135,7 +136,7 @@ func (s *Server) handleLogin(c *gin.Context) {
     return
   }
 
-  isSuperadmin := auth.IsSuperadmin(username)
+  isSuperadmin := store.IsSuperadmin(username)
   if s.isExtensionRequest(c) && isSuperadmin {
     logger.DebugSend("POST", "/api/login", http.StatusForbidden, "reason", "superadmin_extension_blocked")
     writeError(c, http.StatusForbidden, "超管用户不允许登录插件，使用普通用户登录")
@@ -203,7 +204,7 @@ func (s *Server) handleLogin(c *gin.Context) {
     return
   }
   logger.DebugProcess("ensure_external_user", "username", username, "auth_mode", authMode)
-  if err := auth.EnsureExternalUser(username, "user", authMode); err != nil {
+  if err := store.EnsureExternalUser(username, "user", authMode); err != nil {
     writeError(c, http.StatusInternalServerError, "同步用户失败: "+err.Error())
     return
   }
@@ -218,7 +219,7 @@ func (s *Server) handleLogin(c *gin.Context) {
   if authsource.HasDirectoryProvider(s.loadConfig()) {
     go func() {
       if groups, err := authsource.FetchUserGroups(s.loadConfig(), username); err == nil && len(groups) > 0 {
-        auth.SyncUserGroups(username, groups, authMode)
+        store.SyncUserGroups(username, groups, authMode)
       }
     }()
   }
@@ -292,12 +293,12 @@ func (s *Server) handleAuthCallback(c *gin.Context) {
     writeError(c, http.StatusForbidden, "请联系管理员添加白名单")
     return
   }
-  if err := auth.EnsureExternalUser(identity.Username, "user", authMode); err != nil {
+  if err := store.EnsureExternalUser(identity.Username, "user", authMode); err != nil {
     writeError(c, http.StatusInternalServerError, "同步用户失败: "+err.Error())
     return
   }
   if len(identity.Groups) > 0 {
-    _ = auth.SyncUserGroups(identity.Username, identity.Groups, authMode)
+    _ = store.SyncUserGroups(identity.Username, identity.Groups, authMode)
   }
 
   if err := s.initializeUser(identity.Username); err != nil {
@@ -375,7 +376,7 @@ func (s *Server) handleUserCookies(c *gin.Context) {
     return
   }
 
-  entries, err := auth.ListCookieDomains(username)
+  entries, err := store.ListCookieDomains(username)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "读取失败")
     return
@@ -410,7 +411,7 @@ func (s *Server) handleUserCookiesDelete(c *gin.Context) {
     return
   }
 
-  if err := auth.DeleteCookie(username, domain); err != nil {
+  if err := store.DeleteCookie(username, domain); err != nil {
     writeError(c, http.StatusInternalServerError, "删除失败: "+err.Error())
     return
   }
@@ -435,8 +436,8 @@ func (s *Server) handleUserInfo(c *gin.Context) {
   c.JSON(200, gin.H{
     "success":  true,
     "username": username,
-    "role":     auth.GetUserRole(username),
-    "source":   auth.GetUserSource(username),
+    "role":     store.GetUserRole(username),
+    "source":   store.GetUserSource(username),
   })
 }
 
@@ -468,8 +469,8 @@ func (s *Server) handleChatHistory(c *gin.Context) {
   workspace := filepath.Join(config.WorkDir(), "users", username)
   user.InitializeUser(filepath.Join(config.WorkDir(), "user-template"), filepath.Join(config.WorkDir(), "users"), username)
 
-  // 读取最新会话的 live.jsonl
   var messages []chatMessage
+  var events []streamEvent
   sessDir := filepath.Join(workspace, "sessions")
   if !strings.HasPrefix(filepath.Clean(sessDir), filepath.Clean(config.WorkDir())+string(os.PathSeparator)) {
     writeError(c, http.StatusForbidden, "访问被拒绝")
@@ -480,37 +481,57 @@ func (s *Server) handleChatHistory(c *gin.Context) {
       if !entry.IsDir() {
         continue
       }
-      liveFile := filepath.Join(sessDir, entry.Name(), "live.jsonl")
-      if !strings.HasPrefix(filepath.Clean(liveFile), sessDir+string(os.PathSeparator)) {
-        continue
-      }
-      f, err := os.Open(liveFile)
-      if err != nil {
-        continue
-      }
-      scanner := bufio.NewScanner(f)
-      for scanner.Scan() {
-        var msg chatMessage
-        if err := json.Unmarshal([]byte(scanner.Text()), &msg); err == nil {
-          messages = append(messages, msg)
+      sid := entry.Name()
+      // 读 live.jsonl（消息历史）
+      liveFile := filepath.Join(sessDir, sid, "live.jsonl")
+      if strings.HasPrefix(filepath.Clean(liveFile), sessDir+string(os.PathSeparator)) {
+        f, err := os.Open(liveFile)
+        if err == nil {
+          scanner := bufio.NewScanner(f)
+          for scanner.Scan() {
+            var msg chatMessage
+            if json.Unmarshal([]byte(scanner.Text()), &msg) == nil {
+              messages = append(messages, msg)
+            }
+          }
+          f.Close()
         }
       }
-      f.Close()
+      // 读 events.jsonl（流事件，用于重建完整对话状态）
+      eventsFile := filepath.Join(sessDir, sid, "events.jsonl")
+      if strings.HasPrefix(filepath.Clean(eventsFile), sessDir+string(os.PathSeparator)) {
+        f, err := os.Open(eventsFile)
+        if err == nil {
+          scanner := bufio.NewScanner(f)
+          for scanner.Scan() {
+            var evt streamEvent
+            if json.Unmarshal([]byte(scanner.Text()), &evt) == nil {
+              events = append(events, evt)
+            }
+          }
+          f.Close()
+        }
+      }
       break // 只读第一个会话目录
     }
   }
   if messages == nil {
     messages = []chatMessage{}
   }
+  if events == nil {
+    events = []streamEvent{}
+  }
 
   writeJSON(c, http.StatusOK, struct {
     Success  bool          `json:"success"`
     Ready    bool          `json:"ready"`
     Messages []chatMessage `json:"messages"`
+    Events   []streamEvent `json:"events"`
   }{
     Success:  true,
     Ready:    true,
     Messages: messages,
+    Events:   events,
   })
 }
 
@@ -553,7 +574,7 @@ func (s *Server) handleChangePassword(c *gin.Context) {
     return
   }
 
-  if err := auth.ChangePassword(username, newPassword); err != nil {
+  if err := store.ChangePassword(username, newPassword); err != nil {
     writeError(c, http.StatusInternalServerError, "修改密码失败: "+err.Error())
     return
   }
@@ -570,7 +591,7 @@ func (s *Server) handleConfigGet(c *gin.Context) {
   }
 
   // 检查超管权限
-  if !auth.IsSuperadmin(username) {
+  if !store.IsSuperadmin(username) {
     writeError(c, http.StatusForbidden, "仅超级管理员可访问")
     return
   }
@@ -597,7 +618,7 @@ func (s *Server) handleConfigSave(c *gin.Context) {
   logger.DebugRecv("POST", "/api/config", "operator", username)
 
   // 检查超管权限
-  if !auth.IsSuperadmin(username) {
+  if !store.IsSuperadmin(username) {
     writeError(c, http.StatusForbidden, "仅超级管理员可访问")
     return
   }

@@ -14,7 +14,7 @@ import (
 
   "github.com/gin-gonic/gin"
 
-  "github.com/picoaide/picoaide/internal/auth"
+  "github.com/picoaide/picoaide/internal/store"
 )
 
 // ============================================================
@@ -61,21 +61,21 @@ func (s *Server) handlePicoAgentConfig(c *gin.Context) {
   token := strings.TrimPrefix(authHeader, "Bearer ")
 
   // 2. 验证 token
-  username, ok := auth.ValidateMCPToken(token)
+  username, ok := store.ValidateMCPToken(token)
   if !ok {
     c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的 token"})
     return
   }
 
   // 3. 获取用户配置
-  engine, err := auth.GetEngine()
+  engine, err := store.GetEngine()
   if err != nil {
     c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库连接失败"})
     return
   }
 
   // 从 settings 表读取模型配置
-  var settings []auth.Setting
+  var settings []store.Setting
   engine.Find(&settings)
   kv := make(map[string]string)
   for _, s := range settings {
@@ -83,6 +83,18 @@ func (s *Server) handlePicoAgentConfig(c *gin.Context) {
   }
 
   // 4. 构造响应
+  mcpServers := map[string]mcpServer{
+    "browser":  {Socket: "/run/picoaide.sock"},
+    "computer": {Socket: "/run/picoaide.sock"},
+    "agent":    {Socket: "/run/picoaide.sock"},
+    "email":    {Socket: "/run/picoaide.sock"},
+  }
+  // 添加第三方 MCP 代理服务（如 web-search-mcp-server），有授权的才可见
+  for _, name := range ListProxyServices() {
+    if hasMCPGrant(name, username) {
+      mcpServers[name] = mcpServer{Socket: "/run/picoaide.sock"}
+    }
+  }
   resp := agentConfigResponse{
     UserID:    username,
     Workspace: "/workspace",
@@ -90,11 +102,7 @@ func (s *Server) handlePicoAgentConfig(c *gin.Context) {
       "kb_search":  {Enabled: true},
       "web_search": {Enabled: true},
     },
-    MCPServers: map[string]mcpServer{
-      "browser":  {Socket: "/run/picoaide.sock"},
-      "computer": {Socket: "/run/picoaide.sock"},
-      "agent":    {Socket: "/run/picoaide.sock"},
-    },
+    MCPServers: mcpServers,
   }
 
   // 模型配置：从 settings 表直接读取

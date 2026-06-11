@@ -1,454 +1,94 @@
 package auth
 
 import (
-  "context"
-  "crypto/rand"
-  "database/sql"
-  "encoding/hex"
+  "crypto/subtle"
+  "encoding/base64"
   "fmt"
   "log/slog"
-  "os"
-  "path/filepath"
   "strings"
-  "time"
 
-  _ "modernc.org/sqlite"
-  "xorm.io/xorm"
+  "golang.org/x/crypto/argon2"
+  "golang.org/x/crypto/bcrypt"
 
-  "github.com/picoaide/picoaide/internal/auth/migrations"
+  "github.com/picoaide/picoaide/internal/store"
 )
-
-const dbFileName = "picoaide.db"
 
 const argon2idHashPrefix = "$argon2id$"
 
-var passwordHashParams = struct {
-  memory  uint32
-  time    uint32
-  threads uint8
-  keyLen  uint32
-  saltLen int
-}{
-  memory:  19 * 1024, // 19 MiB (19456 KiB) — OWASP 最低建议值
-  time:    2,
-  threads: 1,
-  keyLen:  32,
-  saltLen: 16,
+// hashPassword 委托给 store.HashPassword，避免重复实现。
+// store.argon2idHashPrefix 与 auth.argon2idHashPrefix 值相同，均为 "$argon2id$"。
+func hashPassword(password string) (string, error) {
+  return store.HashPassword(password)
 }
 
-var (
-  engine        *xorm.Engine
-  dbDataDir     string
-  SkillsRootDir string
-)
-
-// ============================================================
-// 数据库初始化
-// ============================================================
-
-// InitDB 打开或创建 SQLite 数据库
-func InitDB(dataDir string) error {
-  dbDataDir = dataDir
-  SkillsRootDir = filepath.Join(dataDir, "skills")
-
-  if err := os.MkdirAll(dataDir, 0755); err != nil {
-    return fmt.Errorf("创建数据库目录失败: %w", err)
+func verifyPassword(storedHash, password string) (ok bool, needsUpgrade bool, err error) {
+  if strings.HasPrefix(storedHash, argon2idHashPrefix) {
+    ok, err := verifyArgon2idPassword(storedHash, password)
+    return ok, false, err
   }
-
-  dbPath := filepath.Join(dataDir, dbFileName)
-
-  var err error
-  engine, err = xorm.NewEngine("sqlite", dbPath)
-  if err != nil {
-    return fmt.Errorf("打开数据库失败: %w", err)
+  if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password)); err != nil {
+    return false, false, nil
   }
-
-  if err := engine.Ping(); err != nil {
-    // 数据库损坏，备份后重建
-    engine.Close()
-    engine = nil
-    backupPath := dbPath + ".broken." + time.Now().Format("20060102-150405")
-    fmt.Fprintf(os.Stderr, "数据库损坏，已备份到 %s，正在重建\n", backupPath)
-    os.Rename(dbPath, backupPath)
-
-    engine, err = xorm.NewEngine("sqlite", dbPath)
-    if err != nil {
-      return fmt.Errorf("重建数据库失败: %w", err)
-    }
-  }
-
-  engine.SetMaxOpenConns(1)
-  // 禁用 xorm 缓存，避免与手动 SQL 操作产生不一致
-  engine.SetDefaultCacher(nil)
-
-  // 启用外键约束（SQLite 默认关闭）
-  if _, err := engine.Exec("PRAGMA foreign_keys = ON"); err != nil {
-    return fmt.Errorf("启用外键约束失败: %w", err)
-  }
-
-  if err := syncSchema(); err != nil {
-    return fmt.Errorf("创建数据表失败: %w", err)
-  }
-
-  return nil
+  return true, true, nil
 }
 
-// ResetDB 关闭当前数据库连接并重置全局状态（测试用）
-func ResetDB() {
-  if engine != nil {
-    engine.Close()
+func verifyArgon2idPassword(storedHash, password string) (bool, error) {
+  parts := strings.Split(storedHash, "$")
+  if len(parts) != 6 || parts[1] != "argon2id" {
+    return false, nil
   }
-  engine = nil
-  dbDataDir = ""
+  var version int
+  if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil || version != argon2.Version {
+    return false, nil
+  }
+  var memory, iterations uint32
+  var threads uint8
+  if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &threads); err != nil {
+    return false, nil
+  }
+  salt, err := base64.RawStdEncoding.DecodeString(parts[4])
+  if err != nil {
+    return false, nil
+  }
+  expectedKey, err := base64.RawStdEncoding.DecodeString(parts[5])
+  if err != nil {
+    return false, nil
+  }
+  actualKey := argon2.IDKey([]byte(password), salt, iterations, memory, threads, uint32(len(expectedKey)))
+  return subtle.ConstantTimeCompare(actualKey, expectedKey) == 1, nil
 }
 
-// GetEngine 返回 xorm 引擎（供新代码使用）
-func GetEngine() (*xorm.Engine, error) {
-  if err := ensureDB(); err != nil {
-    return nil, err
-  }
-  return engine, nil
-}
-
-// ensureDB 确保数据库连接可用，engine 为 nil 时自动重连
-func ensureDB() error {
-  if engine != nil {
-    return nil
-  }
-  if dbDataDir == "" {
-    return fmt.Errorf("数据库未初始化")
-  }
-  return InitDB(dbDataDir)
-}
-
-// syncSchema 使用原始 SQL 创建表结构（保留 SQLite datetime 默认值），并做必要的迁移
-func syncSchema() error {
-  _, err := engine.Exec(`CREATE TABLE IF NOT EXISTS local_users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'user',
-    source TEXT NOT NULL DEFAULT 'local',
-    created_at DATETIME NOT NULL DEFAULT (datetime('now', 'localtime'))
-  )`)
+// AuthenticateLocal 校验本地用户，返回 (是否成功, 角色, 错误)
+func AuthenticateLocal(username, password string) (bool, string, error) {
+  engine, err := store.GetEngine()
   if err != nil {
-    return err
+    return false, "", err
   }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL DEFAULT '',
-    updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
-  )`)
+  var user store.LocalUser
+  has, err := engine.Where("username = ?", username).Get(&user)
   if err != nil {
-    return err
+    return false, "", fmt.Errorf("查询用户失败: %w", err)
   }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS settings_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key TEXT NOT NULL,
-    old_value TEXT,
-    new_value TEXT,
-    changed_by TEXT NOT NULL DEFAULT 'system',
-    changed_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
-  )`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS whitelist (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    added_by TEXT NOT NULL DEFAULT 'system',
-    added_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
-  )`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS groups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    parent_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
-    source TEXT NOT NULL DEFAULT 'local',
-    description TEXT NOT NULL DEFAULT '',
-    created_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
-  )`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS user_groups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    UNIQUE(username, group_id)
-  )`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_groups_username ON user_groups(username)`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_groups_group_id ON user_groups(group_id)`)
-  if err != nil {
-    return err
-  }
-  // group_skills 表已移除，技能绑定展开后直接写入 user_skills
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS user_channels (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    channel TEXT NOT NULL,
-    allowed INTEGER NOT NULL DEFAULT 1,
-    enabled INTEGER NOT NULL DEFAULT 0,
-    configured INTEGER NOT NULL DEFAULT 0,
-    config_version INTEGER NOT NULL DEFAULT 0,
-    updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
-    UNIQUE(username, channel)
-  )`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_channels_username ON user_channels(username)`)
-  if err != nil {
-    return err
+  if !has {
+    return false, "", nil
   }
 
-  // 技能库表
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS skills (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT NOT NULL DEFAULT '',
-    updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
-  )`)
+  ok, needsUpgrade, err := verifyPassword(user.PasswordHash, password)
   if err != nil {
-    return err
+    return false, "", fmt.Errorf("校验密码失败: %w", err)
   }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS user_skills (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    skill_name TEXT NOT NULL,
-    source TEXT NOT NULL DEFAULT '',
-    updated_at TEXT NOT NULL DEFAULT '2000-01-01 00:00:00',
-    UNIQUE(username, skill_name)
-  )`)
-  if err != nil {
-    return err
+  if !ok {
+    return false, "", nil
   }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_skills_username ON user_skills(username)`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_skills_skill_name ON user_skills(skill_name)`)
-  if err != nil {
-    return err
-  }
-
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS shared_folders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT NOT NULL DEFAULT '',
-    is_public INTEGER NOT NULL DEFAULT 0,
-    created_by TEXT NOT NULL DEFAULT 'system',
-    created_at DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
-    updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
-  )`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS shared_folder_groups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    folder_id INTEGER NOT NULL REFERENCES shared_folders(id) ON DELETE CASCADE,
-    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    UNIQUE(folder_id, group_id)
-  )`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_sfg_folder_id ON shared_folder_groups(folder_id)`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_sfg_group_id ON shared_folder_groups(group_id)`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS shared_folder_mounts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    folder_id INTEGER NOT NULL REFERENCES shared_folders(id) ON DELETE CASCADE,
-    username TEXT NOT NULL,
-    mounted INTEGER NOT NULL DEFAULT 0,
-    checked_at DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
-    UNIQUE(folder_id, username)
-  )`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_sfm_folder_id ON shared_folder_mounts(folder_id)`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_sfm_username ON shared_folder_mounts(username)`)
-  if err != nil {
-    return err
-  }
-
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS user_cookies (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    domain TEXT NOT NULL,
-    cookies TEXT NOT NULL DEFAULT '',
-    updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
-    UNIQUE(username, domain)
-  )`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_cookies_username ON user_cookies(username)`)
-  if err != nil {
-    return err
-  }
-
-  // 记忆进化审计日志表
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS memory_evolution_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    session_key TEXT NOT NULL,
-    changes_summary TEXT NOT NULL DEFAULT '',
-    files_modified TEXT NOT NULL DEFAULT '',
-    created_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
-  )`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_mel_username ON memory_evolution_log(username)`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_mel_session_key ON memory_evolution_log(session_key)`)
-  if err != nil {
-    return err
-  }
-
-  // 执行数据库迁移（新增列、改名、数据迁移等）
-  if err := migrations.RunAll(engine); err != nil {
-    return err
-  }
-
-  return nil
-}
-
-// ============================================================
-// MCP Token 管理
-// ============================================================
-
-// GenerateMCPToken 为用户生成 MCP token（用户名:随机hex）并存入 DB
-func GenerateMCPToken(username string) (string, error) {
-  if err := ensureDB(); err != nil {
-    return "", err
-  }
-  b := make([]byte, 32)
-  if _, err := rand.Read(b); err != nil {
-    return "", fmt.Errorf("生成随机数失败: %w", err)
-  }
-  token := username + ":" + hex.EncodeToString(b)
-
-  _, err := engine.Exec(
-    `INSERT INTO mcp_tokens (username, token, updated_at) VALUES (?, ?, datetime('now','localtime'))
-     ON CONFLICT(username) DO UPDATE SET token = ?, updated_at = datetime('now','localtime')`,
-    username, token, token,
-  )
-  if err != nil {
-    return "", fmt.Errorf("保存 MCP token 失败: %w", err)
-  }
-  return token, nil
-}
-
-// GetMCPToken 获取用户的 MCP token
-func GetMCPToken(username string) (string, error) {
-  if err := ensureDB(); err != nil {
-    return "", err
-  }
-  rows, err := engine.Query("SELECT token FROM mcp_tokens WHERE username = ? LIMIT 1", username)
-  if err != nil {
-    return "", err
-  }
-  if len(rows) == 0 {
-    return "", nil
-  }
-  return string(rows[0]["token"]), nil
-}
-
-// ValidateMCPToken 验证 MCP token，返回用户名
-func ValidateMCPToken(token string) (string, bool) {
-  if token == "" {
-    return "", false
-  }
-  parts := strings.SplitN(token, ":", 2)
-  if len(parts) != 2 {
-    return "", false
-  }
-  username := parts[0]
-  stored, err := GetMCPToken(username)
-  if err != nil || stored != token {
-    return "", false
-  }
-  return username, true
-}
-
-// StartAuditLogCleaner 定时清理 90 天前的审计日志（ctx 取消时停止）
-// 每 6 小时执行一次，分批删除避免长锁，每次最多 1000 条，间隔 100ms
-func StartAuditLogCleaner(ctx context.Context) {
-  go func() {
-    // 启动后 5s 首次执行
-    select {
-    case <-time.After(5 * time.Second):
-    case <-ctx.Done():
-      return
-    }
-    ticker := time.NewTicker(6 * time.Hour)
-    defer ticker.Stop()
-    for {
-      runCleanBatch(ctx)
-      select {
-      case <-ticker.C:
-      case <-ctx.Done():
-        return
+  if needsUpgrade {
+    if hash, err := hashPassword(password); err == nil {
+      if _, err := engine.ID(user.ID).Cols("password_hash").Update(&store.LocalUser{PasswordHash: hash}); err != nil {
+        slog.Warn("密码哈希升级写入失败", "username", username, "error", err)
       }
+    } else {
+      slog.Warn("密码哈希升级生成失败", "username", username, "error", err)
     }
-  }()
-}
-
-// runCleanBatch 执行一批清理，最多 200 批，每批 1000 条
-func runCleanBatch(ctx context.Context) {
-  for i := 0; i < 200; i++ {
-    select {
-    case <-ctx.Done():
-      return
-    default:
-    }
-    eng, err := GetEngine()
-    if err != nil {
-      slog.Warn("clean_memory_evolution_log_db_error", "error", err.Error())
-      return
-    }
-    result, err := eng.Exec(`DELETE FROM memory_evolution_log WHERE id IN (
-      SELECT id FROM memory_evolution_log WHERE created_at < datetime('now', '-90 days') LIMIT 1000
-    )`)
-    if err != nil {
-      slog.Warn("clean_memory_evolution_log_error", "error", err.Error())
-      return
-    }
-    affected, _ := result.RowsAffected()
-    if affected == 0 {
-      return
-    }
-    slog.Debug("clean_memory_evolution_log", "batch_deleted", affected)
-    time.Sleep(100 * time.Millisecond)
   }
-}
 
-// ensure interface compatibility: core.DB embeds *sql.DB
-var _ = func() *sql.DB {
-  var e *xorm.Engine
-  if e != nil {
-    return e.DB().DB
-  }
-  return nil
+  return true, user.Role, nil
 }
