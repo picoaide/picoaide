@@ -149,9 +149,8 @@ func TestDeleteUser(t *testing.T) {
 func TestBcryptHashUpgrade(t *testing.T) {
   testInitDB(t)
 
-  legacyHash := "$2y$10$dummyhashingisnotvalidbutwewilltestwithfreshone"
   // Use bcrypt to generate a real legacy hash
-  legacyHash = "$2y$04$E/CPq3s1MZpDTeD6MEoQJO4qUYiTqG/N.PglLWJL0Q7TJrjDqnjFq"
+  legacyHash := "$2y$04$E/CPq3s1MZpDTeD6MEoQJO4qUYiTqG/N.PglLWJL0Q7TJrjDqnjFq"
   // Insert a user with bcrypt-format hash directly
   _, err := engine.Exec("INSERT INTO local_users (username, password_hash, role) VALUES (?, ?, ?)",
     "legacy", legacyHash, "user")
