@@ -1,6 +1,7 @@
 package web
 
 import (
+  "context"
   "encoding/json"
   "fmt"
   "log/slog"
@@ -15,6 +16,9 @@ import (
   "github.com/picoaide/picoaide/internal/config"
   daemonStore "github.com/picoaide/picoaide/internal/daemon/store"
   "github.com/picoaide/picoaide/internal/logger"
+  "github.com/picoaide/picoaide/internal/sandbox"
+
+  storePkg "github.com/picoaide/picoaide/internal/store"
 )
 
 // ============================================================
@@ -83,8 +87,76 @@ func (s *Server) handleTaskSubmit(c *gin.Context) {
   writeJSON(c, http.StatusOK, gin.H{
     "success": true,
     "task_id": taskID,
-    "status":  "pending",
+    "status":  "running",
   })
+
+  // 后台 goroutine 直接执行任务（PicoAide 本身就是 daemon）
+  if s.agentIntegration != nil && s.agentIntegration.sandbox != nil {
+    go s.executeTaskInSandbox(username, taskID, message, taskDir)
+  }
+}
+
+// executeTaskInSandbox 在沙箱中执行任务，将事件写入 EventStore 并广播到 Hub
+func (s *Server) executeTaskInSandbox(username, taskID, message, taskDir string) {
+  ctx, cancel := context.WithCancel(context.Background())
+  defer cancel()
+
+  ts := daemonStore.NewTaskStore(filepath.Join(config.WorkDir(), "users", username, "daemon"))
+  ts.UpdateStatus(taskID, "running")
+
+  es, err := daemonStore.NewEventStore(taskDir)
+  if err != nil {
+    ts.UpdateStatus(taskID, "failed")
+    return
+  }
+  defer es.Close()
+
+  mcpToken, err := storePkg.GetMCPToken(username)
+  if err != nil {
+    mcpToken, _ = storePkg.GenerateMCPToken(username)
+  }
+  workspace := filepath.Join(config.WorkDir(), "users", username)
+
+  inputJSON, _ := json.Marshal(map[string]interface{}{
+    "role":    "user",
+    "content": message,
+  })
+
+  s.broadcastDaemonEvent(username, taskID, "task_started", json.RawMessage(`{"task_id":"`+taskID+`"}`))
+
+  var seq int64 = 1
+  now := time.Now().UTC().Format(time.RFC3339)
+
+  events, err := s.agentIntegration.sandbox.Run(
+    ctx, mcpToken, inputJSON, workspace, s.loadAPIKeys(),
+    buildSkillMounts(username), username,
+    func(evt sandbox.StreamEvent) {
+      s.broadcastDaemonEvent(username, taskID, evt.Type, evt.Data)
+      seq++
+      es.Append(&daemonStore.Event{
+        TaskID: taskID,
+        Seq:    seq,
+        Type:   evt.Type,
+        Data:   evt.Data,
+        Time:   now,
+      })
+    },
+  )
+
+  if err != nil {
+    if err != context.Canceled {
+      ts.UpdateStatus(taskID, "failed")
+      s.broadcastDaemonEvent(username, taskID, "task_failed", json.RawMessage(`{"error":"`+err.Error()+`"}`))
+    }
+    return
+  }
+
+  for range events {
+    // 消费所有事件（callback 已处理持久化和广播）
+  }
+
+  ts.UpdateStatus(taskID, "completed")
+  s.broadcastDaemonEvent(username, taskID, "task_completed", json.RawMessage(`{"task_id":"`+taskID+`"}`))
 }
 
 // handleTaskPause 暂停任务
