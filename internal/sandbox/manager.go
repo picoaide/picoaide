@@ -386,10 +386,7 @@ func killOnCancel(ctx context.Context, cmd *exec.Cmd) {
     <-ctx.Done()
     pid := cmd.Process.Pid
     slog.Debug("sandbox.kill_on_cancel", "pid", pid)
-    cmd.Process.Signal(syscall.SIGTERM)
-    time.AfterFunc(5*time.Second, func() {
-      cmd.Process.Kill()
-    })
+    cmd.Process.Kill()
   }()
 }
 

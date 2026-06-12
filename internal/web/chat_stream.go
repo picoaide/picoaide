@@ -114,6 +114,7 @@ func (r *chatRun) append(evt streamEvent) {
 }
 
 // finish 标记完成并关闭所有订阅者通道
+// 注意：不操作 userRun，由调用方在合适的时机主动清理
 func (r *chatRun) finish() {
   r.mu.Lock()
   r.done = true
@@ -122,8 +123,6 @@ func (r *chatRun) finish() {
   }
   r.subs = make(map[chan struct{}]bool)
   r.mu.Unlock()
-
-  userRun.CompareAndDelete(r.username, r)
 
   // 延迟清理
   go func() {
@@ -165,7 +164,9 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte, so
   // 同一用户发新消息时，取消上一个正在运行的沙箱（通过 context 优雅退出）
   // 上一个沙箱退出后会 releaseUser，当前消息的 acquireUser 再获取 token 启动
   if v, ok := userRun.Load(username); ok {
-    v.(*chatRun).cancel()
+    oldRun := v.(*chatRun)
+    s.persistRunEvents(username, oldRun)
+    oldRun.cancel()
   }
 
   runCtx, runCancel := context.WithCancel(context.Background())
@@ -202,6 +203,7 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte, so
         }
       }
       run.finish()
+      userRun.CompareAndDelete(username, run)
       s.persistRunEvents(username, run)
       return
     }
@@ -228,6 +230,7 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte, so
     }
     slog.Debug("chat.sandbox_complete", "run_id", run.runID, "event_count", eventCount)
     run.finish()
+    userRun.CompareAndDelete(username, run)
     s.persistRunEvents(username, run)
   }()
 
