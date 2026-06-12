@@ -39,6 +39,15 @@
 
       <div id="content-area"></div>
     </main>
+
+    <!-- 全局 daemon 状态栏 → 所有页面可见 -->
+    <div id="daemon-status-bar" style="position:fixed;bottom:0;left:0;right:0;z-index:100">
+      <span class="status-dot stopped" id="daemon-dot"></span>
+      <span id="daemon-text">Agent 未运行</span>
+      <span style="flex:1"></span>
+      <span id="daemon-queue-badge" style="display:none"></span>
+      <button class="btn btn-sm btn-outline" id="daemon-restart-btn" style="display:none" onclick="restartDaemon()">重启 Agent</button>
+    </div>
   </div>
 
   <script src="../js/common.js"></script>

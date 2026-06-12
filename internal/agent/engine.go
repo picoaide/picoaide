@@ -3,6 +3,7 @@ package agent
 import (
   "context"
   "encoding/json"
+  "errors"
   "fmt"
   "sync"
   "sync/atomic"
@@ -99,6 +100,24 @@ const AgentProtocol = `# Agent Protocol
 - 使用 update_memory 更新优于直接 write_file，可确保格式一致性和去重`
 
 // ============================================================
+// 暂停/恢复支持
+// ============================================================
+
+var ErrPaused = errors.New("task paused")
+
+type PauseCheckerFunc func() bool
+
+type OnPauseFunc func(*EngineSnapshot)
+
+func (e *Engine) SetPauseChecker(fn PauseCheckerFunc) {
+  e.pauseChecker = fn
+}
+
+func (e *Engine) SetOnPause(fn OnPauseFunc) {
+  e.onPause = fn
+}
+
+// ============================================================
 // Agent 引擎 — 主循环
 // ============================================================
 
@@ -119,6 +138,8 @@ type Engine struct {
   pendingAdditions  []string   // AppendToSystemPrompt 累积的内容
   llmMessages       []LLMMessage      // 当前会话的 LLM 对话历史
   providerMu        sync.RWMutex      // 保护 Snapshot/Restore 期间的状态一致性
+  pauseChecker      PauseCheckerFunc
+  onPause           OnPauseFunc
 }
 
 func NewEngine(cfg *AgentConfig, provider Provider, tools *ToolRegistry, store *SessionStore) *Engine {
@@ -327,6 +348,14 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
 
   emptyRespRetries := 0
   for iter := 0; iter < maxIter; iter++ {
+    if e.pauseChecker != nil && e.pauseChecker() {
+      taskDoneReason = "paused"
+      if e.onPause != nil {
+        e.onPause(e.Snapshot())
+      }
+      return ErrPaused
+    }
+
     // 每轮独立超时：LLM 调用 + 工具执行共享一条超时线
     iterCtx, iterCancel := context.WithTimeout(cancelCtx, time.Duration(perIterTimeout)*time.Second)
 

@@ -26,6 +26,7 @@ import (
   "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/config"
+  "github.com/picoaide/picoaide/internal/daemon"
   "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/sandbox"
   "github.com/picoaide/picoaide/internal/skill"
@@ -51,6 +52,9 @@ type Server struct {
   agentIntegration  *AgentIntegration
   tlsSrv           *http.Server // TLS 服务器，用于优雅关闭
   extSrv           *http.Server // HTTP 服务器（:80），用于热加载时更新 handler
+  daemonManager     *daemon.DaemonManager
+  taskManager       *daemon.TaskManager
+  daemonHub         *daemon.Hub
 }
 
 // loadConfig 返回当前配置指针（原子读取）
@@ -503,6 +507,8 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
     admin.POST("/tls/save", s.handleAdminTLSSave)
     admin.POST("/tls/toggle", s.handleAdminTLSToggle)
     admin.POST("/tls/clear", s.handleAdminTLSClear)
+    // 超管 - daemon 管理
+    s.registerAdminDaemonRoutes(admin)
   }
   // 普通用户 - 团队空间
   g.GET("/shared-folders", s.handleSharedFolders)
@@ -510,6 +516,9 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
   g.GET("/user/skills", s.handleUserSkills)
   g.POST("/user/skills/install", s.handleUserSkillsInstall)
   g.POST("/user/skills/uninstall", s.handleUserSkillsUninstall)
+
+  // 普通用户 - daemon 任务与事件流
+  s.registerDaemonRoutes(g.Group("/user"))
 }
 
 // RegisterRoutes 将所有 API 路由注册到 Gin 引擎
@@ -710,6 +719,18 @@ func Serve() error {
     auditLimiter:  newAuditRateLimiter(),
   }
   s.cfg.Store(cfg)
+
+  // 初始化 daemon 管理器
+  engine, err := store.GetEngine()
+  if err != nil {
+    slog.Warn("daemon 管理器初始化失败（数据库不可用）", "error", err)
+  } else {
+    daemonHub := daemon.NewHub()
+    s.daemonHub = daemonHub
+    s.daemonManager = daemon.NewDaemonManager(engine.DB().DB, config.WorkDir(), daemonHub)
+    s.taskManager = daemon.NewTaskManager(config.WorkDir())
+    slog.Info("daemon 管理器已初始化")
+  }
 
   // 启动审计日志清理（停止由 gracefulShutdown 管理）
   s.auditCleanerCtx, s.auditCleanerCancel = context.WithCancel(context.Background())

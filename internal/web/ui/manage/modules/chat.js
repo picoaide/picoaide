@@ -1,13 +1,16 @@
-// AI 对话模块（SSE 流式输出，支持断线重连）
+// AI 对话模块（SSE 流式输出，支持断线重连，任务面板）
 
 var currentReader = null;
 var stopRequested = false;
-var currentRunId = null;
-var RUN_ID_KEY = 'picoaide_chat_run_id';
+var currentTaskId = null;
+var TASK_ID_KEY = 'picoaide_chat_task_id';
+var TASK_SEQ_KEY = 'picoaide_chat_task_seq';
 var isUserScrolledUp = false;
 var lastSentText = '';
 var timeoutTimer = null;
 var sendGeneration = 0;
+var daemonOnline = false;
+var chatCtx = null;
 
 function resetTimeoutTimer() {
   if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
@@ -71,7 +74,6 @@ function ensureMarked() {
 }
 
 function renderMarkdown(text) {
-  // 先用 marked 渲染（如果已加载），否则回退到简单转义
   if (window.marked) {
     try {
       return window.marked.parse(text, { breaks: true, gfm: true });
@@ -84,7 +86,6 @@ function escapeHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// 给代码块添加语言标签和复制按钮
 function enhanceCodeBlocks(root) {
   if (!root) return;
   root.querySelectorAll('pre').forEach(function(pre) {
@@ -121,7 +122,6 @@ function enhanceCodeBlocks(root) {
   });
 }
 
-// 空状态引导卡片
 var examplePrompts = [
   '帮我写一封商务邮件',
   '搜索项目中的配置文件',
@@ -138,7 +138,6 @@ function showEmptyPrompt(box) {
       return '<div class="example-prompt" style="display:inline-block;margin:4px 6px;padding:8px 16px;border:1px solid var(--border-light,#e0e0e0);border-radius:8px;cursor:pointer;font-size:14px;background:var(--card-bg,#fff);transition:background .15s" onmouseover="this.style.background=\'#f5f5f5\'" onmouseout="this.style.background=\'var(--card-bg,#fff)\'">' + escapeHtml(p) + '</div>';
     }).join('') +
     '</div>';
-  // 点击示例问题自动发送
   box.querySelectorAll('.example-prompt').forEach(function(el) {
     el.addEventListener('click', function() {
       var text = this.textContent;
@@ -150,7 +149,6 @@ function showEmptyPrompt(box) {
   });
 }
 
-// 格式化时间戳
 function formatTime(ts) {
   var d = ts ? new Date(ts) : new Date();
   var now = new Date();
@@ -166,7 +164,6 @@ function formatTime(ts) {
   return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + t;
 }
 
-// safeParse 安全解析事件数据（SSE 中 Data 可能是序列化字符串或已解析对象）
 function safeParse(data) {
   if (typeof data === 'object') return data;
   try { return JSON.parse(data); } catch(e) { return data; }
@@ -191,7 +188,6 @@ function appendMsg(box, role, content) {
   var lastMsg = box.querySelector('.chat-msg:last-child');
   var lastContent = lastMsg && lastMsg.querySelector('.chat-content');
   if (lastContent) enhanceCodeBlocks(lastContent);
-  // 助手消息添加复制按钮
   if (role === 'assistant' && lastMsg) {
     var copyBtn = document.createElement('button');
     copyBtn.textContent = '📋';
@@ -226,8 +222,32 @@ function getLastAssistantContent(box) {
 
 var sseState = { box: null, contentEl: null, fullText: '', statusEl: null, thinkingEl: null, reasoningEl: null };
 
+// 保留当前的 seq 用于流重连
+var lastSeq = 0;
+
 function handleSSEEvent(parsed) {
   var s = sseState;
+
+  // 记录 seq（用于重连）
+  if (typeof parsed.seq === 'number' && parsed.seq > lastSeq) {
+    lastSeq = parsed.seq;
+    if (currentTaskId) {
+      localStorage.setItem(TASK_SEQ_KEY, String(lastSeq));
+    }
+  }
+
+  // 转发给任务面板
+  if (window.taskpanel && typeof window.taskpanel.handleTaskEvent === 'function') {
+    window.taskpanel.handleTaskEvent(parsed);
+  }
+
+  // 根据任务状态更新 daemon 栏
+  if (parsed.type === 'task_started' || parsed.type === 'task_completed' ||
+      parsed.type === 'task_cancelled' || parsed.type === 'task_paused' ||
+      parsed.type === 'task_resumed') {
+    updateDaemonStatus();
+  }
+
   if (parsed.type === 'user_message') {
     var txt = safeParse(parsed.data);
     if (typeof txt !== 'string') txt = String(txt);
@@ -254,7 +274,6 @@ function handleSSEEvent(parsed) {
     var txt = safeParse(parsed.data);
     if (typeof txt !== 'string') txt = String(txt);
     s.fullText += txt;
-    // 有 reasoning 时，第一条 text_delta 代表思考结束，隐藏 reasoning 块
     if (s.reasoningEl) {
       var reasoningMsg = s.reasoningEl.closest('.chat-msg.msg-reasoning');
       if (reasoningMsg) {
@@ -288,7 +307,6 @@ function handleSSEEvent(parsed) {
     }
     var toolId = td.id || 'tool-' + Date.now();
     var toolCardId = 'tool-card-' + toolId;
-    // 移除旧的临时状态，用卡片替换
     if (s.statusEl && s.statusEl.id === 'chat-tool-status') {
       s.statusEl.remove();
       s.statusEl = null;
@@ -311,7 +329,6 @@ function handleSSEEvent(parsed) {
       try { resultStr = JSON.stringify(safeParse(tr.result), null, 2); }
       catch(e) { resultStr = String(tr.result); }
     }
-    // 找到对应 tool card 更新状态
     var toolId = tr.id;
     var toolCard = toolId ? document.getElementById('tool-card-' + toolId) : null;
     if (toolCard) {
@@ -351,12 +368,11 @@ function handleSSEEvent(parsed) {
       }
       s.reasoningEl = null;
     }
-    // AI 回复已完成，断开 SSE 流，不等待沙箱退出
     if (currentReader) {
       try { currentReader.cancel(); } catch(e) {}
     }
     scrollToBottomIfNeeded(s.box);
-    return; // 提前返回，让 readSSEStream 的 reader.read() catch 到错误后退出
+    return;
   } else if (parsed.type === 'reasoning_complete') {
     // 不再使用（由 finish 事件处理），静默忽略
   } else if (parsed.type === 'error') {
@@ -373,7 +389,6 @@ function handleSSEEvent(parsed) {
     } else {
       s.contentEl.innerHTML = '<div style="color:red">错误: ' + escapeHtml(errMsg) + '</div>';
     }
-    // 添加重试按钮
     var lastMsg = s.box.querySelector('.chat-msg:last-child');
     if (lastMsg && lastSentText) {
       var retryBtn = document.createElement('button');
@@ -395,7 +410,6 @@ function handleSSEEvent(parsed) {
       startupEl = document.createElement('div');
       startupEl.id = 'chat-startup-progress';
       startupEl.style.cssText = 'padding:8px 14px;margin:4px 0 8px;background:#f0f7ff;border:1px solid #d0e4f7;border-radius:8px;font-size:13px;color:#4a9eff';
-      // 插在用户消息和 AI 回复之间
       var lastUser = s.box.querySelector('.chat-msg.msg-user:last-child');
       if (lastUser && lastUser.nextSibling) {
         s.box.insertBefore(startupEl, lastUser.nextSibling);
@@ -468,6 +482,64 @@ function handleSSEEvent(parsed) {
     }
     scrollToBottomIfNeeded(s.box);
   }
+
+  // 更新 daemon 状态（每次事件后检查，历史回放时跳过）
+  if (!window._chatLoadingHistory) {
+    updateDaemonStatus();
+  }
+}
+
+// 暴露给 taskpanel 模块用于加载历史事件
+window._chatHandleSSEEvent = handleSSEEvent;
+
+// ============================================================
+// Daemon 状态
+// ============================================================
+
+async function fetchDaemonStatus() {
+  try {
+    var resp = await Api.get('/api/user/daemon/status');
+    daemonOnline = resp && resp.online === true;
+  } catch (e) {
+    daemonOnline = false;
+  }
+  updateDaemonBar();
+}
+
+function updateDaemonStatus() {
+  // 根据当前任务状态推断 daemon 状态
+  // 如果有 running 或 paused 的任务，daemon 就是 online
+  var running = sseState.contentEl !== null || (currentReader !== null && !stopRequested);
+  if (running && !daemonOnline) {
+    daemonOnline = true;
+    updateDaemonBar();
+  }
+}
+
+function updateDaemonBar() {
+  var dot = document.getElementById('daemon-dot');
+  var text = document.getElementById('daemon-text');
+  if (!dot || !text) return;
+
+  dot.className = 'status-dot';
+  if (daemonOnline) {
+    dot.classList.add('running');
+    text.textContent = 'Agent 运行中';
+  } else {
+    dot.classList.add('stopped');
+    text.textContent = 'Agent 未运行';
+  }
+}
+
+function updateDaemonQueueBadge(count) {
+  var badge = document.getElementById('daemon-queue-badge');
+  if (!badge) return;
+  if (count > 0) {
+    badge.textContent = '队列: ' + count;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
 }
 
 // ============================================================
@@ -481,7 +553,6 @@ function resetSSEState(box) {
   sseState.statusEl = null;
   sseState.thinkingEl = null;
   sseState.reasoningEl = null;
-  // 重置上下文进度条
   var bar = document.getElementById('chat-context-bar');
   var fill = document.getElementById('chat-context-fill');
   var label = document.getElementById('chat-context-label');
@@ -489,13 +560,17 @@ function resetSSEState(box) {
   if (label) label.textContent = '0%';
 }
 
-async function readSSEStream(runId) {
+// 暴露给 taskpanel 模块用于重置状态
+window._chatResetSSEState = function(box) { resetSSEState(box); };
+
+async function readSSEStream(taskId, sinceSeq) {
   var box = document.getElementById('chat-box');
   if (!box) return false;
   resetSSEState(box);
 
   var base = window.location.origin.replace(/\/+$/, '');
-  var streamResp = await fetch(base + '/api/user/chat/stream?run_id=' + encodeURIComponent(runId), {
+  var url = base + '/api/user/events/stream?task_id=' + encodeURIComponent(taskId) + '&since_seq=' + (sinceSeq || 0);
+  var streamResp = await fetch(url, {
     method: 'GET',
     credentials: 'include',
   });
@@ -503,7 +578,7 @@ async function readSSEStream(runId) {
 
   var reader = streamResp.body.getReader();
   currentReader = reader;
-  currentRunId = runId;
+  currentTaskId = taskId;
   var decoder = new TextDecoder();
   var buffer = '';
 
@@ -546,7 +621,6 @@ async function readSSEStream(runId) {
 async function sendMessage(text) {
   var gen = ++sendGeneration;
   lastSentText = text;
-  // 取消前一次未关闭的 reader（快速点击发送时）
   if (currentReader) {
     try { currentReader.cancel(); } catch(e) {}
     currentReader = null;
@@ -557,48 +631,47 @@ async function sendMessage(text) {
   var input = document.getElementById('chat-input');
   stopRequested = false;
 
-  // 清除之前遗留的重生成按钮
   box.querySelectorAll('.regen-btn').forEach(function(b) { b.remove(); });
 
   if (box.children.length === 1 && box.querySelector('div[style*="text-align:center"]')) {
     box.innerHTML = '';
   }
 
-  // 消息和助手回复均由 SSE 事件渲染
   input.value = '';
   sendBtn.style.display = 'none';
   stopBtn.style.display = 'inline-block';
   stopBtn.disabled = false;
-  // 发送状态反馈
   var originalSendText = sendBtn.textContent;
   sendBtn.textContent = '⏳ 发送中...';
 
   resetSSEState(box);
+  lastSeq = 0;
+  localStorage.removeItem(TASK_SEQ_KEY);
   scrollToBottom(box);
   startTimeoutTimer();
 
   try {
     var base = window.location.origin.replace(/\/+$/, '');
-    var sendResp = await fetch(base + '/api/user/chat/send', {
+    var sendResp = await fetch(base + '/api/user/task/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formBody({ message: text }),
       credentials: 'include',
     });
     var sendData = await sendResp.json();
-    if (!sendData.success || !sendData.run_id) {
+    if (!sendData.success || !sendData.task_id) {
       if (sseState.contentEl) {
-        sseState.contentEl.innerHTML = '<div style="color:red">错误: ' + escapeHtml(sendData.error || '提交消息失败') + '</div>';
+        sseState.contentEl.innerHTML = '<div style="color:red">错误: ' + escapeHtml(sendData.error || '提交任务失败') + '</div>';
       } else if (box) {
         box.insertAdjacentHTML('beforeend',
-          '<div class="chat-msg msg-assistant"><div class="chat-meta">助手</div><div class="chat-content" style="color:red">错误: ' + escapeHtml(sendData.error || '提交消息失败') + '</div></div>');
+          '<div class="chat-msg msg-assistant"><div class="chat-meta">助手</div><div class="chat-content" style="color:red">错误: ' + escapeHtml(sendData.error || '提交任务失败') + '</div></div>');
       }
       return;
     }
-    var runId = sendData.run_id;
-    localStorage.setItem(RUN_ID_KEY, runId);
+    var taskId = sendData.task_id;
+    localStorage.setItem(TASK_ID_KEY, taskId);
 
-    await readSSEStream(runId);
+    await readSSEStream(taskId, 0);
   } catch (e) {
     if (!stopRequested) {
       var errText = '请求失败: ' + escapeHtml(e.message);
@@ -611,9 +684,9 @@ async function sendMessage(text) {
     }
   } finally {
     currentReader = null;
-    currentRunId = null;
-    localStorage.removeItem(RUN_ID_KEY);
-    // 只有最新的 sendMessage 才能改按钮状态
+    currentTaskId = null;
+    localStorage.removeItem(TASK_ID_KEY);
+    localStorage.removeItem(TASK_SEQ_KEY);
     if (gen === sendGeneration) {
       sendBtn.style.display = 'inline-block';
       stopBtn.style.display = 'none';
@@ -622,9 +695,15 @@ async function sendMessage(text) {
     }
     var dots = box.querySelector('.chat-thinking-dot');
     if (dots) dots.remove();
+
+    // 任务结束后刷新任务面板
+    if (window.taskpanel && typeof window.taskpanel.refreshTasks === 'function') {
+      setTimeout(function() {
+        window.taskpanel.refreshTasks();
+      }, 500);
+    }
   }
 
-  // 流结束后在助手消息底部添加重新生成按钮（仅最新一代）
   if (gen === sendGeneration && !stopRequested && lastSentText) {
     var lastAssistant = box.querySelector('.chat-msg.msg-assistant:last-child');
     if (lastAssistant && !lastAssistant.querySelector('.regen-btn')) {
@@ -648,10 +727,9 @@ async function loadChatHistory() {
   var box = document.getElementById('chat-box');
   if (!box) return;
   try {
-    var res = await apiJSON('GET', '/api/user/chat/history');
+    var res = await Api.get('/api/user/chat/history');
     var loading = document.getElementById('chat-loading');
     if (loading) loading.remove();
-    // 忽略浮动元素（timeout-hint、scroll-bottom），检查是否有真实消息
     var realChildren = 0;
     for (var i = 0; i < box.children.length; i++) {
       var el = box.children[i];
@@ -661,7 +739,6 @@ async function loadChatHistory() {
     }
     if (realChildren > 0) return;
     if (res.events && res.events.length > 0) {
-      // 优先用 events 还原完整对话状态（含工具调用等）
       box.innerHTML = '';
       resetSSEState(box);
       for (var evt of res.events) {
@@ -686,18 +763,17 @@ async function loadChatHistory() {
 // ============================================================
 
 async function tryReconnect(force) {
-  var runId = localStorage.getItem(RUN_ID_KEY);
-  if (!runId) return false;
-  if (!force && currentRunId === runId) return true; // 已经在读
+  var taskId = localStorage.getItem(TASK_ID_KEY);
+  if (!taskId) return false;
+  if (!force && currentTaskId === taskId) return true;
 
   var gen = ++sendGeneration;
 
-  // 取消旧的 reader（SPA 导航保留的旧连接，渲染到已卸载的 DOM）
   if (currentReader) {
     try { currentReader.cancel(); } catch(e) {}
     currentReader = null;
   }
-  currentRunId = null;
+  currentTaskId = null;
 
   var box = document.getElementById('chat-box');
   if (!box) return false;
@@ -711,22 +787,25 @@ async function tryReconnect(force) {
   stopBtn.style.display = 'inline-block';
   stopBtn.disabled = false;
 
-  var ok = await readSSEStream(runId);
-  // 只有最新一代才能改按钮
+  // 使用上次记录的 seq 进行重连
+  var sinceSeq = parseInt(localStorage.getItem(TASK_SEQ_KEY) || '0', 10);
+  if (sinceSeq > 0) sinceSeq = sinceSeq + 1;
+
+  var ok = await readSSEStream(taskId, sinceSeq);
   if (gen !== sendGeneration) return false;
   if (!ok) {
-    // run 已不存在（已完成超过 5 分钟）
-    localStorage.removeItem(RUN_ID_KEY);
-    currentRunId = null;
+    localStorage.removeItem(TASK_ID_KEY);
+    localStorage.removeItem(TASK_SEQ_KEY);
+    currentTaskId = null;
     sendBtn.style.display = 'inline-block';
     stopBtn.style.display = 'none';
     stopBtn.disabled = true;
     loadChatHistory();
     return false;
   }
-  // 流结束（正常完成或出错）
-  currentRunId = null;
-  localStorage.removeItem(RUN_ID_KEY);
+  currentTaskId = null;
+  localStorage.removeItem(TASK_ID_KEY);
+  localStorage.removeItem(TASK_SEQ_KEY);
   sendBtn.style.display = 'inline-block';
   stopBtn.style.display = 'none';
   stopBtn.disabled = true;
@@ -750,24 +829,28 @@ document.addEventListener('visibilitychange', function() {
 });
 
 // ============================================================
-// 初始化
+// 检查活跃任务
 // ============================================================
-// 预加载 marked 库
-ensureMarked();
 
-async function checkActiveRun() {
+async function checkActiveTask() {
   try {
-    var res = await apiJSON('GET', '/api/user/chat/active');
-    if (res.active && res.run_id) {
-      localStorage.setItem(RUN_ID_KEY, res.run_id);
-      return res.run_id;
+    var res = await Api.get('/api/user/task/active');
+    if (res.active && res.task_id) {
+      localStorage.setItem(TASK_ID_KEY, res.task_id);
+      return res.task_id;
     }
   } catch(e) {}
   return null;
 }
 
-function init() {
-  // 计算面板高度撑满视口剩余空间
+// ============================================================
+// 初始化
+// ============================================================
+ensureMarked();
+
+function init(ctx) {
+  chatCtx = ctx;
+
   var panel = document.getElementById('chat-panel');
   if (panel) {
     var navbar = document.querySelector('.navbar');
@@ -781,25 +864,38 @@ function init() {
       if (header) h += header.offsetHeight + (parseFloat(getComputedStyle(header).marginBottom) || 0);
       if (tabs) h += tabs.offsetHeight + (parseFloat(getComputedStyle(tabs).marginBottom) || 0);
       if (container) h += parseFloat(getComputedStyle(container).paddingBottom) || 0;
+      // 为 daemon 状态栏预留空间
+      var daemonBar = document.getElementById('daemon-status-bar');
+      if (daemonBar && daemonBar.offsetHeight) h += daemonBar.offsetHeight;
       panel.style.height = Math.max(200, window.innerHeight - h) + 'px';
     }
     adjustHeight();
     window.addEventListener('resize', adjustHeight);
   }
 
-  // 先检查服务器是否有活跃会话（跨刷新/SPA导航）
-  checkActiveRun().then(function(serverRunId) {
-    var localRunId = localStorage.getItem(RUN_ID_KEY);
-    var runId = serverRunId || localRunId;
-    if (runId) {
-      localStorage.setItem(RUN_ID_KEY, runId);
+  // 加载任务面板模块
+  import('./taskpanel.js').then(function(mod) {
+    if (mod.init) mod.init(ctx);
+  }).catch(function(e) {
+    console.error('加载任务面板模块失败:', e);
+  });
+
+  // 获取 daemon 状态
+  fetchDaemonStatus();
+
+  // 检查活跃任务并重连
+  checkActiveTask().then(function(serverTaskId) {
+    var localTaskId = localStorage.getItem(TASK_ID_KEY);
+    var taskId = serverTaskId || localTaskId;
+    if (taskId) {
+      localStorage.setItem(TASK_ID_KEY, taskId);
       tryReconnect(true);
     } else {
       loadChatHistory();
     }
   });
 
-  // 滚动锁定：监听用户手动滚动
+  // 滚动锁定
   var box = document.getElementById('chat-box');
   if (box) {
     box.addEventListener('scroll', function() {
@@ -822,14 +918,12 @@ function init() {
       var text = input.value.trim();
       if (text) sendMessage(text);
     });
-    // Shift+Enter 换行，Enter 发送
     input.addEventListener('keydown', function(e) {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         form.dispatchEvent(new Event('submit'));
       }
     });
-    // 自动伸缩高度
     function autoResize() {
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 200) + 'px';
@@ -842,16 +936,84 @@ function init() {
       if (currentReader) {
         currentReader.cancel();
       }
-      fetch('/api/user/chat/stop', { method: 'POST', credentials: 'include' }).catch(function(){});
+      if (currentTaskId) {
+        fetch('/api/user/task/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: formBody({ task_id: currentTaskId }),
+          credentials: 'include'
+        }).catch(function(){});
+      } else {
+        fetch('/api/user/chat/stop', { method: 'POST', credentials: 'include' }).catch(function(){});
+      }
       var box = document.getElementById('chat-box');
       var contentEl = getLastAssistantContent(box);
       if (contentEl) {
         contentEl.insertAdjacentHTML('beforeend', '<div style="color:var(--text-secondary,#999);font-size:13px;padding-top:6px">⏹ 已停止</div>');
       }
-      localStorage.removeItem(RUN_ID_KEY);
-      currentRunId = null;
+      localStorage.removeItem(TASK_ID_KEY);
+      localStorage.removeItem(TASK_SEQ_KEY);
+      currentTaskId = null;
+    });
+  }
+
+  // 暂停按钮
+  var pauseBtn = document.getElementById('chat-pause-btn');
+  if (pauseBtn) {
+    pauseBtn.addEventListener('click', function() {
+      if (!currentTaskId) return;
+      fetch('/api/user/task/pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formBody({ task_id: currentTaskId }),
+        credentials: 'include'
+      }).catch(function(){});
+    });
+  }
+
+  // 取消按钮
+  var cancelBtn = document.getElementById('chat-cancel-btn');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', function() {
+      if (!currentTaskId) return;
+      stopRequested = true;
+      if (currentReader) {
+        currentReader.cancel();
+      }
+      fetch('/api/user/task/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formBody({ task_id: currentTaskId }),
+        credentials: 'include'
+      }).catch(function(){});
+      var box = document.getElementById('chat-box');
+      var contentEl = getLastAssistantContent(box);
+      if (contentEl) {
+        contentEl.insertAdjacentHTML('beforeend', '<div style="color:var(--text-secondary,#999);font-size:13px;padding-top:6px">⏹ 已取消</div>');
+      }
+      localStorage.removeItem(TASK_ID_KEY);
+      localStorage.removeItem(TASK_SEQ_KEY);
+      currentTaskId = null;
     });
   }
 }
+
+// 全局 daemon 重启函数
+window.restartDaemon = function() {
+  fetch('/api/user/daemon/restart', {
+    method: 'POST',
+    credentials: 'include',
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.success) {
+      showMsg(document.createElement('div'), 'Agent 重启成功', true);
+      daemonOnline = true;
+      updateDaemonBar();
+    } else {
+      showMsg(document.createElement('div'), 'Agent 重启失败: ' + (d.error || '未知错误'), false);
+    }
+  }).catch(function(e) {
+    showMsg(document.createElement('div'), '重启请求失败: ' + e.message, false);
+  });
+};
 
 export { init };
