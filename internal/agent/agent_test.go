@@ -1093,3 +1093,132 @@ func TestEngine_PeriodicFSync(t *testing.T) {
     t.Error("expected live messages to be saved via periodic fsync")
   }
 }
+
+// ============================================================
+// Engine Snapshot / Restore — daemon pause/resume 支持
+// ============================================================
+
+func TestEngineSnapshot_CapturesCoreState(t *testing.T) {
+  store := NewSessionStore(t.TempDir())
+  provider := &mockProvider{
+    toolCalls: []ToolCallData{
+      {ID: "tc1", Name: "echo", Input: json.RawMessage(`{}`)},
+    },
+    responseText: "final answer",
+  }
+  tools := NewToolRegistry()
+  tools.Register(&dummyTool{name: "echo"})
+
+  cfg := testConfig()
+  cfg.MaxIter = 2
+  engine := NewEngine(cfg, provider, tools, store)
+  engine.SetSessionKey("snapshot_test")
+  engine.SetSkills([]*Skill{
+    {Name: "test-skill", Content: "test skill content"},
+  })
+  engine.fsyncInterval = 1
+
+  msg := &Message{Role: RoleUser, Content: "hello"}
+  err := engine.Process(context.Background(), "sys prompt", nil, msg, func(_ StreamEvent) {})
+  if err != nil {
+    t.Fatalf("Process failed: %v", err)
+  }
+
+  snap := engine.Snapshot()
+  if snap == nil {
+    t.Fatal("Snapshot() returned nil")
+  }
+  if snap.SessionKey != "snapshot_test" {
+    t.Errorf("SessionKey = %q, want snapshot_test", snap.SessionKey)
+  }
+  if snap.IterCount == 0 {
+    t.Error("IterCount should be > 0 after Process")
+  }
+  if len(snap.Messages) == 0 {
+    t.Error("Messages should not be empty after Process")
+  }
+  if snap.FrozenSystem == "" {
+    t.Error("FrozenSystem should not be empty")
+  }
+}
+
+func TestEngineSnapshot_EmptyEngine(t *testing.T) {
+  store := NewSessionStore(t.TempDir())
+  provider := &mockProvider{}
+  tools := NewToolRegistry()
+  cfg := testConfig()
+  engine := NewEngine(cfg, provider, tools, store)
+
+  snap := engine.Snapshot()
+  if snap == nil {
+    t.Fatal("Snapshot() returned nil")
+  }
+  if snap.SessionKey != "" {
+    t.Errorf("SessionKey = %q, want empty", snap.SessionKey)
+  }
+  if snap.IterCount != 0 {
+    t.Errorf("IterCount = %d, want 0", snap.IterCount)
+  }
+  if len(snap.Messages) != 0 {
+    t.Errorf("Messages length = %d, want 0", len(snap.Messages))
+  }
+}
+
+func TestEngineSnapshot_PendingAdditions(t *testing.T) {
+  store := NewSessionStore(t.TempDir())
+  provider := &mockProvider{}
+  tools := NewToolRegistry()
+  cfg := testConfig()
+  engine := NewEngine(cfg, provider, tools, store)
+  engine.AppendToSystemPrompt("addition 1")
+  engine.AppendToSystemPrompt("addition 2")
+
+  snap := engine.Snapshot()
+  if len(snap.PendingAdditions) != 2 {
+    t.Errorf("PendingAdditions length = %d, want 2", len(snap.PendingAdditions))
+  }
+  if snap.PendingAdditions[0] != "addition 1" {
+    t.Errorf("PendingAdditions[0] = %q, want 'addition 1'", snap.PendingAdditions[0])
+  }
+}
+
+func TestEngineRestore_RestoresState(t *testing.T) {
+  store := NewSessionStore(t.TempDir())
+  provider := &mockProvider{
+    responseText: "restored answer",
+  }
+  tools := NewToolRegistry()
+  tools.Register(&dummyTool{name: "echo"})
+
+  cfg1 := testConfig()
+  cfg1.MaxIter = 2
+  engine1 := NewEngine(cfg1, provider, tools, store)
+  engine1.SetSessionKey("restore_test")
+  engine1.SetSkills([]*Skill{{Name: "s1", Content: "c1"}})
+  engine1.AppendToSystemPrompt("add1")
+
+  msg1 := &Message{Role: RoleUser, Content: "first task"}
+  err := engine1.Process(context.Background(), "sys1", nil, msg1, func(_ StreamEvent) {})
+  if err != nil {
+    t.Fatalf("Process failed: %v", err)
+  }
+  snap := engine1.Snapshot()
+
+  cfg2 := testConfig()
+  cfg2.MaxIter = 2
+  engine2 := NewEngine(cfg2, provider, tools, store)
+  engine2.Restore(snap)
+
+  if engine2.SessionKey() != "restore_test" {
+    t.Errorf("SessionKey = %q, want restore_test", engine2.SessionKey())
+  }
+  if engine2.IterCount() != snap.IterCount {
+    t.Errorf("IterCount = %d, want %d", engine2.IterCount(), snap.IterCount)
+  }
+
+  msg2 := &Message{Role: RoleUser, Content: "continue"}
+  err = engine2.Process(context.Background(), "sys2", nil, msg2, func(_ StreamEvent) {})
+  if err != nil {
+    t.Errorf("Process after restore failed: %v", err)
+  }
+}

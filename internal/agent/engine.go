@@ -4,9 +4,12 @@ import (
   "context"
   "encoding/json"
   "fmt"
+  "sync"
+  "sync/atomic"
+  "time"
+
   "log/slog"
   "strings"
-  "time"
 )
 
 // ============================================================
@@ -109,11 +112,13 @@ type Engine struct {
   subAgentMgr       *SubAgentManager
   sessionKey        string     // 当前会话 key，压缩后写回 store
   fsyncInterval     int        // 每隔 N 轮 fsync 一次会话，0 禁用
-  iterCount         int        // 当前 Process 的迭代计数
+  iterCount         atomic.Int64 // 当前 Process 的迭代计数
   preloadedServers  []string   // 子代理预加载的 MCP 服务器
   preloadedSystem   string     // 追加到 system prompt 的内容（如工具指引）
   frozenSystem      string     // 构建一次后冻结的 system prompt
   pendingAdditions  []string   // AppendToSystemPrompt 累积的内容
+  llmMessages       []LLMMessage      // 当前会话的 LLM 对话历史
+  providerMu        sync.RWMutex      // 保护 Snapshot/Restore 期间的状态一致性
 }
 
 func NewEngine(cfg *AgentConfig, provider Provider, tools *ToolRegistry, store *SessionStore) *Engine {
@@ -147,6 +152,74 @@ func (e *Engine) SetSubAgentManager(mgr *SubAgentManager) {
   e.subAgentMgr = mgr
 }
 
+// EngineSnapshot 引擎可序列化的完整状态，用于 daemon pause/resume
+type EngineSnapshot struct {
+  SessionKey       string        `json:"session_key"`
+  IterCount        int           `json:"iter_count"`
+  Messages         []LLMMessage  `json:"messages"`
+  Skills           []string      `json:"skills"`
+  FrozenSystem     string        `json:"frozen_system"`
+  PendingAdditions []string      `json:"pending_additions"`
+  ProviderType     string        `json:"provider_type"`
+  ModelID          string        `json:"model_id"`
+}
+
+func (e *Engine) SessionKey() string { return e.sessionKey }
+func (e *Engine) IterCount() int { return int(e.iterCount.Load()) }
+
+func (e *Engine) Snapshot() *EngineSnapshot {
+  e.providerMu.RLock()
+  defer e.providerMu.RUnlock()
+
+  skillNames := make([]string, len(e.skills))
+  for i, s := range e.skills {
+    if s != nil {
+      skillNames[i] = s.Name
+    }
+  }
+
+  added := make([]string, len(e.pendingAdditions))
+  copy(added, e.pendingAdditions)
+
+  msgs := make([]LLMMessage, len(e.llmMessages))
+  copy(msgs, e.llmMessages)
+
+  return &EngineSnapshot{
+    SessionKey:       e.sessionKey,
+    IterCount:        int(e.iterCount.Load()),
+    Messages:         msgs,
+    Skills:           skillNames,
+    FrozenSystem:     e.frozenSystem,
+    PendingAdditions: added,
+    ProviderType:     e.config.Model.Provider,
+    ModelID:          e.config.Model.ModelID,
+  }
+}
+
+func (e *Engine) Restore(s *EngineSnapshot) {
+  e.providerMu.Lock()
+  defer e.providerMu.Unlock()
+
+  e.sessionKey = s.SessionKey
+  e.iterCount.Store(int64(s.IterCount))
+
+  msgs := make([]LLMMessage, len(s.Messages))
+  copy(msgs, s.Messages)
+  e.llmMessages = msgs
+
+  e.frozenSystem = s.FrozenSystem
+
+  added := make([]string, len(s.PendingAdditions))
+  copy(added, s.PendingAdditions)
+  e.pendingAdditions = added
+
+  skills := make([]*Skill, len(s.Skills))
+  for i, name := range s.Skills {
+    skills[i] = &Skill{Name: name}
+  }
+  e.skills = skills
+}
+
 // PreloadServer 预加载指定 MCP 服务器的工具到引擎工具列表
 func (e *Engine) PreloadServer(serverName string) {
   for _, s := range e.preloadedServers {
@@ -161,7 +234,9 @@ func (e *Engine) PreloadServer(serverName string) {
 // 内容不会修改 system prompt 本身，而是累积到 pendingAdditions，
 // 在 LLM 调用时作为 system 角色消息注入 messages 开头。
 func (e *Engine) AppendToSystemPrompt(text string) {
+  e.providerMu.Lock()
   e.pendingAdditions = append(e.pendingAdditions, text)
+  e.providerMu.Unlock()
 }
 
 // buildServerSummary 从工具注册表中生成 MCP 服务器摘要
@@ -343,9 +418,13 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
 
       // 注入 pendingAdditions 到 messages 开头（仅 DeepSeek 场景用于缓存优化，所有 provider 兼容）
       msgsForLLM := llmMsgs
-      if len(e.pendingAdditions) > 0 {
-        additions := make([]LLMMessage, 0, len(e.pendingAdditions))
-        for _, a := range e.pendingAdditions {
+      e.providerMu.RLock()
+      pendingAdditions := make([]string, len(e.pendingAdditions))
+      copy(pendingAdditions, e.pendingAdditions)
+      e.providerMu.RUnlock()
+      if len(pendingAdditions) > 0 {
+        additions := make([]LLMMessage, 0, len(pendingAdditions))
+        for _, a := range pendingAdditions {
           additions = append(additions, LLMMessage{Role: "system", Content: a})
         }
         msgsForLLM = append(additions, llmMsgs...)
@@ -518,9 +597,14 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     toolCallsExecuted = true
     e.postTurnCompaction(sysPrompt, &llmMsgs, usableTokens, cb)
 
-    // 定期 fsync 会话
-    e.iterCount++
-    if e.fsyncInterval > 0 && e.iterCount%e.fsyncInterval == 0 {
+    iter := int(e.iterCount.Add(1))
+    // 保存 llmMsgs 以便 Snapshot 捕获
+    e.providerMu.Lock()
+    e.llmMessages = make([]LLMMessage, len(llmMsgs))
+    copy(e.llmMessages, llmMsgs)
+    e.providerMu.Unlock()
+
+    if e.fsyncInterval > 0 && iter%e.fsyncInterval == 0 {
       e.fsyncSession(llmMsgs)
     }
 
