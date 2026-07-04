@@ -20,7 +20,6 @@ import (
 const smtpTimeout = 5 * time.Second
 
 var htmlTagRe = regexp.MustCompile(`(?i)<[^>]*>`)
-var blockTagRe = regexp.MustCompile(`(?i)<\s*(br|/p|/div|/li|/h[1-6]|/tr|/blockquote)[^>]*>`)
 var looksLikeHTML = regexp.MustCompile(`(?i)<\s*(html|body|div|p|br|h[1-6]|table|tr|td|th|a|img|ul|ol|li|span|b|i|u|strong|em|style|script|!--)[^>]*>`)
 
 func stripHTML(html string) string {
@@ -204,13 +203,13 @@ func dialSMTPServer(cfg *Config) (net.Conn, error) {
   addr := net.JoinHostPort(cfg.SMTPHost, fmt.Sprintf("%d", cfg.SMTPPort))
   conn, err := net.DialTimeout("tcp", addr, smtpTimeout)
   if err != nil {
-    return nil, &NetworkError{Err: fmt.Errorf("连接 SMTP 服务器失败: %w", err)}
+    return nil, fmt.Errorf("连接 SMTP 服务器失败: %w", err)
   }
   if cfg.SMTPTLS {
     tlsConn := tls.Client(conn, &tls.Config{ServerName: cfg.SMTPHost})
     if err := tlsConn.Handshake(); err != nil {
       conn.Close()
-      return nil, &NetworkError{Err: fmt.Errorf("SMTP TLS 握手失败: %w", err)}
+      return nil, fmt.Errorf("SMTP TLS 握手失败: %w", err)
     }
     return tlsConn, nil
   }
@@ -232,35 +231,35 @@ func SendMail(cfg *Config, msg *OutgoingMessage) (messageID string, err error) {
   if cfg.SMTPTLS {
     conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: cfg.SMTPHost})
     if err != nil {
-      return "", &NetworkError{Err: fmt.Errorf("连接 SMTP 服务器失败: %w", err)}
+      return "", fmt.Errorf("连接 SMTP 服务器失败: %w", err)
     }
     client, err := smtp.NewClient(conn, cfg.SMTPHost)
     if err != nil {
       conn.Close()
-      return "", &ProtocolError{Err: fmt.Errorf("创建 SMTP 客户端失败: %w", err)}
+      return "", fmt.Errorf("创建 SMTP 客户端失败: %w", err)
     }
     defer client.Close()
 
     if err = client.Auth(auth); err != nil {
-      return "", &AuthError{Err: fmt.Errorf("SMTP 认证失败: %w", err)}
+      return "", fmt.Errorf("SMTP 认证失败: %w", err)
     }
     if err = client.Mail(cfg.Email); err != nil {
-      return "", &ProtocolError{Err: fmt.Errorf("设置发件人失败: %w", err)}
+      return "", fmt.Errorf("设置发件人失败: %w", err)
     }
     for _, rcpt := range recipients {
       if err = client.Rcpt(rcpt); err != nil {
-        return "", &ProtocolError{Err: fmt.Errorf("设置收件人 %s 失败: %w", rcpt, err)}
+        return "", fmt.Errorf("设置收件人 %s 失败: %w", rcpt, err)
       }
     }
     w, err := client.Data()
     if err != nil {
-      return "", &ProtocolError{Err: fmt.Errorf("获取 DATA writer 失败: %w", err)}
+      return "", fmt.Errorf("获取 DATA writer 失败: %w", err)
     }
     if _, err = w.Write(data); err != nil {
-      return "", &ProtocolError{Err: fmt.Errorf("写入邮件数据失败: %w", err)}
+      return "", fmt.Errorf("写入邮件数据失败: %w", err)
     }
     if err = w.Close(); err != nil {
-      return "", &ProtocolError{Err: fmt.Errorf("关闭 DATA writer 失败: %w", err)}
+      return "", fmt.Errorf("关闭 DATA writer 失败: %w", err)
     }
     client.Quit()
   } else {

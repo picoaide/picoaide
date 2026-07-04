@@ -79,14 +79,7 @@ func (s *Server) handleAdminSkillsSourcesGitAdd(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
 
   name := strings.TrimSpace(c.PostForm("name"))
   repoURL := strings.TrimSpace(c.PostForm("url"))
@@ -172,14 +165,7 @@ func (s *Server) handleAdminSkillsSourcesRemove(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
 
   name := strings.TrimSpace(c.PostForm("name"))
   if name == "" {
@@ -232,14 +218,7 @@ func (s *Server) handleAdminSkillsSourcesPull(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
 
   name := strings.TrimSpace(c.PostForm("name"))
   if name == "" {
@@ -303,14 +282,7 @@ func (s *Server) handleAdminSkillsSourcesRefresh(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
 
   name := strings.TrimSpace(c.PostForm("name"))
   if name == "" {
@@ -354,14 +326,7 @@ func (s *Server) handleAdminSkillsRegistryInstall(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
 
   sourceName := strings.TrimSpace(c.PostForm("source"))
   slug := strings.TrimSpace(c.PostForm("slug"))
@@ -463,7 +428,7 @@ func (s *Server) handleAdminSkillsRegistryList(c *gin.Context) {
 func updateSourceLastPull(sources []config.SkillsSourceWrapper, name string) []config.SkillsSourceWrapper {
   for i, sw := range sources {
     if sw.Name == name && sw.Git != nil {
-      sources[i].Git.LastPull = timeNow()
+      sources[i].Git.LastPull = time.Now().Format("2006-01-02 15:04:05")
     }
   }
   return sources
@@ -472,14 +437,10 @@ func updateSourceLastPull(sources []config.SkillsSourceWrapper, name string) []c
 func updateSourceLastRefresh(sources []config.SkillsSourceWrapper, name string) []config.SkillsSourceWrapper {
   for i, sw := range sources {
     if sw.Name == name && sw.Reg != nil {
-      sources[i].Reg.LastRefresh = timeNow()
+      sources[i].Reg.LastRefresh = time.Now().Format("2006-01-02 15:04:05")
     }
   }
   return sources
-}
-
-func timeNow() string {
-  return time.Now().Format("2006-01-02 15:04:05")
 }
 
 // ============================================================

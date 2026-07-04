@@ -43,8 +43,6 @@ type ToolFunction struct {
 type Message struct {
   Role             MessageRole  `json:"role"`
   Content          string       `json:"content,omitempty"`
-  Media            []string     `json:"media,omitempty"`
-  Attachments      []Attachment `json:"attachments,omitempty"`
   ReasoningContent string       `json:"reasoning_content,omitempty"`
   ToolCalls        []ToolCall   `json:"tool_calls,omitempty"`
   ToolCallID       string       `json:"tool_call_id,omitempty"`
@@ -57,7 +55,6 @@ type Message struct {
 type SessionScope struct {
   Version    int               `json:"version"`
   AgentID    string            `json:"agent_id"`
-  Channel    string            `json:"channel"`
   Account    string            `json:"account"`
   Dimensions []string          `json:"dimensions"`
   Values     map[string]string `json:"values"`
@@ -180,12 +177,7 @@ type StreamEvent struct {
 }
 
 func TextDelta(text string) StreamEvent {
-  return StreamEvent{Type: "text_delta", Data: json.RawMessage(jsonString(text))}
-}
-
-func ToolCallEvent(name string, args interface{}) StreamEvent {
-  argsJSON, _ := json.Marshal(args)
-  return StreamEvent{Type: "tool_call", Data: argsJSON}
+  return StreamEvent{Type: "text_delta", Data: mustJSON(text)}
 }
 
 func FinishEvent(content string, usage map[string]int) StreamEvent {
@@ -197,7 +189,7 @@ func FinishEvent(content string, usage map[string]int) StreamEvent {
 }
 
 func ErrorEvent(err string) StreamEvent {
-  return StreamEvent{Type: "error", Data: json.RawMessage(jsonString(err))}
+  return StreamEvent{Type: "error", Data: mustJSON(err)}
 }
 
 // ============================================================
@@ -210,7 +202,4 @@ type ToolDef struct {
   InputSchema map[string]interface{} `json:"inputSchema"`
 }
 
-func jsonString(s string) string {
-  b, _ := json.Marshal(s)
-  return string(b)
-}
+

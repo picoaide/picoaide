@@ -21,14 +21,7 @@ func (s *Server) handleAdminAuthTestLDAP(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
 
   host := c.PostForm("host")
   bindDN := c.PostForm("bind_dn")
@@ -132,14 +125,7 @@ func (s *Server) handleAdminAuthSyncUsers(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   if !authsource.HasDirectoryProvider(s.loadConfig()) {
     writeError(c, http.StatusBadRequest, "当前认证方式不支持目录同步")
     return
@@ -237,10 +223,6 @@ func (s *Server) handleAdminWhitelistGet(c *gin.Context) {
 // handleAdminWhitelistPost 更新白名单
 func (s *Server) handleAdminWhitelistPost(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
     return
   }
   addStr := strings.TrimSpace(c.PostForm("add"))

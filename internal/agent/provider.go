@@ -63,6 +63,8 @@ func NewProvider(provider, modelID, baseURL, apiKey string) (Provider, error) {
 // HTTP 请求辅助（避免 curl 命令行参数泄露）
 // ============================================================
 
+var defaultHTTPClient = &http.Client{Timeout: 120 * time.Second}
+
 func doHTTP(ctx context.Context, url, method string, headers map[string]string, body []byte) (*http.Response, error) {
   req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
   if err != nil {
@@ -71,24 +73,16 @@ func doHTTP(ctx context.Context, url, method string, headers map[string]string, 
   for k, v := range headers {
     req.Header.Set(k, v)
   }
-  client := &http.Client{Timeout: 120 * time.Second}
-  return client.Do(req)
+  return defaultHTTPClient.Do(req)
 }
 
 // retryableErrorPrefixes 可重试的网络/服务端错误前缀匹配
 var retryableErrorPrefixes = []string{
-  "connection refused",
-  "connection reset",
-  "no such host",
-  "TLS handshake",
-  "i/o timeout",
-  "dial tcp",
-  "HTTP 429",
   "HTTP 5",
-  "HTTP 50",
-  "HTTP 51",
-  "HTTP 52",
-  "HTTP 53",
+  "HTTP 429",
+  "HTTP 408",
+  "connection reset",
+  "TLS handshake",
 }
 
 func isRetryable(err error) bool {
@@ -610,67 +604,6 @@ func logDeepSeekCacheStats(model, chunkRaw string) {
   }
 }
 
-func extractDeepSeekCacheUsage(rawJSON string) string {
-  if rawJSON == "" {
-    return ""
-  }
-  var resp struct {
-    Usage map[string]json.RawMessage `json:"usage"`
-  }
-  if err := json.Unmarshal([]byte(rawJSON), &resp); err != nil {
-    return ""
-  }
-  if resp.Usage == nil {
-    return ""
-  }
-  // 只关心缓存相关字段
-  filtered := make(map[string]json.RawMessage)
-  for _, key := range []string{"prompt_cache_hit_tokens", "prompt_cache_miss_tokens"} {
-    if v, ok := resp.Usage[key]; ok {
-      filtered[key] = v
-    }
-  }
-  if len(filtered) == 0 {
-    return ""
-  }
-  data, _ := json.Marshal(filtered)
-  return string(data)
-}
 
-func buildDeepSeekMessages(messages []LLMMessage) []map[string]interface{} {
-  raw := make([]map[string]interface{}, 0, len(messages))
-  for _, m := range messages {
-    msg := map[string]interface{}{
-      "role": m.Role,
-    }
-    if m.Content != "" {
-      msg["content"] = m.Content
-    }
-    if m.ReasoningContent != "" {
-      msg["reasoning_content"] = m.ReasoningContent
-    }
-    if m.ToolCallID != "" {
-      msg["tool_call_id"] = m.ToolCallID
-    }
-    if len(m.ToolCalls) > 0 {
-      tcs := make([]map[string]interface{}, 0, len(m.ToolCalls))
-      for _, tc := range m.ToolCalls {
-        var args interface{}
-        json.Unmarshal([]byte(tc.Function.Arguments), &args)
-        tcs = append(tcs, map[string]interface{}{
-          "id":   tc.ID,
-          "type": tc.Type,
-          "function": map[string]interface{}{
-            "name":      tc.Function.Name,
-            "arguments": tc.Function.Arguments,
-          },
-        })
-      }
-      msg["tool_calls"] = tcs
-    }
-    raw = append(raw, msg)
-  }
-  return raw
-}
 
 

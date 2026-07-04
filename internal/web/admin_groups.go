@@ -69,14 +69,7 @@ func (s *Server) handleAdminGroupCreate(c *gin.Context) {
     writeError(c, http.StatusForbidden, "用户组由当前认证源同步，不允许手动创建")
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   name := strings.TrimSpace(c.PostForm("name"))
   description := strings.TrimSpace(c.PostForm("description"))
   parentIDStr := strings.TrimSpace(c.PostForm("parent_id"))
@@ -111,14 +104,7 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
     writeError(c, http.StatusForbidden, "用户组由当前认证源同步，不允许手动删除")
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   name := strings.TrimSpace(c.PostForm("name"))
   logger.DebugRecv("POST", "/api/admin/groups/delete", "group", name, "operator", s.getSessionUser(c))
   if name == "" {
@@ -150,14 +136,7 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
     writeError(c, http.StatusForbidden, "用户组成员由当前认证源同步，不允许手动修改")
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   groupName := strings.TrimSpace(c.PostForm("group_name"))
   usersStr := strings.TrimSpace(c.PostForm("usernames"))
   if groupName == "" || usersStr == "" {
@@ -207,14 +186,7 @@ func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
     writeError(c, http.StatusForbidden, "用户组成员由当前认证源同步，不允许手动修改")
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   groupName := strings.TrimSpace(c.PostForm("group_name"))
   username := strings.TrimSpace(c.PostForm("username"))
   if groupName == "" || username == "" {
@@ -236,14 +208,7 @@ func (s *Server) handleAdminGroupSkillsBind(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   groupName := strings.TrimSpace(c.PostForm("group_name"))
   skillName := strings.TrimSpace(c.PostForm("skill_name"))
   if groupName == "" || skillName == "" {
@@ -281,14 +246,7 @@ func (s *Server) handleAdminGroupSkillsUnbind(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   groupName := strings.TrimSpace(c.PostForm("group_name"))
   skillName := strings.TrimSpace(c.PostForm("skill_name"))
   if groupName == "" || skillName == "" {
@@ -384,14 +342,7 @@ func (s *Server) handleAdminAuthSyncGroups(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   if !authsource.HasDirectoryProvider(s.loadConfig()) {
     writeError(c, http.StatusBadRequest, "当前认证方式不支持目录同步")
     return

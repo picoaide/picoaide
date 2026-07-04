@@ -3,7 +3,6 @@ package store
 import (
   "context"
   "crypto/rand"
-  "database/sql"
   "encoding/hex"
   "fmt"
   "log/slog"
@@ -20,7 +19,7 @@ import (
 
 const dbFileName = "picoaide.db"
 
-const argon2idHashPrefix = "$argon2id$"
+const Argon2idHashPrefix = "$argon2id$"
 
 var passwordHashParams = struct {
   memory  uint32
@@ -198,15 +197,6 @@ func syncSchema() error {
     return err
   }
   _, err = engine.Exec(`CREATE INDEX IF NOT EXISTS idx_user_channels_username ON user_channels(username)`)
-  if err != nil {
-    return err
-  }
-  _, err = engine.Exec(`CREATE TABLE IF NOT EXISTS skills (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT NOT NULL DEFAULT '',
-    updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
-  )`)
   if err != nil {
     return err
   }
@@ -442,10 +432,4 @@ func ValidateMCPToken(token string) (string, bool) {
   return username, true
 }
 
-var _ = func() *sql.DB {
-  var e *xorm.Engine
-  if e != nil {
-    return e.DB().DB
-  }
-  return nil
-}()
+

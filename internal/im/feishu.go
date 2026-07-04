@@ -278,22 +278,6 @@ func (f *FeishuProvider) SendToUser(ctx context.Context, username string, text s
   return nil
 }
 
-func extractFeishuSenderID(sender *larkim.EventSender) string {
-  if sender == nil || sender.SenderId == nil {
-    return ""
-  }
-  if sender.SenderId.UserId != nil && *sender.SenderId.UserId != "" {
-    return *sender.SenderId.UserId
-  }
-  if sender.SenderId.OpenId != nil && *sender.SenderId.OpenId != "" {
-    return *sender.SenderId.OpenId
-  }
-  if sender.SenderId.UnionId != nil && *sender.SenderId.UnionId != "" {
-    return *sender.SenderId.UnionId
-  }
-  return ""
-}
-
 func extractFeishuContent(messageType, rawContent string) string {
   if rawContent == "" {
     return ""

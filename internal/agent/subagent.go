@@ -128,7 +128,7 @@ func (m *SubAgentManager) runSubAgent(ctx context.Context, name, taskDesc, serve
       case "tool_call_start", "reasoning", "error":
         m.parentCb(StreamEvent{
           Type: "subagent_event",
-          Data: mustJSONData(map[string]interface{}{
+          Data: mustJSON(map[string]interface{}{
             "name": name,
             "sub_type": ev.Type,
             "data": string(ev.Data),
@@ -355,7 +355,4 @@ func (t *SubAgentCollectTool) Execute(ctx context.Context, args json.RawMessage)
   return &ToolResult{Success: result.Success, Data: result.Data}, nil
 }
 
-func mustJSONData(v interface{}) json.RawMessage {
-  data, _ := json.Marshal(v)
-  return data
-}
+

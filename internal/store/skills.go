@@ -52,8 +52,8 @@ func GetUserSkillSource(username, skillName string) (string, error) {
   return skill.Source, nil
 }
 
-// GetUsersBySkill 获取直接绑定某技能的所有用户
-func GetUsersBySkill(skillName string) ([]string, error) {
+// GetUsersForSkill 返回 user_skills 中直接绑定了此技能的所有用户
+func GetUsersForSkill(skillName string) ([]string, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
@@ -66,15 +66,6 @@ func GetUsersBySkill(skillName string) ([]string, error) {
     list = append(list, s.Username)
   }
   return list, nil
-}
-
-// ============================================================
-// 智能查询（仅查 user_skills，组展开为直接绑定后不再需要 group_skills 继承）
-// ============================================================
-
-// GetUsersForSkill 返回 user_skills 中直接绑定了此技能的所有用户
-func GetUsersForSkill(skillName string) ([]string, error) {
-  return GetUsersBySkill(skillName)
 }
 
 // UserHasSkillFromAnySource 判断用户是否有此技能（仅查 user_skills）

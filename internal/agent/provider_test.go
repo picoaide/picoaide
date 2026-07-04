@@ -4,7 +4,6 @@ import (
   "context"
   "encoding/json"
   "errors"
-  "net"
   "strings"
   "testing"
   "time"
@@ -17,7 +16,7 @@ func TestRetryStream_NetworkErrorRetries(t *testing.T) {
   err := retryStream(context.Background(), "test", func(ctx context.Context) error {
     attempts++
     if attempts < 2 {
-      return &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+      return errors.New("TLS handshake failed")
     }
     return nil
   })
@@ -108,54 +107,6 @@ func fakeDeepSeekParams(model string, messages []LLMMessage, userID string) open
     p.SetExtraFields(map[string]any{"user_id": userID})
   }
   return p
-}
-
-func TestBuildDeepSeekMessages_IncludesReasoningContent(t *testing.T) {
-  msgs := []LLMMessage{
-    {Role: "user", Content: "hello"},
-    {Role: "assistant", Content: "visible", ReasoningContent: "thinking", ToolCalls: []ToolCall{{ID: "t1", Type: "function", Function: ToolFunction{Name: "fn", Arguments: "{}"}}}},
-    {Role: "tool", Content: "result", ToolCallID: "t1"},
-  }
-  raw := buildDeepSeekMessages(msgs)
-  data, _ := json.Marshal(raw)
-  var parsed []map[string]interface{}
-  json.Unmarshal(data, &parsed)
-
-  if len(parsed) != 3 {
-    t.Fatalf("expected 3 messages, got %d", len(parsed))
-  }
-
-  // assistant message should have reasoning_content and content
-  assistant := parsed[1]
-  if assistant["role"] != "assistant" {
-    t.Errorf("expected role=assistant, got %v", assistant["role"])
-  }
-  if assistant["content"] != "visible" {
-    t.Errorf("expected content=visible, got %v", assistant["content"])
-  }
-  if assistant["reasoning_content"] != "thinking" {
-    t.Errorf("expected reasoning_content=thinking, got %v", assistant["reasoning_content"])
-  }
-
-  // user message should NOT have reasoning_content
-  user := parsed[0]
-  if _, ok := user["reasoning_content"]; ok {
-    t.Errorf("user message should not have reasoning_content")
-  }
-}
-
-func TestBuildDeepSeekMessages_SkipsEmptyReasoningContent(t *testing.T) {
-  msgs := []LLMMessage{
-    {Role: "assistant", Content: "no thinking"},
-  }
-  raw := buildDeepSeekMessages(msgs)
-  data, _ := json.Marshal(raw)
-  var parsed []map[string]interface{}
-  json.Unmarshal(data, &parsed)
-
-  if _, ok := parsed[0]["reasoning_content"]; ok {
-    t.Errorf("should not include reasoning_content when empty")
-  }
 }
 
 func TestSetExtraFields_UserID(t *testing.T) {

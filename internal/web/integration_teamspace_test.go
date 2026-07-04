@@ -285,8 +285,11 @@ func TestSharedFolders_UserDeleteCleansMountRecords(t *testing.T) {
   assertStatus(t, resp, 200)
 
   // 验证挂载记录已清理
-  _, err := store.GetMountStatus(sf.ID, "delete-me")
-  if err == nil {
+  mountStatuses, err := store.GetMountStatusesForFolder(sf.ID)
+  if err != nil {
+    t.Fatal(err)
+  }
+  if _, exists := mountStatuses["delete-me"]; exists {
     t.Error("mount record should be deleted after user deletion")
   }
 }

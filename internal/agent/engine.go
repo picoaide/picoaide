@@ -3,7 +3,6 @@ package agent
 import (
   "context"
   "encoding/json"
-  "errors"
   "fmt"
   "sync"
   "sync/atomic"
@@ -100,24 +99,6 @@ const AgentProtocol = `# Agent Protocol
 - 使用 update_memory 更新优于直接 write_file，可确保格式一致性和去重`
 
 // ============================================================
-// 暂停/恢复支持
-// ============================================================
-
-var ErrPaused = errors.New("task paused")
-
-type PauseCheckerFunc func() bool
-
-type OnPauseFunc func(*EngineSnapshot)
-
-func (e *Engine) SetPauseChecker(fn PauseCheckerFunc) {
-  e.pauseChecker = fn
-}
-
-func (e *Engine) SetOnPause(fn OnPauseFunc) {
-  e.onPause = fn
-}
-
-// ============================================================
 // Agent 引擎 — 主循环
 // ============================================================
 
@@ -133,13 +114,10 @@ type Engine struct {
   fsyncInterval     int        // 每隔 N 轮 fsync 一次会话，0 禁用
   iterCount         atomic.Int64 // 当前 Process 的迭代计数
   preloadedServers  []string   // 子代理预加载的 MCP 服务器
-  preloadedSystem   string     // 追加到 system prompt 的内容（如工具指引）
   frozenSystem      string     // 构建一次后冻结的 system prompt
   pendingAdditions  []string   // AppendToSystemPrompt 累积的内容
   llmMessages       []LLMMessage      // 当前会话的 LLM 对话历史
   providerMu        sync.RWMutex      // 保护 Snapshot/Restore 期间的状态一致性
-  pauseChecker      PauseCheckerFunc
-  onPause           OnPauseFunc
 }
 
 func NewEngine(cfg *AgentConfig, provider Provider, tools *ToolRegistry, store *SessionStore) *Engine {
@@ -157,7 +135,7 @@ func (e *Engine) SetSessionKey(key string) {
   e.sessionKey = key
 }
 
-func (e *Engine) SetSummarizer(llm Summarizer) {
+func (e *Engine) SetSummarizer(llm *LLMSummarizer) {
   e.compactor.SetSummarizer(llm)
 }
 
@@ -348,14 +326,6 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
 
   emptyRespRetries := 0
   for iter := 0; iter < maxIter; iter++ {
-    if e.pauseChecker != nil && e.pauseChecker() {
-      taskDoneReason = "paused"
-      if e.onPause != nil {
-        e.onPause(e.Snapshot())
-      }
-      return ErrPaused
-    }
-
     // 每轮独立超时：LLM 调用 + 工具执行共享一条超时线
     iterCtx, iterCancel := context.WithTimeout(cancelCtx, time.Duration(perIterTimeout)*time.Second)
 
@@ -755,10 +725,6 @@ func (e *Engine) buildSystemPrompt(base string) string {
       result = result + "\n\n## 可用 MCP 服务器\n" + serverSummary +
         "\n\n使用 query_server 工具快速调用某个 MCP 服务器的工具。批量任务请使用 subagent_spawn + subagent_collect。"
     }
-  }
-
-  if e.preloadedSystem != "" {
-    result = result + "\n\n" + e.preloadedSystem
   }
 
   e.frozenSystem = result

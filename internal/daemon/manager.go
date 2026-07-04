@@ -215,8 +215,4 @@ func (tm *TaskManager) GetTaskEvents(username, taskID string, sinceSeq int64) ([
   return es.ReadFromSeq(sinceSeq)
 }
 
-func (tm *TaskManager) GetTaskSnapshots(username, taskID, snapType string) ([]store.FileEntry, error) {
-  snapDir := filepath.Join(tm.userDaemonDir(username), "tasks", taskID)
-  ss := store.NewSnapshotStore(snapDir)
-  return ss.LoadFiles(snapType)
-}
+

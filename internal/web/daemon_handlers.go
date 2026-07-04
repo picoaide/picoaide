@@ -8,6 +8,8 @@ import (
   "net/http"
   "os"
   "path/filepath"
+  "sort"
+  "strconv"
   "time"
 
   "github.com/gin-gonic/gin"
@@ -24,11 +26,6 @@ import (
 // ============================================================
 // 任务提交流程 — 用户提交任务、查询任务、管理任务生命周期
 // ============================================================
-
-type taskSubmitReq struct {
-  Message  string `json:"message"`
-  Priority int    `json:"priority"`
-}
 
 // handleTaskSubmit 提交任务
 // POST /api/user/task/submit (form-encoded: message, priority)
@@ -159,9 +156,8 @@ func (s *Server) executeTaskInSandbox(username, taskID, message, taskDir string)
   s.broadcastDaemonEvent(username, taskID, "task_completed", json.RawMessage(`{"task_id":"`+taskID+`"}`))
 }
 
-// handleTaskPause 暂停任务
-// POST /api/user/task/pause
-func (s *Server) handleTaskPause(c *gin.Context) {
+// updateTaskStatus 更新任务状态的通用处理函数
+func (s *Server) updateTaskStatus(c *gin.Context, taskStatus, eventType, auditDesc, operDesc, successMsg string) {
   username := s.requireRegularUser(c)
   if username == "" {
     return
@@ -174,83 +170,39 @@ func (s *Server) handleTaskPause(c *gin.Context) {
   }
 
   ts := daemonStore.NewTaskStore(filepath.Join(config.WorkDir(), "users", username, "daemon"))
-  if err := ts.UpdateStatus(taskID, "paused"); err != nil {
+  if err := ts.UpdateStatus(taskID, taskStatus); err != nil {
     if err == daemonStore.ErrNotFound {
       writeError(c, http.StatusNotFound, "任务不存在")
     } else {
-      writeError(c, http.StatusInternalServerError, "暂停任务失败")
+      writeError(c, http.StatusInternalServerError, operDesc+"任务失败")
     }
     return
   }
 
   now := time.Now().UTC().Format(time.RFC3339)
-  s.broadcastDaemonEvent(username, taskID, "task_paused", json.RawMessage(fmt.Sprintf(`{"paused_at":"%s"}`, now)))
+  eventSuffix := eventType[5:]
+  s.broadcastDaemonEvent(username, taskID, eventType, json.RawMessage(fmt.Sprintf(`{"%s_at":"%s"}`, eventSuffix, now)))
 
-  logger.Audit("daemon.task_pause", "username", username, "task_id", taskID)
-  writeSuccess(c, "任务已暂停")
+  logger.Audit(auditDesc, "username", username, "task_id", taskID)
+  writeSuccess(c, successMsg)
+}
+
+// handleTaskPause 暂停任务
+// POST /api/user/task/pause
+func (s *Server) handleTaskPause(c *gin.Context) {
+  s.updateTaskStatus(c, "paused", "task_paused", "daemon.task_pause", "暂停", "任务已暂停")
 }
 
 // handleTaskResume 恢复任务
 // POST /api/user/task/resume
 func (s *Server) handleTaskResume(c *gin.Context) {
-  username := s.requireRegularUser(c)
-  if username == "" {
-    return
-  }
-
-  taskID := c.PostForm("task_id")
-  if taskID == "" {
-    writeError(c, http.StatusBadRequest, "缺少 task_id")
-    return
-  }
-
-  ts := daemonStore.NewTaskStore(filepath.Join(config.WorkDir(), "users", username, "daemon"))
-  if err := ts.UpdateStatus(taskID, "pending"); err != nil {
-    if err == daemonStore.ErrNotFound {
-      writeError(c, http.StatusNotFound, "任务不存在")
-    } else {
-      writeError(c, http.StatusInternalServerError, "恢复任务失败")
-    }
-    return
-  }
-
-  now := time.Now().UTC().Format(time.RFC3339)
-  s.broadcastDaemonEvent(username, taskID, "task_resumed", json.RawMessage(fmt.Sprintf(`{"resumed_at":"%s"}`, now)))
-
-  logger.Audit("daemon.task_resume", "username", username, "task_id", taskID)
-  writeSuccess(c, "任务已恢复")
+  s.updateTaskStatus(c, "pending", "task_resumed", "daemon.task_resume", "恢复", "任务已恢复")
 }
 
 // handleTaskCancel 取消任务
 // POST /api/user/task/cancel
 func (s *Server) handleTaskCancel(c *gin.Context) {
-  username := s.requireRegularUser(c)
-  if username == "" {
-    return
-  }
-
-  taskID := c.PostForm("task_id")
-  if taskID == "" {
-    writeError(c, http.StatusBadRequest, "缺少 task_id")
-    return
-  }
-
-  ts := daemonStore.NewTaskStore(filepath.Join(config.WorkDir(), "users", username, "daemon"))
-  if err := ts.UpdateStatus(taskID, "cancelled"); err != nil {
-    if err == daemonStore.ErrNotFound {
-      writeError(c, http.StatusNotFound, "任务不存在")
-    } else {
-      writeError(c, http.StatusInternalServerError, "取消任务失败")
-    }
-    return
-  }
-
-  now := time.Now().UTC().Format(time.RFC3339)
-  eventData := json.RawMessage(fmt.Sprintf(`{"cancelled_at":"%s"}`, now))
-  s.broadcastDaemonEvent(username, taskID, "task_cancelled", eventData)
-
-  logger.Audit("daemon.task_cancel", "username", username, "task_id", taskID)
-  writeSuccess(c, "任务已取消")
+  s.updateTaskStatus(c, "cancelled", "task_cancelled", "daemon.task_cancel", "取消", "任务已取消")
 }
 
 // handleTaskMessage 向正在执行的任务注入消息
@@ -392,12 +344,12 @@ func (s *Server) handleTaskList(c *gin.Context) {
   limit := 50
   offset := 0
   if v := c.Query("limit"); v != "" {
-    if n, err := parseInt(v); err == nil && n > 0 {
+    if n, err := strconv.Atoi(v); err == nil && n > 0 {
       limit = n
     }
   }
   if v := c.Query("offset"); v != "" {
-    if n, err := parseInt(v); err == nil && n >= 0 {
+    if n, err := strconv.Atoi(v); err == nil && n >= 0 {
       offset = n
     }
   }
@@ -409,7 +361,7 @@ func (s *Server) handleTaskList(c *gin.Context) {
   }
 
   // 按创建时间降序排列
-  sortTasksByTimeDesc(tasks)
+  sort.Slice(tasks, func(i, j int) bool { return tasks[i].CreatedAt > tasks[j].CreatedAt })
 
   // 过滤
   var filtered []daemonStore.TaskMeta
@@ -521,12 +473,12 @@ func (s *Server) handleAdminListTasks(c *gin.Context) {
   limit := 100
   offset := 0
   if v := c.Query("limit"); v != "" {
-    if n, err := parseInt(v); err == nil && n > 0 {
+    if n, err := strconv.Atoi(v); err == nil && n > 0 {
       limit = n
     }
   }
   if v := c.Query("offset"); v != "" {
-    if n, err := parseInt(v); err == nil && n >= 0 {
+    if n, err := strconv.Atoi(v); err == nil && n >= 0 {
       offset = n
     }
   }
@@ -552,7 +504,7 @@ func (s *Server) handleAdminListTasks(c *gin.Context) {
     allTasks = []daemonStore.TaskMeta{}
   }
 
-  sortTasksByTimeDesc(allTasks)
+  sort.Slice(allTasks, func(i, j int) bool { return allTasks[i].CreatedAt > allTasks[j].CreatedAt })
   total := len(allTasks)
   if offset >= len(allTasks) {
     allTasks = []daemonStore.TaskMeta{}
@@ -625,17 +577,6 @@ func (s *Server) broadcastDaemonEvent(username, taskID, eventType string, data j
   }
 }
 
-// sortTasksByTimeDesc 按创建时间降序排列任务
-func sortTasksByTimeDesc(tasks []daemonStore.TaskMeta) {
-  for i := 0; i < len(tasks); i++ {
-    for j := i + 1; j < len(tasks); j++ {
-      if tasks[i].CreatedAt < tasks[j].CreatedAt {
-        tasks[i], tasks[j] = tasks[j], tasks[i]
-      }
-    }
-  }
-}
-
 // readDirNames 读取目录中的条目名（只取目录名，不含路径）
 func readDirNames(dir string) ([]string, error) {
   entries, err := os.ReadDir(dir)
@@ -649,18 +590,6 @@ func readDirNames(dir string) ([]string, error) {
     }
   }
   return names, nil
-}
-
-// parseInt 将字符串解析为 int
-func parseInt(s string) (int, error) {
-  var n int
-  for _, c := range s {
-    if c < '0' || c > '9' {
-      return 0, fmt.Errorf("非数字")
-    }
-    n = n*10 + int(c-'0')
-  }
-  return n, nil
 }
 
 // truncate 截断字符串到指定长度

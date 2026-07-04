@@ -43,17 +43,17 @@ func dialIMAP(cfg *Config) (*client.Client, error) {
     if err == nil {
       if err := c.StartTLS(&tls.Config{ServerName: cfg.IMAPHost}); err != nil {
         c.Logout()
-        return nil, &ProtocolError{Err: fmt.Errorf("IMAP STARTTLS 失败: %w", err)}
+        return nil, fmt.Errorf("IMAP STARTTLS 失败: %w", err)
       }
     }
   }
   if err != nil {
-    return nil, &NetworkError{Err: fmt.Errorf("连接 IMAP 服务器失败: %w", err)}
+    return nil, fmt.Errorf("连接 IMAP 服务器失败: %w", err)
   }
 
   if err := c.Login(cfg.LoginUser, cfg.LoginPass); err != nil {
     c.Logout()
-    return nil, &AuthError{Err: fmt.Errorf("IMAP 登录失败: %w", err)}
+    return nil, fmt.Errorf("IMAP 登录失败: %w", err)
   }
 
   return c, nil
@@ -181,7 +181,7 @@ func ListMessages(cfg *Config, folder string, limit, offset int) ([]*MessageSumm
 
   mbox, err := c.Select(folder, true)
   if err != nil {
-    return nil, 0, &ProtocolError{Err: fmt.Errorf("选择文件夹 %s 失败: %w", folder, err)}
+    return nil, 0, fmt.Errorf("选择文件夹 %s 失败: %w", folder, err)
   }
 
   total := mbox.Messages
@@ -233,7 +233,7 @@ func ListMessages(cfg *Config, folder string, limit, offset int) ([]*MessageSumm
     result = append(result, summary)
   }
   if err := <-done; err != nil {
-    return nil, 0, &ProtocolError{Err: fmt.Errorf("获取邮件列表失败: %w", err)}
+    return nil, 0, fmt.Errorf("获取邮件列表失败: %w", err)
   }
 
   return result, total, nil
@@ -253,7 +253,7 @@ func FetchMessage(cfg *Config, uid uint32, markSeen bool) (*Message, error) {
 
   _, err = c.Select("INBOX", false)
   if err != nil {
-    return nil, &ProtocolError{Err: fmt.Errorf("选择 INBOX 失败: %w", err)}
+    return nil, fmt.Errorf("选择 INBOX 失败: %w", err)
   }
 
   seqSet := new(imap.SeqSet)
@@ -272,7 +272,7 @@ func FetchMessage(cfg *Config, uid uint32, markSeen bool) (*Message, error) {
 
   msg := <-messages
   if err := <-done; err != nil {
-    return nil, &ProtocolError{Err: fmt.Errorf("获取邮件失败: %w", err)}
+    return nil, fmt.Errorf("获取邮件失败: %w", err)
   }
   if msg == nil {
     return nil, fmt.Errorf("未找到 UID %d 的邮件", uid)
@@ -323,7 +323,7 @@ func FetchMessage(cfg *Config, uid uint32, markSeen bool) (*Message, error) {
     seqSet = new(imap.SeqSet)
     seqSet.AddNum(uid)
     if err := storeFlags(c, seqSet, imap.AddFlags, []interface{}{imap.SeenFlag}); err != nil {
-      return nil, &ProtocolError{Err: fmt.Errorf("标记已读失败: %w", err)}
+      return nil, fmt.Errorf("标记已读失败: %w", err)
     }
   }
 
@@ -397,13 +397,13 @@ func SearchMessages(cfg *Config, folder, query string, limit int) ([]*MessageSum
 
   _, err = c.Select(folder, true)
   if err != nil {
-    return nil, &ProtocolError{Err: fmt.Errorf("选择文件夹 %s 失败: %w", folder, err)}
+    return nil, fmt.Errorf("选择文件夹 %s 失败: %w", folder, err)
   }
 
   criteria := parseSearchQuery(query)
   seqNums, err := c.Search(criteria)
   if err != nil {
-    return nil, &ProtocolError{Err: fmt.Errorf("搜索失败: %w", err)}
+    return nil, fmt.Errorf("搜索失败: %w", err)
   }
 
   if len(seqNums) == 0 {
@@ -463,7 +463,7 @@ func DeleteMessage(cfg *Config, uid uint32, hard bool) error {
 
   _, err = c.Select("INBOX", false)
   if err != nil {
-    return &ProtocolError{Err: fmt.Errorf("选择 INBOX 失败: %w", err)}
+    return fmt.Errorf("选择 INBOX 失败: %w", err)
   }
 
   seqSet := new(imap.SeqSet)
@@ -471,16 +471,16 @@ func DeleteMessage(cfg *Config, uid uint32, hard bool) error {
 
   if hard {
     if err := storeFlags(c, seqSet, imap.AddFlags, []interface{}{imap.DeletedFlag}); err != nil {
-      return &ProtocolError{Err: fmt.Errorf("标记删除失败: %w", err)}
+      return fmt.Errorf("标记删除失败: %w", err)
     }
     if err := expunge(c); err != nil {
-      return &ProtocolError{Err: fmt.Errorf("永久删除失败: %w", err)}
+      return fmt.Errorf("永久删除失败: %w", err)
     }
   } else {
     if err := c.Move(seqSet, "Trash"); err != nil {
       if err := c.Move(seqSet, "INBOX.Trash"); err != nil {
         if err := storeFlags(c, seqSet, imap.AddFlags, []interface{}{imap.DeletedFlag}); err != nil {
-          return &ProtocolError{Err: fmt.Errorf("移动到回收站失败: %w", err)}
+          return fmt.Errorf("移动到回收站失败: %w", err)
         }
       }
     }
@@ -502,14 +502,14 @@ func MoveMessage(cfg *Config, uid uint32, targetFolder string) error {
 
   _, err = c.Select("INBOX", false)
   if err != nil {
-    return &ProtocolError{Err: fmt.Errorf("选择 INBOX 失败: %w", err)}
+    return fmt.Errorf("选择 INBOX 失败: %w", err)
   }
 
   seqSet := new(imap.SeqSet)
   seqSet.AddNum(uid)
 
   if err := c.Move(seqSet, targetFolder); err != nil {
-    return &ProtocolError{Err: fmt.Errorf("移动到 %s 失败: %w", targetFolder, err)}
+    return fmt.Errorf("移动到 %s 失败: %w", targetFolder, err)
   }
   return nil
 }
@@ -546,7 +546,7 @@ func ListFolders(cfg *Config) ([]*Folder, error) {
     })
   }
   if err := <-done; err != nil {
-    return nil, &ProtocolError{Err: fmt.Errorf("列出文件夹失败: %w", err)}
+    return nil, fmt.Errorf("列出文件夹失败: %w", err)
   }
   return result, nil
 }

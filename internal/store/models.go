@@ -139,22 +139,6 @@ type SharedFolderMount struct {
 
 func (SharedFolderMount) TableName() string { return "shared_folder_mounts" }
 
-// ShareMount 共享文件夹挂载规范
-type ShareMount struct {
-  Source string
-  Target string
-}
-
-// SkillRecord 技能元数据表
-type SkillRecord struct {
-  ID          int64  `xorm:"pk autoincr 'id'"`
-  Name        string `xorm:"unique notnull 'name'"`
-  Description string `xorm:"notnull 'description'"`
-  UpdatedAt   string `xorm:"notnull 'updated_at'"`
-}
-
-func (SkillRecord) TableName() string { return "skills" }
-
 // UserSkill 用户-技能直接绑定表
 type UserSkill struct {
   ID        int64  `xorm:"pk autoincr 'id'"`

@@ -36,7 +36,6 @@ func DefaultGlobalConfig() *GlobalConfig {
       },
     },
     Skills: SkillsConfig{
-      Repos: []SkillRepo{},
       Sources: []SkillsSourceWrapper{
         {
           Type: "registry",

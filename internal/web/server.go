@@ -417,7 +417,6 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
 
   g.POST("/logout", s.handleLogout)
   g.GET("/user/info", s.handleUserInfo)
-  g.GET("/user/init-status", s.handleUserInitStatus)
   g.POST("/user/password", s.handleChangePassword)
   // 对话
   g.GET("/user/chat/history", s.handleChatHistory)
@@ -547,19 +546,6 @@ func (s *Server) buildExternalHandler() http.Handler {
   r.Use(s.secureHeaders())
   s.RegisterRoutes(r)
   return logger.AccessMiddleware(r)
-}
-
-// redirectToHTTPSHandler 返回一个将 HTTP 请求 301 重定向到 HTTPS 的 handler
-func redirectToHTTPSHandler() http.Handler {
-  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    u := url.URL{
-      Scheme:   "https",
-      Host:     r.Host,
-      Path:     r.URL.Path,
-      RawQuery: r.URL.RawQuery,
-    }
-    http.Redirect(w, r, u.String(), http.StatusMovedPermanently)
-  })
 }
 
 // tlsAwareHandler 根据当前配置动态判断是否需要 301 跳转 HTTPS
@@ -866,8 +852,4 @@ func (s *Server) gracefulShutdown(sockPath string) error {
   slog.Info("服务器已优雅关闭")
   os.Remove(sockPath)
   return nil
-}
-
-func contextWithTimeout(sec int) (context.Context, context.CancelFunc) {
-  return context.WithTimeout(context.Background(), time.Duration(sec)*time.Second)
 }

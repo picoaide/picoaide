@@ -472,43 +472,6 @@ func TestSandboxAwareHandler_externalGetsExternal(t *testing.T) {
   }
 }
 
-// ============================================================
-// TLS 重定向 handler 测试
-// ============================================================
-
-func TestTLSRedirectHandler_redirectsAllRequests(t *testing.T) {
-  handler := redirectToHTTPSHandler()
-
-  req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
-  req.Host = "example.com"
-  w := httptest.NewRecorder()
-  handler.ServeHTTP(w, req)
-
-  if w.Code != http.StatusMovedPermanently {
-    t.Errorf("状态码 = %d, 期望 301", w.Code)
-  }
-  loc := w.Header().Get("Location")
-  expected := "https://example.com/api/health"
-  if loc != expected {
-    t.Errorf("Location = %q, 期望 %q", loc, expected)
-  }
-}
-
-func TestTLSRedirectHandler_preservesQueryString(t *testing.T) {
-  handler := redirectToHTTPSHandler()
-
-  req := httptest.NewRequest(http.MethodGet, "/api/health?token=abc", nil)
-  req.Host = "example.com"
-  w := httptest.NewRecorder()
-  handler.ServeHTTP(w, req)
-
-  loc := w.Header().Get("Location")
-  expected := "https://example.com/api/health?token=abc"
-  if loc != expected {
-    t.Errorf("Location = %q, 期望 %q", loc, expected)
-  }
-}
-
 func TestBuildTLSServer_returnsNilWhenDisabled(t *testing.T) {
   s := &Server{secret: "test", csrfKey: "test-csrf"}
   cfg := &config.GlobalConfig{}

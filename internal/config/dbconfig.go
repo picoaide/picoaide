@@ -5,6 +5,8 @@ import (
   "fmt"
   "strconv"
   "strings"
+
+  storePkg "github.com/picoaide/picoaide/internal/store"
 )
 
 // ============================================================
@@ -17,7 +19,7 @@ func SettingsCount() (int, error) {
   if err != nil {
     return 0, fmt.Errorf("获取数据库引擎失败: %w", err)
   }
-  count, err := engine.Count(&Setting{})
+  count, err := engine.Count(&storePkg.Setting{})
   if err != nil {
     return 0, fmt.Errorf("查询配置数量失败: %w", err)
   }
@@ -31,7 +33,7 @@ func LoadFromDB() (*GlobalConfig, error) {
     return nil, fmt.Errorf("获取数据库引擎失败: %w", err)
   }
 
-  var settings []Setting
+  var settings []storePkg.Setting
   if err := engine.Find(&settings); err != nil {
     return nil, fmt.Errorf("查询配置失败: %w", err)
   }
@@ -195,7 +197,7 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
 
   for key, newValue := range kv {
     // 查询当前值
-    var existing Setting
+    var existing storePkg.Setting
     has, err := session.Where("key = ?", key).Get(&existing)
     if err != nil {
       return fmt.Errorf("查询配置失败: %w", err)
@@ -208,7 +210,7 @@ func SaveToDB(cfg *GlobalConfig, changedBy string) error {
 
     // 记录变更历史
     if has {
-      history := &SettingsHistory{
+      history := &storePkg.SettingsHistory{
         Key:       key,
         OldValue:  existing.Value,
         NewValue:  newValue,
@@ -242,7 +244,7 @@ func LoadRawFromDB() (map[string]interface{}, error) {
     return nil, fmt.Errorf("获取数据库引擎失败: %w", err)
   }
 
-  var settings []Setting
+  var settings []storePkg.Setting
   if err := engine.Find(&settings); err != nil {
     return nil, fmt.Errorf("查询配置失败: %w", err)
   }
@@ -280,7 +282,7 @@ func SaveRawToDB(data map[string]interface{}, changedBy string) error {
       continue
     }
     // 查询当前值
-    var existing Setting
+    var existing storePkg.Setting
     has, err := session.Where("key = ?", key).Get(&existing)
     if err != nil {
       return fmt.Errorf("查询配置失败: %w", err)
@@ -293,7 +295,7 @@ func SaveRawToDB(data map[string]interface{}, changedBy string) error {
 
     // 记录变更历史
     if has {
-      history := &SettingsHistory{
+      history := &storePkg.SettingsHistory{
         Key:       key,
         OldValue:  existing.Value,
         NewValue:  newValue,

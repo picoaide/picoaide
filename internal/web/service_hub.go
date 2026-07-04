@@ -39,7 +39,6 @@ type AgentConn struct {
   pending     sync.Map // map[int]*PendingCall
   nextID      int
   done        chan struct{}
-  Extra       interface{} // 服务特定数据
 }
 
 // NewServiceHub 创建一个服务连接管理器
@@ -66,7 +65,6 @@ func (h *ServiceHub) Register(username string, ws *websocket.Conn, extra interfa
     username:    username,
     ws:          ws,
     done:        make(chan struct{}),
-    Extra:       extra,
   }
   h.conns[username] = conn
 

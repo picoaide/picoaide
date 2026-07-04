@@ -700,69 +700,6 @@ func TestBuildFallbackSummary(t *testing.T) {
   }
 }
 
-func TestExtractSummary(t *testing.T) {
-  msgs := []*Message{
-    {Role: RoleAssistant, Content: "[历史摘要] 这是之前的内容"},
-    {Role: RoleUser, Content: "hi"},
-  }
-  s := extractSummary(msgs)
-  if s != " 这是之前的内容" {
-    t.Errorf("got %q", s)
-  }
-
-  t.Run("no_summary", func(t *testing.T) {
-    msgs := []*Message{
-      {Role: RoleUser, Content: "hi"},
-    }
-    if s := extractSummary(msgs); s != "" {
-      t.Errorf("expected empty, got %q", s)
-    }
-  })
-}
-
-func TestCompactAndRewrite(t *testing.T) {
-  workspace := t.TempDir()
-  store := NewSessionStore(workspace)
-  key := "test_compact"
-
-  // Write 10 messages to live (5 user turns, preserveRounds=2 => truncates 3)
-  msgs := []*Message{
-    {Role: RoleUser, Content: "q1"},
-    {Role: RoleAssistant, Content: "a1"},
-    {Role: RoleUser, Content: "q2"},
-    {Role: RoleAssistant, Content: "a2"},
-    {Role: RoleUser, Content: "q3"},
-    {Role: RoleAssistant, Content: "a3"},
-    {Role: RoleUser, Content: "q4"},
-    {Role: RoleAssistant, Content: "a4"},
-    {Role: RoleUser, Content: "q5"},
-    {Role: RoleAssistant, Content: "a5"},
-  }
-  for _, m := range msgs {
-    store.AppendMessage(key, m)
-  }
-
-  compactor := NewCompactor(DefaultCompactionConfig())
-  ctx := context.Background()
-
-  if err := CompactAndRewrite(ctx, store, key, compactor); err != nil {
-    t.Fatal(err)
-  }
-
-  live, _ := store.LoadLive(key)
-  if len(live) != 6 {
-    t.Fatalf("expected 6 after compact, got %d", len(live))
-  }
-  if !strings.HasPrefix(live[0].Content, "[历史摘要]") {
-    t.Errorf("expected summary prefix")
-  }
-
-  meta, _ := store.LoadMeta(key)
-  if meta == nil || meta.Count != 6 {
-    t.Errorf("meta count = %d, want 6", meta.Count)
-  }
-}
-
 // ============================================================
 // RetryPolicy
 // ============================================================
@@ -876,20 +813,6 @@ func TestTextDelta(t *testing.T) {
   }
   if s != "hello" {
     t.Errorf("data = %q", s)
-  }
-}
-
-func TestToolCallEvent(t *testing.T) {
-  e := ToolCallEvent("search", map[string]string{"q": "test"})
-  if e.Type != "tool_call" {
-    t.Errorf("Type = %q", e.Type)
-  }
-  var m map[string]string
-  if err := json.Unmarshal(e.Data, &m); err != nil {
-    t.Fatal(err)
-  }
-  if m["q"] != "test" {
-    t.Errorf("data = %+v", m)
   }
 }
 

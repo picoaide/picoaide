@@ -144,24 +144,15 @@ func LoadMCPServers(ctx context.Context) error {
 func fetchProxyTools(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
   // stdio 传输：启动子进程，发送 initialize 和 tools/list JSON-RPC 消息
   if proxy.Transport == "stdio" && proxy.Command != "" {
-    return fetchStdioTools(ctx, proxy)
+    return mcpStdioHandshake(ctx, proxy)
   }
   // HTTP/SSE 传输
   if proxy.Transport == "http" || proxy.Transport == "sse" {
-    return fetchHTTPTools(ctx, proxy)
+    return mcpHTTPHandshake(ctx, proxy)
   }
   return nil, fmt.Errorf("不支持的传输方式: %s", proxy.Transport)
 }
 
-// fetchStdioTools 通过子进程 stdio 获取工具列表
-func fetchStdioTools(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
-  return mcpStdioHandshake(ctx, proxy)
-}
-
-// fetchHTTPTools 通过 HTTP 请求获取工具列表
-func fetchHTTPTools(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
-  return mcpHTTPHandshake(ctx, proxy)
-}
 
 // registerProxyService 为 MCP 代理注册独立的 SSE 服务
 func registerProxyService(name string, tools []ToolDef) {

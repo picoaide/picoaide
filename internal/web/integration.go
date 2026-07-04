@@ -111,7 +111,7 @@ func (s *Server) initAgentIntegration() (*AgentIntegration, error) {
     slog.Warn("初始化 cron 表失败", "error", err)
   }
 
-  cronTimeout := s.loadConfig().CronJobTimeout()
+  cronTimeout := s.loadConfig().GetCronJobTimeout()
   cronScheduler := scheduler.NewCronScheduler(cronStore, cronTimeout, func(ctx context.Context, job *scheduler.CronJob) error {
     return s.executeCronJob(ctx, sb, cronStore, job)
   })

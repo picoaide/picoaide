@@ -110,14 +110,7 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
 
   skillName := strings.TrimSpace(c.PostForm("skill_name"))
   targetUser := strings.TrimSpace(c.PostForm("username"))
@@ -208,14 +201,7 @@ func (s *Server) handleAdminSkillsRemove(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   name := strings.TrimSpace(c.PostForm("name"))
   if name == "" {
     writeError(c, http.StatusBadRequest, "技能名称不能为空")
@@ -298,14 +284,7 @@ func (s *Server) handleAdminSkillsUserBind(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
 
   skillName := strings.TrimSpace(c.PostForm("skill_name"))
   username := strings.TrimSpace(c.PostForm("username"))
@@ -337,14 +316,7 @@ func (s *Server) handleAdminSkillsUserUnbind(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
 
   skillName := strings.TrimSpace(c.PostForm("skill_name"))
   username := strings.TrimSpace(c.PostForm("username"))
@@ -417,14 +389,7 @@ func (s *Server) handleAdminSkillsDefaultsToggle(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   name := strings.TrimSpace(c.PostForm("skill_name"))
   if name == "" {
     writeError(c, http.StatusBadRequest, "技能名称不能为空")
@@ -461,12 +426,4 @@ func (s *Server) applyDefaultSkillsToUser(username string) {
 // 辅助函数
 // ============================================================
 
-func formatSize(size int64) string {
-  if size < 1024 {
-    return fmt.Sprintf("%d B", size)
-  }
-  if size < 1024*1024 {
-    return fmt.Sprintf("%.1f KB", float64(size)/1024)
-  }
-  return fmt.Sprintf("%.1f MB", float64(size)/(1024*1024))
-}
+

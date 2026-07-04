@@ -168,7 +168,6 @@ func main() {
   scope := agent.SessionScope{
     Version:    1,
     AgentID:    "pico",
-    Channel:    channel,
     Account:    cfg.UserID,
     Dimensions: []string{"user"},
     Values:     map[string]string{"user": cfg.UserID},
@@ -525,10 +524,6 @@ func readInputFrom(r *bufio.Reader) (*agent.Message, error) {
     return nil, fmt.Errorf("消息缺少 role 字段")
   }
   return &msg, nil
-}
-
-func readInput() (*agent.Message, error) {
-  return readInputFrom(bufio.NewReader(os.Stdin))
 }
 
 func buildSystemPrompt(workspace string) string {

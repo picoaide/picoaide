@@ -286,7 +286,12 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
   var stderrBuf bytes.Buffer
   stderrReader, stderrWriter := io.Pipe()
   cmd.Stderr = io.MultiWriter(&stderrBuf, stderrWriter)
-  go parsePicoagentStderr(stderrReader, username)
+  go func() {
+    scanner := bufio.NewScanner(stderrReader)
+    for scanner.Scan() {
+      slog.Debug("sandbox.agent.stderr", "line", scanner.Text())
+    }
+  }()
 
   if err := cmd.Start(); err != nil {
     localCleanup()
@@ -312,68 +317,7 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
   return localCleanup, stdout, cmd, nil
 }
 
-// RunAndWait 同步运行沙箱，等待 picoagent 完成后返回所有事件
-func (m *Manager) RunAndWait(ctx context.Context, token string, inputJSON []byte, workspace string, apiKeys map[string]string, mounts []Mount, username string) (*RunResult, error) {
-  slog.Debug("sandbox.run_start",
-    "username", username,
-    "workspace", workspace,
-    "api_keys_count", len(apiKeys),
-    "mounts_count", len(mounts),
-  )
 
-  runCtx, cancel := context.WithTimeout(ctx, maxSandboxDuration)
-  defer cancel()
-
-  cleanup, stdout, cmd, err := m.prepareSandbox(runCtx, token, inputJSON, workspace, apiKeys, mounts, username)
-  if err != nil {
-    return nil, err
-  }
-  defer cleanup()
-
-  killOnCancel(runCtx, cmd)
-
-  result := &RunResult{}
-  scanner := bufio.NewScanner(stdout)
-  scanBuf := make([]byte, 32*1024*1024)
-  scanner.Buffer(scanBuf, 32*1024*1024)
-  var eventCount int
-  for scanner.Scan() {
-    line := scanner.Text()
-    if len(line) == 0 {
-      continue
-    }
-    var event StreamEvent
-    if err := json.Unmarshal([]byte(line), &event); err != nil {
-      continue
-    }
-    eventCount++
-    result.Events = append(result.Events, event)
-    if event.Type == "error" {
-      var errStr string
-      json.Unmarshal(event.Data, &errStr)
-      result.Error = errStr
-      slog.Debug("sandbox.event_error", "error", errStr)
-    }
-    if event.Type == "task_done" {
-      slog.Debug("sandbox.event_task_done", "event_count", eventCount)
-    }
-  }
-
-  cmd.Wait()
-
-  slog.Debug("sandbox.picoagent_exited",
-    "pid", cmd.Process.Pid,
-    "exit_code", cmd.ProcessState.ExitCode(),
-    "event_count", eventCount,
-  )
-
-  slog.Debug("sandbox.run_complete",
-    "username", username,
-    "event_count", eventCount,
-    "has_error", result.Error != "",
-  )
-  return result, nil
-}
 
 // killOnCancel 等待 ctx 取消后先 SIGTERM 再 SIGKILL 终止沙箱进程
 func killOnCancel(ctx context.Context, cmd *exec.Cmd) {
@@ -519,180 +463,6 @@ func (m *Manager) Run(ctx context.Context, token string, inputJSON []byte, works
 func mustJSON(v interface{}) json.RawMessage {
   data, _ := json.Marshal(v)
   return data
-}
-
-// parsePicoagentStderr 实时解析 picoagent 的 stderr 输出，转发为结构化 debug 日志
-// stderr 格式: [PICOAGENT] message
-func parsePicoagentStderr(r io.Reader, username string) {
-  scanner := bufio.NewScanner(r)
-  for scanner.Scan() {
-    line := scanner.Text()
-    if line == "" {
-      continue
-    }
-
-    // 提取 [PICOAGENT] 前缀
-    if !strings.HasPrefix(line, "[PICOAGENT]") {
-      slog.Debug("sandbox.picoagent_stderr", "username", username, "message", line)
-      continue
-    }
-
-    msg := strings.TrimSpace(strings.TrimPrefix(line, "[PICOAGENT]"))
-    if msg == "" {
-      continue
-    }
-
-    // 解析常见消息模式，提取结构化字段
-    switch {
-    case msg == "starting":
-      slog.Debug("sandbox.agent.starting", "username", username)
-
-    case strings.HasPrefix(msg, "token ok:"):
-      slog.Debug("sandbox.agent.token_ok", "username", username)
-
-    case strings.HasPrefix(msg, "host:"):
-      host := strings.TrimSpace(strings.TrimPrefix(msg, "host:"))
-      slog.Debug("sandbox.agent.host", "username", username, "host", host)
-
-    case msg == "fetching config":
-      slog.Debug("sandbox.agent.fetching_config", "username", username)
-
-    case strings.HasPrefix(msg, "config ok, model:"):
-      model := strings.TrimSpace(strings.TrimPrefix(msg, "config ok, model:"))
-      slog.Debug("sandbox.agent.config_loaded", "username", username, "model", model)
-
-    case msg == "config fetch failed":
-      slog.Debug("sandbox.agent.config_failed", "username", username)
-
-    case msg == "initializing store":
-      slog.Debug("sandbox.agent.init_store", "username", username)
-
-    case strings.HasPrefix(msg, "store ok, workspace:"):
-      ws := strings.TrimSpace(strings.TrimPrefix(msg, "store ok, workspace:"))
-      slog.Debug("sandbox.agent.store_ready", "username", username, "workspace", ws)
-
-    case msg == "building sys prompt":
-      slog.Debug("sandbox.agent.building_sysprompt", "username", username)
-
-    case strings.HasPrefix(msg, "sysprompt:"):
-      // "sysprompt: 1234 chars"
-      parts := strings.Fields(msg)
-      if len(parts) >= 2 {
-        slog.Debug("sandbox.agent.sysprompt_ready", "username", username, "length", parts[1])
-      }
-
-    case msg == "looking up API key":
-      slog.Debug("sandbox.agent.lookup_apikey", "username", username)
-
-    case strings.HasPrefix(msg, "apikey:"):
-      status := strings.TrimSpace(strings.TrimPrefix(msg, "apikey:"))
-      slog.Debug("sandbox.agent.apikey_status", "username", username, "status", status)
-
-    case strings.HasPrefix(msg, "model:"):
-      // "model: xxx, provider: yyy, base_url: zzz"
-      slog.Debug("sandbox.agent.model_info", "username", username, "detail", msg)
-
-    case msg == "provider ok":
-      slog.Debug("sandbox.agent.provider_ready", "username", username)
-
-    case msg == "registering tools":
-      slog.Debug("sandbox.agent.registering_tools", "username", username)
-
-    case strings.HasPrefix(msg, "MCP") && strings.Contains(msg, "连接失败"):
-      slog.Debug("sandbox.agent.mcp_connect_failed", "username", username, "detail", msg)
-
-    case strings.HasPrefix(msg, "MCP") && strings.Contains(msg, "已连接"):
-      slog.Debug("sandbox.agent.mcp_connected", "username", username, "detail", msg)
-
-    case msg == "creating engine":
-      slog.Debug("sandbox.agent.creating_engine", "username", username)
-
-    case strings.HasPrefix(msg, "loaded") && strings.Contains(msg, "skills"):
-      // "loaded 5 skills"
-      parts := strings.Fields(msg)
-      if len(parts) >= 2 {
-        slog.Debug("sandbox.agent.skills_loaded", "username", username, "count", parts[1])
-      }
-
-    case strings.HasPrefix(msg, "history:"):
-      // "history: 10 msgs"
-      parts := strings.Fields(msg)
-      if len(parts) >= 2 {
-        slog.Debug("sandbox.agent.history_loaded", "username", username, "count", parts[1])
-      }
-
-    case msg == "reading input from stdin":
-      slog.Debug("sandbox.agent.reading_input", "username", username)
-
-    case strings.HasPrefix(msg, "input:"):
-      input := strings.TrimSpace(strings.TrimPrefix(msg, "input:"))
-      slog.Debug("sandbox.agent.input_received",
-        "username", username,
-        "content_preview", truncateString(input, 100),
-      )
-
-    case msg == "no input":
-      slog.Debug("sandbox.agent.no_input", "username", username)
-
-    case msg == "starting engine.Process...":
-      slog.Debug("sandbox.agent.engine_start", "username", username)
-
-    case strings.HasPrefix(msg, "engine error:"):
-      err := strings.TrimSpace(strings.TrimPrefix(msg, "engine error:"))
-      slog.Debug("sandbox.agent.engine_error", "username", username, "error", err)
-
-    case strings.HasPrefix(msg, "engine done, response:"):
-      // "engine done, response: 1234 chars"
-      parts := strings.Fields(msg)
-      if len(parts) >= 4 {
-        slog.Debug("sandbox.agent.engine_done",
-          "username", username,
-          "response_length", parts[3],
-        )
-      }
-
-    case msg == "done":
-      slog.Debug("sandbox.agent.done", "username", username)
-
-    case strings.HasPrefix(msg, "error:"):
-      err := strings.TrimSpace(strings.TrimPrefix(msg, "error:"))
-      slog.Debug("sandbox.agent.error", "username", username, "error", err)
-
-    default:
-      slog.Debug("sandbox.agent.stderr", "username", username, "message", msg)
-    }
-  }
-}
-
-func truncateString(s string, maxLen int) string {
-  if len(s) <= maxLen {
-    return s
-  }
-  return s[:maxLen] + "..."
-}
-
-func StreamEvents(ctx context.Context, r io.Reader) (<-chan StreamEvent, error) {
-  events := make(chan StreamEvent, 100)
-  go func() {
-    defer close(events)
-    scanner := bufio.NewScanner(r)
-    for scanner.Scan() {
-      line := scanner.Text()
-      if len(line) == 0 {
-        continue
-      }
-      var event StreamEvent
-      if err := json.Unmarshal([]byte(line), &event); err != nil {
-        continue
-      }
-      select {
-      case events <- event:
-      case <-ctx.Done():
-        return
-      }
-    }
-  }()
-  return events, nil
 }
 
 // initBridge 确保 picoaide-br 网桥就绪（幂等，可重复调用）

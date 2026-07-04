@@ -54,14 +54,7 @@ func (s *Server) handleAdminSharedFoldersCreate(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   username := s.getSessionUser(c)
   name := strings.TrimSpace(c.PostForm("name"))
   description := strings.TrimSpace(c.PostForm("description"))
@@ -118,14 +111,7 @@ func (s *Server) handleAdminSharedFoldersUpdate(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   idStr := strings.TrimSpace(c.PostForm("id"))
   newName := strings.TrimSpace(c.PostForm("name"))
   description := strings.TrimSpace(c.PostForm("description"))
@@ -186,14 +172,7 @@ func (s *Server) handleAdminSharedFoldersDelete(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   idStr := strings.TrimSpace(c.PostForm("id"))
   id, err := strconv.ParseInt(idStr, 10, 64)
   if err != nil {
@@ -231,14 +210,7 @@ func (s *Server) handleAdminSharedFoldersSetGroups(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   folderIDStr := strings.TrimSpace(c.PostForm("folder_id"))
   groupIDsStr := strings.TrimSpace(c.PostForm("group_ids"))
 
@@ -288,14 +260,7 @@ func (s *Server) handleAdminSharedFoldersTest(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   folderIDStr := strings.TrimSpace(c.PostForm("folder_id"))
   testUsername := strings.TrimSpace(c.PostForm("username"))
 
@@ -361,14 +326,7 @@ func (s *Server) handleAdminSharedFoldersMount(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if c.Request.Method != "POST" {
-    writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
-    return
-  }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
+
   folderIDStr := strings.TrimSpace(c.PostForm("folder_id"))
   folderID, err := strconv.ParseInt(folderIDStr, 10, 64)
   if err != nil {

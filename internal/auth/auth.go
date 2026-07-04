@@ -13,16 +13,8 @@ import (
   "github.com/picoaide/picoaide/internal/store"
 )
 
-const argon2idHashPrefix = "$argon2id$"
-
-// hashPassword 委托给 store.HashPassword，避免重复实现。
-// store.argon2idHashPrefix 与 auth.argon2idHashPrefix 值相同，均为 "$argon2id$"。
-func hashPassword(password string) (string, error) {
-  return store.HashPassword(password)
-}
-
 func verifyPassword(storedHash, password string) (ok bool, needsUpgrade bool, err error) {
-  if strings.HasPrefix(storedHash, argon2idHashPrefix) {
+  if strings.HasPrefix(storedHash, store.Argon2idHashPrefix) {
     ok, err := verifyArgon2idPassword(storedHash, password)
     return ok, false, err
   }
@@ -81,7 +73,7 @@ func AuthenticateLocal(username, password string) (bool, string, error) {
     return false, "", nil
   }
   if needsUpgrade {
-    if hash, err := hashPassword(password); err == nil {
+    if hash, err := store.HashPassword(password); err == nil {
       if _, err := engine.ID(user.ID).Cols("password_hash").Update(&store.LocalUser{PasswordHash: hash}); err != nil {
         slog.Warn("密码哈希升级写入失败", "username", username, "error", err)
       }

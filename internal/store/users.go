@@ -21,7 +21,7 @@ func HashPassword(password string) (string, error) {
   }
   key := argon2.IDKey([]byte(password), salt, passwordHashParams.time, passwordHashParams.memory, passwordHashParams.threads, passwordHashParams.keyLen)
   return fmt.Sprintf("%sv=%d$m=%d,t=%d,p=%d$%s$%s",
-    argon2idHashPrefix,
+    Argon2idHashPrefix,
     argon2.Version,
     passwordHashParams.memory,
     passwordHashParams.time,

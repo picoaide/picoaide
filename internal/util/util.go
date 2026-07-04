@@ -12,50 +12,9 @@ import (
 // 通用工具函数
 // ============================================================
 
-func DeepCopyMap(src map[string]interface{}) map[string]interface{} {
-  dst := make(map[string]interface{}, len(src))
-  for k, v := range src {
-    dst[k] = deepCopyValue(v)
-  }
-  return dst
-}
 
-func DeepCopySlice(src []interface{}) []interface{} {
-  dst := make([]interface{}, len(src))
-  for i, v := range src {
-    dst[i] = deepCopyValue(v)
-  }
-  return dst
-}
 
-func deepCopyValue(v interface{}) interface{} {
-  switch val := v.(type) {
-  case map[string]interface{}:
-    return DeepCopyMap(val)
-  case []interface{}:
-    return DeepCopySlice(val)
-  default:
-    return v
-  }
-}
 
-func MergeMap(dst, src map[string]interface{}) map[string]interface{} {
-  for k, sv := range src {
-    dv, exists := dst[k]
-    if !exists {
-      dst[k] = sv
-      continue
-    }
-    srcMap, srcIsMap := sv.(map[string]interface{})
-    dstMap, dstIsMap := dv.(map[string]interface{})
-    if srcIsMap && dstIsMap {
-      dst[k] = MergeMap(dstMap, srcMap)
-      continue
-    }
-    dst[k] = sv
-  }
-  return dst
-}
 
 func CopyFile(src, dst string) error {
   in, err := os.Open(src)
@@ -189,65 +148,11 @@ func SafeRelPath(baseDir, relPath string) (string, error) {
   return evalPath, nil
 }
 
-// DeepGet 从嵌套 map 中按点号路径取值（如 "a.b.c"）
-func DeepGet(cfg map[string]interface{}, dottedPath string) (interface{}, bool) {
-  if dottedPath == "" {
-    return nil, false
-  }
-  parts := strings.Split(dottedPath, ".")
-  var current interface{} = cfg
-  for _, part := range parts {
-    node, ok := current.(map[string]interface{})
-    if !ok {
-      return nil, false
-    }
-    next, ok := node[part]
-    if !ok {
-      return nil, false
-    }
-    current = next
-  }
-  return current, true
-}
 
-// SetByPath 按点号路径设置嵌套 map 的值（路径不存在时自动创建节点）
-func SetByPath(cfg map[string]interface{}, dottedPath string, value interface{}) {
-  if dottedPath == "" {
-    return
-  }
-  parts := strings.Split(dottedPath, ".")
-  current := cfg
-  for i := 0; i < len(parts)-1; i++ {
-    next, ok := current[parts[i]].(map[string]interface{})
-    if !ok {
-      next = make(map[string]interface{})
-      current[parts[i]] = next
-    }
-    current = next
-  }
-  current[parts[len(parts)-1]] = value
-}
 
-// DeleteByPath 按点号路径删除嵌套 map 中的键
-func DeleteByPath(cfg map[string]interface{}, dottedPath string) {
-  if dottedPath == "" {
-    return
-  }
-  parts := strings.Split(dottedPath, ".")
-  if len(parts) == 1 {
-    delete(cfg, parts[0])
-    return
-  }
-  current := cfg
-  for i := 0; i < len(parts)-1; i++ {
-    next, ok := current[parts[i]].(map[string]interface{})
-    if !ok {
-      return
-    }
-    current = next
-  }
-  delete(current, parts[len(parts)-1])
-}
+
+
+
 
 func IsTextFile(filename string) bool {
   ext := strings.ToLower(filepath.Ext(filename))

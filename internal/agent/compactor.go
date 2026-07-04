@@ -35,11 +35,7 @@ func DefaultCompactionConfig() *CompactionConfig {
 
 type Compactor struct {
   cfg *CompactionConfig
-  llm Summarizer // 用于生成摘要的 LLM
-}
-
-type Summarizer interface {
-  Summarize(ctx context.Context, prompt string) (string, error)
+  llm *LLMSummarizer // 用于生成摘要的 LLM
 }
 
 func NewCompactor(cfg *CompactionConfig) *Compactor {
@@ -47,7 +43,7 @@ func NewCompactor(cfg *CompactionConfig) *Compactor {
 }
 
 // SetSummarizer 设置摘要用 LLM
-func (c *Compactor) SetSummarizer(llm Summarizer) {
+func (c *Compactor) SetSummarizer(llm *LLMSummarizer) {
   c.llm = llm
 }
 
@@ -235,39 +231,7 @@ func buildFallbackSummary(msgs []*Message) string {
 // Engine 集成：压缩回调
 // ============================================================
 
-// CompactAndRewrite 压缩 live 并写回文件
-func CompactAndRewrite(ctx context.Context, store *SessionStore, key string, compactor *Compactor) error {
-  msgs, err := store.LoadLive(key)
-  if err != nil || len(msgs) == 0 {
-    return err
-  }
-  compacted, err := compactor.Compact(ctx, msgs)
-  if err != nil {
-    return err
-  }
-  if len(compacted) < len(msgs) {
-    if err := store.ReplaceLive(key, compacted); err != nil {
-      slog.Warn("compactor.replace_live_error", "error", err.Error())
-      return err
-    }
-    store.SaveMeta(key, &SessionMeta{
-      Summary: extractSummary(compacted),
-      Count:   len(compacted),
-    })
-  }
-  return nil
-}
-
-func extractSummary(msgs []*Message) string {
-  for _, m := range msgs {
-    if strings.HasPrefix(m.Content, "[历史摘要]") {
-      return strings.TrimPrefix(m.Content, "[历史摘要]")
-    }
-  }
-  return ""
-}
-
-// Summarize 实现 Summarizer 接口（通过 LLM provider）
+// Summarize（通过 LLM provider）
 type LLMSummarizer struct {
   provider  Provider
   model     string

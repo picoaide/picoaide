@@ -182,7 +182,7 @@ func TestInitDBRecreatesOnCorruption(t *testing.T) {
 }
 
 func TestArgon2idHashPrefix(t *testing.T) {
-  if !strings.HasPrefix(argon2idHashPrefix, "$argon2id$") {
-    t.Errorf("unexpected prefix: %q", argon2idHashPrefix)
+  if !strings.HasPrefix(Argon2idHashPrefix, "$argon2id$") {
+    t.Errorf("unexpected prefix: %q", Argon2idHashPrefix)
   }
 }

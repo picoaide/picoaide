@@ -2,7 +2,6 @@ package store
 
 import (
   "fmt"
-  "path/filepath"
   "time"
 
   "github.com/picoaide/picoaide/internal/util"
@@ -314,23 +313,6 @@ func GetAccessibleSharedFolders(username string) ([]SharedFolder, error) {
   return accessible, nil
 }
 
-// GetSharedFolderMountsForUser 获取用户应挂载的共享文件夹列表
-// workDir 为工作目录绝对路径
-func GetSharedFolderMountsForUser(workDir, username string) ([]ShareMount, error) {
-  folders, err := GetAccessibleSharedFolders(username)
-  if err != nil {
-    return nil, err
-  }
-  mounts := make([]ShareMount, 0, len(folders))
-  for _, sf := range folders {
-    mounts = append(mounts, ShareMount{
-      Source: filepath.Join(workDir, "shared", sf.Name),
-      Target: "/root/share/" + sf.Name,
-    })
-  }
-  return mounts, nil
-}
-
 // ============================================================
 // 挂载记录管理
 // ============================================================
@@ -349,22 +331,6 @@ func RecordMountTest(folderID int64, username string, mounted bool) error {
       checked_at = excluded.checked_at`,
     folderID, username, mounted, now)
   return err
-}
-
-// GetMountStatus 获取用户的挂载状态
-func GetMountStatus(folderID int64, username string) (*SharedFolderMount, error) {
-  if err := ensureDB(); err != nil {
-    return nil, err
-  }
-  var m SharedFolderMount
-  has, err := engine.Where("folder_id = ? AND username = ?", folderID, username).Get(&m)
-  if err != nil {
-    return nil, err
-  }
-  if !has {
-    return nil, fmt.Errorf("未找到挂载记录")
-  }
-  return &m, nil
 }
 
 // GetMountStatusesForFolder 获取共享文件夹所有用户的挂载状态
@@ -417,112 +383,6 @@ func RemoveGroupFromAllSharedFolders(groupID int64) ([]int64, error) {
     return nil, err
   }
   return affected, nil
-}
-
-// GetOrphanedSharedFolders 获取没有关联组且非公共的共享文件夹（孤立状态）
-func GetOrphanedSharedFolders() ([]SharedFolder, error) {
-  if err := ensureDB(); err != nil {
-    return nil, err
-  }
-  all, err := ListSharedFolders()
-  if err != nil {
-    return nil, err
-  }
-  orphaned := make([]SharedFolder, 0)
-  for _, sf := range all {
-    if sf.IsPublic {
-      continue
-    }
-    gids, err := GetSharedFolderGroupIDs(sf.ID)
-    if err != nil {
-      continue
-    }
-    if len(gids) == 0 {
-      orphaned = append(orphaned, sf)
-    }
-  }
-  return orphaned, nil
-}
-
-// ============================================================
-// 集成钩子：认证源切换
-// ============================================================
-
-// RemoveGroupSourceFromSharedFolders 删除指定来源的所有组的共享文件夹关联
-func RemoveGroupSourceFromSharedFolders(source string) error {
-  if err := ensureDB(); err != nil {
-    return err
-  }
-  // 找到所有指定来源的组 ID
-  var groups []Group
-  err := engine.Where("source = ?", source).Find(&groups)
-  if err != nil {
-    return err
-  }
-  if len(groups) == 0 {
-    return nil
-  }
-  gids := make([]interface{}, len(groups))
-  for i, g := range groups {
-    gids[i] = g.ID
-  }
-  _, err = engine.In("group_id", gids...).Delete(&SharedFolderGroup{})
-  return err
-}
-
-// ============================================================
-// 集成钩子：组成员变更 → 影响分析
-// ============================================================
-
-// OnGroupMembersAdded 组成员被添加时，返回所有因该变更需要重启容器的用户
-func OnGroupMembersAdded(groupID int64, usernames []string) ([]string, error) {
-  if err := ensureDB(); err != nil {
-    return nil, err
-  }
-  // 找到关联该组的所有共享文件夹
-  var sfg []SharedFolderGroup
-  err := engine.Where("group_id = ?", groupID).Find(&sfg)
-  if err != nil {
-    return nil, err
-  }
-  if len(sfg) == 0 {
-    return nil, nil
-  }
-  // 新加的用户都应重启（如果他们有运行容器）
-  return usernames, nil
-}
-
-// OnGroupMembersRemoved 组成员被移除时，返回因失去访问权需要重启容器的用户。
-// 如果用户还通过其他组或公共方式访问，则不需要重启。
-func OnGroupMembersRemoved(groupID int64, username string) ([]string, error) {
-  if err := ensureDB(); err != nil {
-    return nil, err
-  }
-  // 找到关联该组的所有共享文件夹
-  var sfg []SharedFolderGroup
-  err := engine.Where("group_id = ?", groupID).Find(&sfg)
-  if err != nil {
-    return nil, err
-  }
-  if len(sfg) == 0 {
-    return nil, nil
-  }
-  // 检查该用户是否通过其他方式仍能访问每个共享文件夹
-  needsRestart := false
-  for _, s := range sfg {
-    ok, err := IsUserInSharedFolder(s.FolderID, username)
-    if err != nil {
-      continue
-    }
-    if !ok {
-      needsRestart = true
-      break
-    }
-  }
-  if needsRestart {
-    return []string{username}, nil
-  }
-  return nil, nil
 }
 
 // ============================================================

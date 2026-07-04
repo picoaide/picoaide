@@ -41,23 +41,6 @@ func TestMCPServerReqStruct(t *testing.T) {
   }
 }
 
-func TestMCPServerGrantReqStruct(t *testing.T) {
-  req := mcpServerGrantReq{
-    ServerID:   1,
-    GrantType:  "user",
-    GrantValue: "testuser",
-  }
-  if req.ServerID != 1 {
-    t.Errorf("ServerID = %d, want 1", req.ServerID)
-  }
-  if req.GrantType != "user" {
-    t.Errorf("GrantType = %q, want user", req.GrantType)
-  }
-  if req.GrantValue != "testuser" {
-    t.Errorf("GrantValue = %q, want testuser", req.GrantValue)
-  }
-}
-
 func TestAdminMCPServersList_RequiresAuth(t *testing.T) {
   gin.SetMode(gin.TestMode)
   s := &Server{secret: "test", csrfKey: "test-csrf"}

@@ -63,15 +63,7 @@ func (s *Server) requireAuth(c *gin.Context) string {
 }
 
 func (s *Server) requireNonSuperadmin(c *gin.Context) string {
-  username := s.requireAuth(c)
-  if username == "" {
-    return ""
-  }
-  if store.IsSuperadmin(username) {
-    writeError(c, http.StatusForbidden, "超管用户不允许登录插件，使用普通用户登录")
-    return ""
-  }
-  return username
+  return s.requireRegularUser(c)
 }
 
 func (s *Server) requireRegularUser(c *gin.Context) string {
@@ -439,19 +431,6 @@ func (s *Server) handleUserInfo(c *gin.Context) {
     "username": username,
     "role":     store.GetUserRole(username),
     "source":   store.GetUserSource(username),
-  })
-}
-
-// handleUserInitStatus 返回用户目录初始化状态
-func (s *Server) handleUserInitStatus(c *gin.Context) {
-  username := s.requireRegularUser(c)
-  if username == "" {
-    return
-  }
-  c.JSON(200, gin.H{
-    "success": true,
-    "ready":   true,
-    "status":  "running",
   })
 }
 

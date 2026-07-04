@@ -73,16 +73,6 @@ type SkillRepoCredential struct {
   Secret   string `json:"secret"`
 }
 
-type SkillRepo struct {
-  Name        string                `json:"name"`
-  URL         string                `json:"url"`
-  Ref         string                `json:"ref"`
-  RefType     string                `json:"ref_type"` // "branch" | "tag"
-  Public      bool                  `json:"public"`
-  Credentials []SkillRepoCredential `json:"credentials"`
-  LastPull    string                `json:"last_pull"`
-}
-
 // RegistrySource 注册源（如 SkillHub）
 type RegistrySource struct {
   Name                string `json:"name"`
@@ -116,21 +106,16 @@ type SkillsSourceWrapper struct {
 }
 
 type SkillsConfig struct {
-  Repos   []SkillRepo           `json:"-"`
   Sources []SkillsSourceWrapper `json:"sources"`
 }
 
-type TimeoutConfig struct {
-  CronJob string // cron 任务超时，如 "60m", "30m"，空值则用默认 60 分钟
-}
-
 type GlobalConfig struct {
-  LDAP        LDAPConfig
-  OIDC        OIDCConfig
-  UsersRoot   string
-  ArchiveRoot string
-  Web         WebConfig
-  Security    interface{}
-  Skills      SkillsConfig
-  Timeout     TimeoutConfig
+  LDAP           LDAPConfig
+  OIDC           OIDCConfig
+  UsersRoot      string
+  ArchiveRoot    string
+  Web            WebConfig
+  Security       interface{}
+  Skills         SkillsConfig
+  CronJobTimeout string `yaml:"cron_job_timeout" xorm:"'cron_job_timeout'"`
 }

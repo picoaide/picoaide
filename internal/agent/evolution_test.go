@@ -14,13 +14,20 @@ import (
 // Mock 辅助
 // ============================================================
 
-type mockSummarizer struct {
+type evolutionMockProvider struct {
   result string
   err    error
 }
 
-func (m *mockSummarizer) Summarize(_ context.Context, _ string) (string, error) {
-  return m.result, m.err
+func (m *evolutionMockProvider) StreamChat(_ context.Context, _ *ChatRequest, cb func(event StreamEvent)) error {
+  if m.err != nil {
+    return m.err
+  }
+  if m.result != "" {
+    cb(StreamEvent{Type: "text_delta", Data: mustJSON(m.result)})
+  }
+  cb(StreamEvent{Type: "finish", Data: mustJSON(map[string]string{"content": m.result})})
+  return nil
 }
 
 func setupEvolutionTest(t *testing.T) (string, *SessionStore) {
@@ -415,7 +422,7 @@ func TestEvolveWithLLMResult(t *testing.T) {
     workspace:  dir,
     store:      store,
     maxMsgs:    200,
-    summarizer: &mockSummarizer{result: `{"decisions":[{"topic":"新决策","decision":"使用Go 1.22","rationale":"更好的性能"}],"knowledge":[],"progress":{"completed":["任务A"],"in_progress":[],"blocked":[]},"preferences":[{"aspect":"工作习惯","description":"先写测试"}]}`, err: nil},
+    summarizer: NewLLMSummarizer(&evolutionMockProvider{result: `{"decisions":[{"topic":"新决策","decision":"使用Go 1.22","rationale":"更好的性能"}],"knowledge":[],"progress":{"completed":["任务A"],"in_progress":[],"blocked":[]},"preferences":[{"aspect":"工作习惯","description":"先写测试"}]}`, err: nil}, "test-model", 0),
   }
 
   result, err := evolver.Evolve(context.Background(), key)
@@ -459,7 +466,7 @@ func TestEvolveWithEmptyLLMResult(t *testing.T) {
     workspace:  dir,
     store:      store,
     maxMsgs:    200,
-    summarizer: &mockSummarizer{result: `{}`, err: nil},
+    summarizer: NewLLMSummarizer(&evolutionMockProvider{result: `{}`, err: nil}, "test-model", 0),
   }
 
   result, err := evolver.Evolve(context.Background(), key)
@@ -488,7 +495,7 @@ func TestEvolveWithLLMError(t *testing.T) {
     workspace:  dir,
     store:      store,
     maxMsgs:    200,
-    summarizer: &mockSummarizer{result: "", err: fmt.Errorf("LLM unavailable")},
+    summarizer: NewLLMSummarizer(&evolutionMockProvider{result: "", err: fmt.Errorf("LLM unavailable")}, "test-model", 0),
   }
 
   result, err := evolver.Evolve(context.Background(), key)
@@ -518,7 +525,7 @@ func TestEvolveWithCodeWrappedJSON(t *testing.T) {
     workspace:  dir,
     store:      store,
     maxMsgs:    200,
-    summarizer: &mockSummarizer{result: "```json\n{\"decisions\":[{\"topic\":\"从代码块提取\",\"decision\":\"测试通过\",\"rationale\":\"\"}]}\n```", err: nil},
+    summarizer: NewLLMSummarizer(&evolutionMockProvider{result: "```json\n{\"decisions\":[{\"topic\":\"从代码块提取\",\"decision\":\"测试通过\",\"rationale\":\"\"}]}\n```", err: nil}, "test-model", 0),
   }
 
   result, err := evolver.Evolve(context.Background(), key)

@@ -6,6 +6,7 @@ import (
   "encoding/json"
   "fmt"
   "log/slog"
+  "maps"
   "net"
   "net/http"
   "net/url"
@@ -212,13 +213,6 @@ func (m *MCPToolManager) CallTool(ctx context.Context, serverName, toolName stri
   return result, nil
 }
 
-// getSession 线程安全地获取 session
-func (m *MCPToolManager) getSession(name string) *mcp.ClientSession {
-  m.mu.Lock()
-  defer m.mu.Unlock()
-  return m.sessions[name]
-}
-
 // isConnError 判断是否为连接类错误（可重连）
 func isConnError(err error) bool {
   if err == nil {
@@ -231,15 +225,6 @@ func isConnError(err error) bool {
     strings.Contains(msg, "stream error") ||
     strings.Contains(msg, "transport") ||
     strings.Contains(msg, "broken pipe")
-}
-
-func (m *MCPToolManager) Close() {
-  m.mu.Lock()
-  defer m.mu.Unlock()
-  for name, session := range m.sessions {
-    session.Close()
-    delete(m.sessions, name)
-  }
 }
 
 type mcpToolExecutor struct {
@@ -283,7 +268,7 @@ func (e *mcpToolExecutor) Execute(ctx context.Context, args json.RawMessage) (*T
       } else if text, ok := m["text"]; ok {
         parts = append(parts, fmt.Sprint(text))
       } else {
-        slog.Debug("mcp.unknown_content_type", "type", m["type"], "keys", fmt.Sprintf("%v", keysOfMap(m)))
+        slog.Debug("mcp.unknown_content_type", "type", m["type"], "keys", fmt.Sprintf("%v", maps.Keys(m)))
         parts = append(parts, string(data))
       }
     }
@@ -317,13 +302,6 @@ func saveImage(m map[string]interface{}, workspace string) string {
     return ""
   }
   return path
-}
-
-// Summary 返回指定 MCP 服务器的一行摘要
-func (m *MCPToolManager) Summary(serverName string) string {
-  m.mu.Lock()
-  defer m.mu.Unlock()
-  return m.serverSummaries[serverName]
 }
 
 // ============================================================
@@ -461,13 +439,7 @@ func (t *QueryServerTool) Execute(ctx context.Context, args json.RawMessage) (*T
   return executor.Execute(ctx, rawArgs)
 }
 
-func keysOfMap(m map[string]interface{}) []string {
-  keys := make([]string, 0, len(m))
-  for k := range m {
-    keys = append(keys, k)
-  }
-  return keys
-}
+
 
 func toMap(v interface{}) map[string]interface{} {
   if m, ok := v.(map[string]interface{}); ok {

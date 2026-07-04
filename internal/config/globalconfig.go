@@ -5,7 +5,6 @@ import (
   "fmt"
   "os"
   "os/exec"
-  "path/filepath"
   "strconv"
   "strings"
   "text/template"
@@ -19,10 +18,6 @@ var getEngine func() (*xorm.Engine, error)
 // SetEngineProvider 设置引擎获取函数，由 main.go 在初始化后注入
 func SetEngineProvider(provider func() (*xorm.Engine, error)) {
   getEngine = provider
-}
-
-func (cfg *GlobalConfig) GetSecurityConfig() interface{} {
-  return cfg.Security
 }
 
 // LDAPEnabled 返回是否启用 LDAP（默认启用，只有明确设为 false 才禁用）
@@ -55,10 +50,6 @@ func (cfg *GlobalConfig) AuthMode() string {
   return "local"
 }
 
-func (cfg *GlobalConfig) ActiveAuthProvider() string {
-  return cfg.AuthMode()
-}
-
 func (cfg *GlobalConfig) WhitelistEnabledForProvider(provider string) bool {
   switch provider {
   case "ldap":
@@ -68,10 +59,6 @@ func (cfg *GlobalConfig) WhitelistEnabledForProvider(provider string) bool {
   default:
     return false
   }
-}
-
-func (cfg *GlobalConfig) WhitelistEnabled() bool {
-  return cfg.WhitelistEnabledForProvider(cfg.AuthMode())
 }
 
 // SyncIntervalDuration 解析同步间隔配置，返回 time.Duration，0 表示禁用
@@ -103,9 +90,9 @@ func (cfg *GlobalConfig) SyncIntervalDuration() time.Duration {
   return d
 }
 
-// CronJobTimeout 返回 cron 任务超时时间，默认 60 分钟
-func (cfg *GlobalConfig) CronJobTimeout() time.Duration {
-  s := cfg.Timeout.CronJob
+// GetCronJobTimeout 返回 cron 任务超时时间，默认 60 分钟
+func (cfg *GlobalConfig) GetCronJobTimeout() time.Duration {
+  s := cfg.CronJobTimeout
   if s == "" {
     return 60 * time.Minute
   }
@@ -117,11 +104,6 @@ func (cfg *GlobalConfig) CronJobTimeout() time.Duration {
     return 60 * time.Minute
   }
   return d
-}
-
-// SkillsDirPath 返回技能目录路径
-func SkillsDirPath() string {
-  return filepath.Join(WorkDir(), "skills")
 }
 
 // ============================================================

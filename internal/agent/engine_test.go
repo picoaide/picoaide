@@ -24,12 +24,9 @@ func (p *blockingProvider) StreamChat(ctx context.Context, _ *ChatRequest, _ fun
 // Engine.Process 正常对话流
 // ============================================================
 
-func TestAppendToSystemPrompt_AddsToPendingNotPreloaded(t *testing.T) {
+func TestAppendToSystemPrompt_AddsToPending(t *testing.T) {
   e := NewEngine(testConfig(), nil, nil, nil)
   e.AppendToSystemPrompt("tool hint")
-  if e.preloadedSystem != "" {
-    t.Errorf("preloadedSystem should remain empty, got %q", e.preloadedSystem)
-  }
   if len(e.pendingAdditions) != 1 || e.pendingAdditions[0] != "tool hint" {
     t.Errorf("pendingAdditions = %v, want [tool hint]", e.pendingAdditions)
   }

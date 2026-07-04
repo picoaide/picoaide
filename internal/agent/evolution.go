@@ -7,6 +7,7 @@ import (
   "log/slog"
   "os"
   "path/filepath"
+  "slices"
   "sort"
   "strings"
   "time"
@@ -52,7 +53,7 @@ type Preference struct {
 type MemoryEvolution struct {
   workspace  string
   store      *SessionStore
-  summarizer Summarizer // LLM 提取器，为空时仅做格式维护
+  summarizer *LLMSummarizer // LLM 提取器，为空时仅做格式维护
   maxMsgs    int        // 送入 LLM 的消息上限
   maxTokens  int        // 管理员配置的 max_tokens，用于 prompt 指导输出长度
 }
@@ -65,18 +66,12 @@ func NewMemoryEvolution(workspace string, store *SessionStore) *MemoryEvolution 
   }
 }
 
-func (e *MemoryEvolution) SetSummarizer(s Summarizer) {
+func (e *MemoryEvolution) SetSummarizer(s *LLMSummarizer) {
   e.summarizer = s
 }
 
 func (e *MemoryEvolution) SetMaxTokens(maxTokens int) {
   e.maxTokens = maxTokens
-}
-
-func (e *MemoryEvolution) SetMaxMsgs(n int) {
-  if n > 0 {
-    e.maxMsgs = n
-  }
 }
 
 // Evolve 执行一次完整的记忆进化
@@ -348,19 +343,19 @@ func MergeIntoMemoryMD(existing string, result EvolutionResult, maxTokens int) s
     for _, c := range result.Progress.Completed {
       inProgress = removeItem(inProgress, c)
       blocked = removeItem(blocked, c)
-      if !contains(completed, c) {
+      if !slices.Contains(completed, c) {
         completed = append(completed, c)
       }
     }
     // 进行中
     for _, p := range result.Progress.InProgress {
-      if !contains(inProgress, p) {
+      if !slices.Contains(inProgress, p) {
         inProgress = append(inProgress, p)
       }
     }
     // 阻塞
     for _, b := range result.Progress.Blocked {
-      if !contains(blocked, b) {
+      if !slices.Contains(blocked, b) {
         blocked = append(blocked, b)
       }
     }
@@ -765,14 +760,7 @@ func sectionSlice(items []string) []string {
   return items
 }
 
-func contains(slice []string, item string) bool {
-  for _, s := range slice {
-    if s == item {
-      return true
-    }
-  }
-  return false
-}
+
 
 func removeItem(slice []string, item string) []string {
   var result []string
@@ -784,13 +772,7 @@ func removeItem(slice []string, item string) []string {
   return result
 }
 
-func truncateStr(s string, n int) string {
-  runes := []rune(s)
-  if len(runes) <= n {
-    return s
-  }
-  return string(runes[:n])
-}
+
 
 // backupFile 备份文件到指定目录，文件名添加时间戳后缀
 func backupFile(srcPath, backupDir string) error {

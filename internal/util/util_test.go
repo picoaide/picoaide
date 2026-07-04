@@ -174,75 +174,9 @@ func TestParseFlags(t *testing.T) {
   }
 }
 
-func TestDeepCopyMap(t *testing.T) {
-  original := map[string]interface{}{
-    "name": "test",
-    "nested": map[string]interface{}{
-      "key": "value",
-      "list": []interface{}{1, 2, 3},
-    },
-  }
 
-  copied := DeepCopyMap(original)
 
-  // 修改副本不影响原始
-  copied["name"] = "changed"
-  copied["nested"].(map[string]interface{})["key"] = "changed"
 
-  if original["name"] != "test" {
-    t.Error("DeepCopyMap: modifying copy affected original (top-level)")
-  }
-  if original["nested"].(map[string]interface{})["key"] != "value" {
-    t.Error("DeepCopyMap: modifying copy affected original (nested)")
-  }
-}
-
-func TestMergeMap(t *testing.T) {
-  base := map[string]interface{}{
-    "name": "base",
-    "nested": map[string]interface{}{
-      "a": 1,
-      "b": 2,
-    },
-  }
-
-  overlay := map[string]interface{}{
-    "age": 10,
-    "nested": map[string]interface{}{
-      "b": 20,
-      "c": 30,
-    },
-  }
-
-  result := MergeMap(base, overlay)
-
-  if result["name"] != "base" {
-    t.Error("MergeMap: overlay should not overwrite existing top-level key")
-  }
-  if result["age"] != 10 {
-    t.Error("MergeMap: overlay should add new key")
-  }
-  nested := result["nested"].(map[string]interface{})
-  if nested["a"] != 1 {
-    t.Error("MergeMap: should preserve base nested value")
-  }
-  if nested["b"] != 20 {
-    t.Error("MergeMap: src (overlay) non-map values overwrite dst (base)")
-  }
-  if nested["c"] != 30 {
-    t.Error("MergeMap: should add new nested key from overlay")
-  }
-}
-
-func TestMergeMapEmptyOverlay(t *testing.T) {
-  base := map[string]interface{}{
-    "key": "value",
-  }
-  result := MergeMap(base, map[string]interface{}{})
-  if result["key"] != "value" {
-    t.Error("MergeMap with empty overlay should preserve base")
-  }
-}
 
 func TestCopyFile(t *testing.T) {
   srcDir := t.TempDir()
@@ -436,97 +370,8 @@ func TestSafeRelPath_SymlinkInBase(t *testing.T) {
   }
 }
 
-func TestDeepGet(t *testing.T) {
-  cfg := map[string]interface{}{
-    "a": map[string]interface{}{
-      "b": map[string]interface{}{
-        "c": "value",
-      },
-    },
-    "x": "direct",
-  }
 
-  val, ok := DeepGet(cfg, "a.b.c")
-  if !ok || val != "value" {
-    t.Errorf("DeepGet(a.b.c) = %v, %v; want value, true", val, ok)
-  }
 
-  val, ok = DeepGet(cfg, "x")
-  if !ok || val != "direct" {
-    t.Errorf("DeepGet(x) = %v, %v; want direct, true", val, ok)
-  }
 
-  _, ok = DeepGet(cfg, "nonexistent")
-  if ok {
-    t.Error("DeepGet(nonexistent) should return false")
-  }
 
-  _, ok = DeepGet(cfg, "")
-  if ok {
-    t.Error("DeepGet('') should return false")
-  }
-}
 
-func TestSetByPath(t *testing.T) {
-  cfg := make(map[string]interface{})
-
-  SetByPath(cfg, "a.b.c", "value")
-  if cfg["a"].(map[string]interface{})["b"].(map[string]interface{})["c"] != "value" {
-    t.Error("SetByPath(a.b.c) did not set correctly")
-  }
-
-  SetByPath(cfg, "x", "direct")
-  if cfg["x"] != "direct" {
-    t.Error("SetByPath(x) did not set correctly")
-  }
-
-  SetByPath(cfg, "", "nothing")
-  // should not panic, should not change anything
-}
-
-func TestDeleteByPath(t *testing.T) {
-  cfg := map[string]interface{}{
-    "a": map[string]interface{}{
-      "b": map[string]interface{}{
-        "c": "value",
-        "d": "keep",
-      },
-    },
-    "x": "direct",
-  }
-
-  DeleteByPath(cfg, "a.b.c")
-  _, ok := DeepGet(cfg, "a.b.c")
-  if ok {
-    t.Error("DeleteByPath(a.b.c) did not delete")
-  }
-  // d should still exist
-  val, ok := DeepGet(cfg, "a.b.d")
-  if !ok || val != "keep" {
-    t.Error("DeleteByPath should keep sibling keys")
-  }
-
-  DeleteByPath(cfg, "x")
-  _, ok = cfg["x"]
-  if ok {
-    t.Error("DeleteByPath(x) did not delete top-level key")
-  }
-
-  DeleteByPath(cfg, "nonexistent.key")
-  // should not panic
-}
-
-func TestDeepCopySlice(t *testing.T) {
-  original := []interface{}{1, "hello", map[string]interface{}{"k": "v"}}
-  copied := DeepCopySlice(original)
-
-  copied[0] = 99
-  copied[2].(map[string]interface{})["k"] = "changed"
-
-  if original[0] != 1 {
-    t.Error("DeepCopySlice: modifying copy affected original")
-  }
-  if original[2].(map[string]interface{})["k"] != "v" {
-    t.Error("DeepCopySlice: modifying copy affected original nested map")
-  }
-}

@@ -24,12 +24,6 @@ type mcpServerReq struct {
   Enabled   bool
 }
 
-type mcpServerGrantReq struct {
-  ServerID   int64
-  GrantType  string
-  GrantValue string
-}
-
 // parseMCPForm 从 POST 表单解析 mcpServerReq
 func parseMCPForm(c *gin.Context) (mcpServerReq, error) {
   var req mcpServerReq
