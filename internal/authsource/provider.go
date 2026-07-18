@@ -6,8 +6,22 @@ import (
   "sort"
   "sync"
 
+  "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/config"
 )
+
+// LocalProvider 内嵌本地认证实现
+type LocalProvider struct{}
+
+func init() { Register("local", LocalProvider{}) }
+
+func (LocalProvider) Authenticate(cfg *config.GlobalConfig, username, password string) bool {
+  ok, _, err := auth.AuthenticateLocal(username, password)
+  return err == nil && ok
+}
+
+func (LocalProvider) DisplayName() string { return "本地用户" }
+func (LocalProvider) ConfigFields() []FieldSection { return nil }
 
 // Identity 表示认证源返回的已认证用户身份
 type Identity struct {
@@ -74,40 +88,30 @@ func Provider(name string) (any, bool) {
   return provider, ok
 }
 
-func passwordProvider(name string) (PasswordProvider, error) {
+func typedProvider[T any](name string, capability string) (T, error) {
   provider, ok := Provider(name)
   if !ok {
-    return nil, fmt.Errorf("认证源 %s 未注册", name)
+    var zero T
+    return zero, fmt.Errorf("认证源 %s 未注册", name)
   }
-  typed, ok := provider.(PasswordProvider)
+  typed, ok := provider.(T)
   if !ok {
-    return nil, fmt.Errorf("认证源 %s 不支持用户名密码认证", name)
+    var zero T
+    return zero, fmt.Errorf("认证源 %s 不支持%s", name, capability)
   }
   return typed, nil
+}
+
+func passwordProvider(name string) (PasswordProvider, error) {
+  return typedProvider[PasswordProvider](name, "用户名密码认证")
 }
 
 func browserProvider(name string) (BrowserProvider, error) {
-  provider, ok := Provider(name)
-  if !ok {
-    return nil, fmt.Errorf("认证源 %s 未注册", name)
-  }
-  typed, ok := provider.(BrowserProvider)
-  if !ok {
-    return nil, fmt.Errorf("认证源 %s 不支持浏览器认证", name)
-  }
-  return typed, nil
+  return typedProvider[BrowserProvider](name, "浏览器认证")
 }
 
 func directoryProvider(name string) (DirectoryProvider, error) {
-  provider, ok := Provider(name)
-  if !ok {
-    return nil, fmt.Errorf("认证源 %s 未注册", name)
-  }
-  typed, ok := provider.(DirectoryProvider)
-  if !ok {
-    return nil, fmt.Errorf("认证源 %s 不支持目录同步", name)
-  }
-  return typed, nil
+  return typedProvider[DirectoryProvider](name, "目录同步")
 }
 
 // ============================================================

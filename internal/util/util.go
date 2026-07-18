@@ -16,6 +16,8 @@ import (
 
 
 
+// ponytail: os.CopyFS available since Go 1.23 — replace CopyFile/CopyDir callers
+// when the filesystem root changes settle.
 func CopyFile(src, dst string) error {
   in, err := os.Open(src)
   if err != nil {

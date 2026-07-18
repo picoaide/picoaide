@@ -4,6 +4,7 @@ import (
   "testing"
 
   "github.com/picoaide/picoaide/internal/config"
+  "github.com/picoaide/picoaide/internal/ldap"
 )
 
 const ldapBadHost = "ldap://nx-domain-test-9999.local:389"
@@ -78,14 +79,14 @@ func TestLDAPProviderFetchGroups(t *testing.T) {
 }
 
 func TestLDAPTestConnectionError(t *testing.T) {
-  _, err := LDAPTestConnection(ldapBadHost, "cn=admin,dc=example,dc=com", "secret", "dc=example,dc=com", "(objectClass=person)", "uid")
+  _, err := ldap.TestConnection(ldapBadHost, "cn=admin,dc=example,dc=com", "secret", "dc=example,dc=com", "(objectClass=person)", "uid")
   if err == nil {
     t.Fatal("LDAPTestConnection with bad host should return error")
   }
 }
 
 func TestLDAPTestGroupsEmptyMode(t *testing.T) {
-  result, err := LDAPTestGroups(ldapBadHost, "", "", "", "", "", "", "", "")
+  result, err := ldap.TestGroups(ldapBadHost, "", "", "", "", "", "", "", "")
   if err != nil {
     t.Fatalf("LDAPTestGroups with empty mode should not error: %v", err)
   }
@@ -95,7 +96,7 @@ func TestLDAPTestGroupsEmptyMode(t *testing.T) {
 }
 
 func TestLDAPTestGroupsError(t *testing.T) {
-  _, err := LDAPTestGroups(ldapBadHost, "cn=admin,dc=example,dc=com", "secret", "dc=example,dc=com", "member_of", "", "", "", "uid")
+  _, err := ldap.TestGroups(ldapBadHost, "cn=admin,dc=example,dc=com", "secret", "dc=example,dc=com", "member_of", "", "", "", "uid")
   if err == nil {
     t.Fatal("LDAPTestGroups with bad host should return error")
   }

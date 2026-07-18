@@ -8,7 +8,6 @@ import (
   "sync"
   "time"
 
-  "github.com/picoaide/picoaide/internal/util"
   "github.com/robfig/cron/v3"
 )
 
@@ -173,7 +172,7 @@ func (s *CronScheduler) RecoverStaleJobs(ctx context.Context) error {
     if job.LastRunAt != "" {
       continue
     }
-    nextRun, err := util.ParseTime(job.NextRunAt)
+    nextRun, err := time.Parse(time.RFC3339, job.NextRunAt)
     if err != nil {
       continue
     }
@@ -210,7 +209,7 @@ func (s *CronScheduler) poll(ctx context.Context) {
 
   now := time.Now()
   for _, job := range jobs {
-    nextRun, err := util.ParseTime(job.NextRunAt)
+    nextRun, err := time.Parse(time.RFC3339, job.NextRunAt)
     if err != nil || nextRun.After(now) {
       continue
     }

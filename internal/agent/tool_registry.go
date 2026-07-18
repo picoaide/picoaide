@@ -9,6 +9,9 @@ import (
   "strings"
   "sync"
   "time"
+
+  "google.golang.org/adk/v2/agent"
+  "google.golang.org/adk/v2/tool"
 )
 
 var sandboxWorkspace = "/workspace"
@@ -175,4 +178,31 @@ func (r *ToolRegistry) ListServers() []string {
     }
   }
   return servers
+}
+
+// AsADKToolset 将注册表中的泛型工具转换为 ADK v2 工具集
+func (r *ToolRegistry) AsADKToolset() tool.Toolset {
+  return &registryToolSet{registry: r}
+}
+
+type registryToolSet struct {
+  registry *ToolRegistry
+}
+
+func (s *registryToolSet) Name() string { return "picoagent" }
+
+func (s *registryToolSet) Tools(ctx agent.ReadonlyContext) ([]tool.Tool, error) {
+  s.registry.mu.RLock()
+  defer s.registry.mu.RUnlock()
+
+  var tools []tool.Tool
+  for _, entry := range s.registry.entries {
+    if p, ok := entry.executor.(ADKToolProvider); ok {
+      t, err := p.AsADKTool()
+      if err == nil {
+        tools = append(tools, t)
+      }
+    }
+  }
+  return tools, nil
 }

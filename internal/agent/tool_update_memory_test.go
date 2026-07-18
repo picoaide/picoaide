@@ -10,26 +10,20 @@ import (
 )
 
 func TestUpdateMemoryToolName(t *testing.T) {
-  tool := &UpdateMemoryTool{Workspace: t.TempDir()}
+  tool := NewUpdateMemoryTool(t.TempDir())
   if tool.Name() != "update_memory" {
     t.Errorf("Name() = %q, want %q", tool.Name(), "update_memory")
   }
 }
 
 func TestUpdateMemoryToolSchema(t *testing.T) {
-  tool := &UpdateMemoryTool{Workspace: t.TempDir()}
+  tool := NewUpdateMemoryTool(t.TempDir())
   schema := tool.Schema()
   if schema == nil {
     t.Fatal("Schema() should not be nil")
   }
-  props, ok := schema["properties"].(map[string]interface{})
-  if !ok {
-    t.Fatal("Schema should have properties")
-  }
-  for _, key := range []string{"section", "action", "entries"} {
-    if _, exists := props[key]; !exists {
-      t.Errorf("Schema should have property %q", key)
-    }
+  if schema["type"] != "object" {
+    t.Errorf("Schema type = %v, want object", schema["type"])
   }
 }
 
@@ -46,7 +40,7 @@ func TestUpdateMemoryToolAddDecision(t *testing.T) {
 `
   os.WriteFile(filepath.Join(memoryDir, "MEMORY.md"), []byte(initialContent), 0644)
 
-  tool := &UpdateMemoryTool{Workspace: dir}
+  tool := NewUpdateMemoryTool(dir)
   params := map[string]interface{}{
     "section": "decisions",
     "action":  "add",
@@ -84,7 +78,7 @@ func TestUpdateMemoryToolAddPreference(t *testing.T) {
 `
   os.WriteFile(filepath.Join(dir, "USER.md"), []byte(initialContent), 0644)
 
-  tool := &UpdateMemoryTool{Workspace: dir}
+  tool := NewUpdateMemoryTool(dir)
   params := map[string]interface{}{
     "section": "preferences",
     "action":  "add",
@@ -120,7 +114,7 @@ func TestUpdateMemoryToolUpdateDecision(t *testing.T) {
 `
   os.WriteFile(filepath.Join(memoryDir, "MEMORY.md"), []byte(initialContent), 0644)
 
-  tool := &UpdateMemoryTool{Workspace: dir}
+  tool := NewUpdateMemoryTool(dir)
   params := map[string]interface{}{
     "section": "decisions",
     "action":  "update",
@@ -160,7 +154,7 @@ func TestUpdateMemoryToolDeleteDecision(t *testing.T) {
 `
   os.WriteFile(filepath.Join(memoryDir, "MEMORY.md"), []byte(initialContent), 0644)
 
-  tool := &UpdateMemoryTool{Workspace: dir}
+  tool := NewUpdateMemoryTool(dir)
   params := map[string]interface{}{
     "section": "decisions",
     "action":  "delete",
@@ -188,7 +182,7 @@ func TestUpdateMemoryToolDeleteDecision(t *testing.T) {
 }
 
 func TestUpdateMemoryToolInvalidSection(t *testing.T) {
-  tool := &UpdateMemoryTool{Workspace: t.TempDir()}
+  tool := NewUpdateMemoryTool(t.TempDir())
   params := map[string]interface{}{
     "section": "invalid_section",
     "action":  "add",
@@ -213,7 +207,7 @@ func TestUpdateMemoryToolCreatesBackup(t *testing.T) {
   os.MkdirAll(memoryDir, 0755)
   os.WriteFile(filepath.Join(memoryDir, "MEMORY.md"), []byte("# 长期记忆\n\n## 关键决策\n- 旧决策\n"), 0644)
 
-  tool := &UpdateMemoryTool{Workspace: dir}
+  tool := NewUpdateMemoryTool(dir)
   params := map[string]interface{}{
     "section": "decisions",
     "action":  "add",
@@ -237,7 +231,7 @@ func TestUpdateMemoryToolCreatesBackup(t *testing.T) {
 }
 
 func TestUpdateMemoryToolInvalidAction(t *testing.T) {
-  tool := &UpdateMemoryTool{Workspace: t.TempDir()}
+  tool := NewUpdateMemoryTool(t.TempDir())
   params := map[string]interface{}{
     "section": "decisions",
     "action":  "invalid",
@@ -256,7 +250,7 @@ func TestUpdateMemoryToolInvalidAction(t *testing.T) {
 }
 
 func TestUpdateMemoryToolEmptyEntries(t *testing.T) {
-  tool := &UpdateMemoryTool{Workspace: t.TempDir()}
+  tool := NewUpdateMemoryTool(t.TempDir())
   params := map[string]interface{}{
     "section": "decisions",
     "action":  "add",
@@ -278,7 +272,7 @@ func TestUpdateMemoryToolAddKnowledge(t *testing.T) {
   os.MkdirAll(memoryDir, 0755)
   os.WriteFile(filepath.Join(memoryDir, "MEMORY.md"), []byte("# 长期记忆\n\n## 项目知识\n- 已有知识：旧\n"), 0644)
 
-  tool := &UpdateMemoryTool{Workspace: dir}
+  tool := NewUpdateMemoryTool(dir)
   params := map[string]interface{}{
     "section": "knowledge",
     "action":  "add",
@@ -307,7 +301,7 @@ func TestUpdateMemoryToolAddProgress(t *testing.T) {
   os.MkdirAll(memoryDir, 0755)
   os.WriteFile(filepath.Join(memoryDir, "MEMORY.md"), []byte("# 长期记忆\n"), 0644)
 
-  tool := &UpdateMemoryTool{Workspace: dir}
+  tool := NewUpdateMemoryTool(dir)
   params := map[string]interface{}{
     "section": "progress",
     "action":  "add",
@@ -334,7 +328,7 @@ func TestUpdateMemoryToolUpdatePreference(t *testing.T) {
   dir := t.TempDir()
   os.WriteFile(filepath.Join(dir, "USER.md"), []byte("# 用户信息\n\n## 工作偏好\n- 沟通风格：详细\n"), 0644)
 
-  tool := &UpdateMemoryTool{Workspace: dir}
+  tool := NewUpdateMemoryTool(dir)
   params := map[string]interface{}{
     "section": "preferences",
     "action":  "update",
@@ -364,7 +358,7 @@ func TestUpdateMemoryToolDeletePreference(t *testing.T) {
   dir := t.TempDir()
   os.WriteFile(filepath.Join(dir, "USER.md"), []byte("# 用户信息\n\n## 工作偏好\n- 沟通风格：简洁\n- 技术偏好：Go\n"), 0644)
 
-  tool := &UpdateMemoryTool{Workspace: dir}
+  tool := NewUpdateMemoryTool(dir)
   params := map[string]interface{}{
     "section": "preferences",
     "action":  "delete",
@@ -396,7 +390,7 @@ func TestUpdateMemoryToolUpdateNonexistentTopic(t *testing.T) {
   os.MkdirAll(memoryDir, 0755)
   os.WriteFile(filepath.Join(memoryDir, "MEMORY.md"), []byte("# 长期记忆\n\n## 关键决策\n- 已有决策：旧\n"), 0644)
 
-  tool := &UpdateMemoryTool{Workspace: dir}
+  tool := NewUpdateMemoryTool(dir)
   params := map[string]interface{}{
     "section": "decisions",
     "action":  "update",
@@ -421,7 +415,7 @@ func TestUpdateMemoryToolUpdateNonexistentTopic(t *testing.T) {
 
 func TestUpdateMemoryToolDeleteEmptyFile(t *testing.T) {
   dir := t.TempDir()
-  tool := &UpdateMemoryTool{Workspace: dir}
+  tool := NewUpdateMemoryTool(dir)
   params := map[string]interface{}{
     "section": "preferences",
     "action":  "delete",

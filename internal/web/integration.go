@@ -6,12 +6,10 @@ import (
   "fmt"
   "log/slog"
   "path/filepath"
-
   "github.com/picoaide/picoaide/internal/agent"
   "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/im"
-  "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/sandbox"
   "github.com/picoaide/picoaide/internal/scheduler"
   "github.com/picoaide/picoaide/internal/skill"
@@ -130,12 +128,7 @@ func (s *Server) initAgentIntegration() (*AgentIntegration, error) {
 func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
   // 查找用户
   username := msg.UserID
-  logger.DebugProcess("im_message_recv",
-    "platform", msg.Platform,
-    "user_id", msg.UserID,
-    "chat_id", msg.ChatID,
-    "text_length", len(msg.Text),
-  )
+  slog.Debug("process", "event", "process", "phase", "im_message_recv", "platform", msg.Platform, "user_id", msg.UserID, "chat_id", msg.ChatID, "text_length", len(msg.Text))
   if username == "" {
     return
   }

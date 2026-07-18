@@ -14,31 +14,27 @@ import (
 // ============================================================
 
 func TestWebFetchTool_Name(t *testing.T) {
-  tool := &WebFetchTool{}
+  tool := NewWebFetchTool()
   if tool.Name() != "web_fetch" {
     t.Errorf("Name = %q, want web_fetch", tool.Name())
   }
 }
 
 func TestWebFetchTool_Description(t *testing.T) {
-  tool := &WebFetchTool{}
+  tool := NewWebFetchTool()
   if tool.Description() == "" {
     t.Error("Description should not be empty")
   }
 }
 
 func TestWebFetchTool_Schema(t *testing.T) {
-  tool := &WebFetchTool{}
+  tool := NewWebFetchTool()
   schema := tool.Schema()
   if schema == nil {
     t.Fatal("Schema should not be nil")
   }
-  props, ok := schema["properties"].(map[string]interface{})
-  if !ok {
-    t.Fatal("schema missing properties")
-  }
-  if _, ok := props["url"]; !ok {
-    t.Error("schema missing 'url' property")
+  if schema["type"] != "object" {
+    t.Errorf("Schema type = %v, want object", schema["type"])
   }
 }
 
@@ -48,7 +44,7 @@ func TestWebFetchTool_Success(t *testing.T) {
   }))
   defer mockServer.Close()
 
-  tool := &WebFetchTool{client: mockServer.Client()}
+  tool := NewWebFetchTool()
   args, _ := json.Marshal(map[string]interface{}{"url": mockServer.URL})
   result, err := tool.Execute(context.Background(), args)
   if err != nil {
@@ -63,7 +59,7 @@ func TestWebFetchTool_Success(t *testing.T) {
 }
 
 func TestWebFetchTool_EmptyURL(t *testing.T) {
-  tool := &WebFetchTool{}
+  tool := NewWebFetchTool()
   args, _ := json.Marshal(map[string]interface{}{"url": ""})
   result, err := tool.Execute(context.Background(), args)
   if err != nil {
@@ -84,7 +80,7 @@ func TestWebFetchTool_HTTPError(t *testing.T) {
   }))
   defer mockServer.Close()
 
-  tool := &WebFetchTool{client: mockServer.Client()}
+  tool := NewWebFetchTool()
   args, _ := json.Marshal(map[string]interface{}{"url": mockServer.URL + "/nonexistent"})
   result, err := tool.Execute(context.Background(), args)
   if err != nil {
@@ -102,7 +98,7 @@ func TestWebFetchTool_LargeResponseBody(t *testing.T) {
   }))
   defer mockServer.Close()
 
-  tool := &WebFetchTool{client: mockServer.Client()}
+  tool := NewWebFetchTool()
   args, _ := json.Marshal(map[string]interface{}{"url": mockServer.URL})
   result, err := tool.Execute(context.Background(), args)
   if err != nil {

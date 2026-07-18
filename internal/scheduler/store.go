@@ -5,7 +5,6 @@ import (
   "fmt"
   "time"
 
-  "github.com/picoaide/picoaide/internal/util"
   "xorm.io/xorm"
 )
 
@@ -44,13 +43,13 @@ func (s *SQLCronStore) ListActiveJobs(ctx context.Context) ([]*CronJob, error) {
 }
 
 func (s *SQLCronStore) UpdateNextRun(ctx context.Context, job *CronJob, nextRun time.Time) error {
-  job.NextRunAt = util.FormatTime(nextRun)
+  job.NextRunAt = nextRun.Format(time.RFC3339)
   _, err := s.engine.ID(job.ID).Cols("next_run_at").Update(job)
   return err
 }
 
 func (s *SQLCronStore) UpdateLastRun(ctx context.Context, job *CronJob) error {
-  job.LastRunAt = util.FormatTime(time.Now())
+  job.LastRunAt = time.Now().Format(time.RFC3339)
   _, err := s.engine.ID(job.ID).Cols("last_run_at").Update(job)
   return err
 }
@@ -61,9 +60,9 @@ func (s *SQLCronStore) Insert(ctx context.Context, job *CronJob) error {
     return fmt.Errorf("计算执行时间失败: %w", err)
   }
   if next != nil {
-    job.NextRunAt = util.FormatTime(*next)
+    job.NextRunAt = next.Format(time.RFC3339)
   }
-  job.CreatedAt = util.FormatTime(time.Now())
+  job.CreatedAt = time.Now().Format(time.RFC3339)
   _, err = s.engine.Insert(job)
   return err
 }
@@ -97,7 +96,7 @@ func (s *SQLCronStore) Update(ctx context.Context, job *CronJob) error {
     return fmt.Errorf("计算执行时间失败: %w", err)
   }
   if next != nil {
-    job.NextRunAt = util.FormatTime(*next)
+    job.NextRunAt = next.Format(time.RFC3339)
   } else {
     job.NextRunAt = ""
   }

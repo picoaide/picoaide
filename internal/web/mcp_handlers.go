@@ -4,10 +4,8 @@ import (
   "log/slog"
   "net/http"
   "strings"
-
   "github.com/gin-gonic/gin"
   "github.com/gorilla/websocket"
-
   "github.com/picoaide/picoaide/internal/store"
 )
 
@@ -32,7 +30,7 @@ var upgrader = websocket.Upgrader{
 
 // handleMCPToken 返回当前用户的 MCP token
 func (s *Server) handleMCPToken(c *gin.Context) {
-  username := s.requireNonSuperadmin(c)
+  username := s.requireRegularUser(c)
   if username == "" {
     return
   }

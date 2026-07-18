@@ -11,7 +11,6 @@ import (
   "strings"
 
   "github.com/gin-gonic/gin"
-
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/config"
@@ -19,17 +18,12 @@ import (
   "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
+  "log/slog"
 )
 
 // ============================================================
 // JSON 响应辅助
 // ============================================================
-
-// apiResponse 是统一的 JSON 响应结构
-type apiResponse struct {
-  Success bool   `json:"success"`
-  Message string `json:"message,omitempty"`
-}
 
 // apiError 是带 error 字段的 JSON 响应
 type apiError struct {
@@ -44,7 +38,7 @@ func writeJSON(c *gin.Context, statusCode int, v interface{}) {
 
 // writeSuccess 返回成功响应
 func writeSuccess(c *gin.Context, message string) {
-  writeJSON(c, http.StatusOK, apiResponse{Success: true, Message: message})
+  writeJSON(c, http.StatusOK, gin.H{"success": true, "message": message})
 }
 
 // writeError 返回错误响应
@@ -60,10 +54,6 @@ func (s *Server) requireAuth(c *gin.Context) string {
     return ""
   }
   return username
-}
-
-func (s *Server) requireNonSuperadmin(c *gin.Context) string {
-  return s.requireRegularUser(c)
 }
 
 func (s *Server) requireRegularUser(c *gin.Context) string {
@@ -123,7 +113,7 @@ func (s *Server) handleLoginMode(c *gin.Context) {
 func (s *Server) handleLogin(c *gin.Context) {
   username := c.PostForm("username")
   password := c.PostForm("password")
-  logger.DebugRecv("POST", "/api/login", "username", username)
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/login", "username", username)
   if username == "" || password == "" {
     writeError(c, http.StatusBadRequest, "请输入用户名和密码")
     return
@@ -131,18 +121,18 @@ func (s *Server) handleLogin(c *gin.Context) {
 
   isSuperadmin := store.IsSuperadmin(username)
   if s.isExtensionRequest(c) && isSuperadmin {
-    logger.DebugSend("POST", "/api/login", http.StatusForbidden, "reason", "superadmin_extension_blocked")
+    slog.Debug("response", "event", "send", "method", "POST", "path", "/api/login", "status", http.StatusForbidden, "reason", "superadmin_extension_blocked")
     writeError(c, http.StatusForbidden, "超管用户不允许登录插件，使用普通用户登录")
     return
   }
 
   // 1. 通过当前认证源认证（local/ldap/任何 PasswordProvider）
-  logger.DebugProcess("authenticate", "username", username, "auth_mode", s.loadConfig().AuthMode())
+  slog.Debug("process", "event", "process", "phase", "authenticate", "username", username, "auth_mode", s.loadConfig().AuthMode())
   authenticated := authsource.Authenticate(s.loadConfig(), username, password)
 
   // 2. 超管逃生通道：当前认证源认证失败时，尝试本地密码
   if !authenticated && isSuperadmin {
-    logger.DebugProcess("superadmin_fallback", "username", username)
+    slog.Debug("process", "event", "process", "phase", "superadmin_fallback", "username", username)
     ok, _, err := auth.AuthenticateLocal(username, password)
     authenticated = (err == nil && ok)
   }
@@ -162,7 +152,7 @@ func (s *Server) handleLogin(c *gin.Context) {
   // 场景 A：本地模式或超管 → 直接登录
   if isSuperadmin || !s.loadConfig().UnifiedAuthEnabled() {
     if !isSuperadmin {
-      logger.DebugProcess("init_user", "username", username)
+      slog.Debug("process", "event", "process", "phase", "init_user", "username", username)
       if err := s.initializeUser(username); err != nil {
         writeError(c, http.StatusInternalServerError, "初始化用户失败: "+err.Error())
         return
@@ -170,7 +160,7 @@ func (s *Server) handleLogin(c *gin.Context) {
     }
     s.setSessionCookie(c, s.createSessionToken(username), 86400)
     logger.Audit("user.login", "username", username, "method", "local")
-    logger.DebugSend("POST", "/api/login", http.StatusOK, "username", username, "method", "local")
+    slog.Debug("response", "event", "send", "method", "POST", "path", "/api/login", "status", http.StatusOK, "username", username, "method", "local")
 
     // 超管首次登录成功，删除 secret 文件
     if isSuperadmin {
@@ -190,13 +180,13 @@ func (s *Server) handleLogin(c *gin.Context) {
   }
 
   // 场景 B：统一认证模式下的外部用户
-  logger.DebugProcess("whitelist_check", "username", username, "auth_mode", authMode)
+  slog.Debug("process", "event", "process", "phase", "whitelist_check", "username", username, "auth_mode", authMode)
   if !user.AllowedByWhitelist(s.loadConfig(), authMode, username) {
-    logger.DebugSend("POST", "/api/login", http.StatusForbidden, "reason", "whitelist_denied")
+    slog.Debug("response", "event", "send", "method", "POST", "path", "/api/login", "status", http.StatusForbidden, "reason", "whitelist_denied")
     writeError(c, http.StatusForbidden, "请联系管理员添加白名单")
     return
   }
-  logger.DebugProcess("ensure_external_user", "username", username, "auth_mode", authMode)
+  slog.Debug("process", "event", "process", "phase", "ensure_external_user", "username", username, "auth_mode", authMode)
   if err := store.EnsureExternalUser(username, "user", authMode); err != nil {
     writeError(c, http.StatusInternalServerError, "同步用户失败: "+err.Error())
     return
@@ -219,7 +209,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 
   s.setSessionCookie(c, s.createSessionToken(username), 86400)
   logger.Audit("user.login", "username", username, "method", authMode)
-  logger.DebugSend("POST", "/api/login", http.StatusOK, "username", username, "method", authMode)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/login", "status", http.StatusOK, "username", username, "method", authMode)
   writeJSON(c, http.StatusOK, struct {
     Success  bool   `json:"success"`
     Username string `json:"username"`
@@ -307,12 +297,12 @@ func (s *Server) handleAuthCallback(c *gin.Context) {
 // handleLogout 处理登出请求
 func (s *Server) handleLogout(c *gin.Context) {
   username := s.getSessionUser(c)
-  logger.DebugRecv("POST", "/api/logout", "username", username)
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/logout", "username", username)
   s.setSessionCookie(c, "", -1)
   if username != "" {
     logger.Audit("user.logout", "username", username)
   }
-  logger.DebugSend("POST", "/api/logout", http.StatusOK)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/logout", "status", http.StatusOK)
   writeSuccess(c, "已登出")
 }
 
@@ -337,7 +327,7 @@ func (s *Server) handleCSRF(c *gin.Context) {
 
 // handleCookies 将当前页面的 Cookie 写入数据库
 func (s *Server) handleCookies(c *gin.Context) {
-  username := s.requireNonSuperadmin(c)
+  username := s.requireRegularUser(c)
   if username == "" {
     return
   }
@@ -598,7 +588,7 @@ func (s *Server) handleConfigSave(c *gin.Context) {
   if username == "" {
     return
   }
-  logger.DebugRecv("POST", "/api/config", "operator", username)
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/config", "operator", username)
 
   // 检查超管权限
   if !store.IsSuperadmin(username) {
@@ -636,7 +626,7 @@ func (s *Server) handleConfigSave(c *gin.Context) {
   if changedBy == "" {
     changedBy = "admin"
   }
-  logger.DebugProcess("save_config", "operator", changedBy, "auth_mode_change", oldMode != newMode, "old_mode", oldMode, "new_mode", newMode)
+  slog.Debug("process", "event", "process", "phase", "save_config", "operator", changedBy, "auth_mode_change", oldMode != newMode, "old_mode", oldMode, "new_mode", newMode)
   if err := config.SaveRawToDB(raw, changedBy); err != nil {
     writeError(c, http.StatusInternalServerError, err.Error())
     return

@@ -11,11 +11,10 @@ import (
   "strings"
 
   "github.com/gin-gonic/gin"
-
   "github.com/picoaide/picoaide/internal/store"
-  "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
+  "log/slog"
 )
 
 // ============================================================
@@ -179,7 +178,7 @@ func (s *Server) handleFiles(c *gin.Context) {
   }
 
   relPath := c.Query("path")
-  logger.DebugRecv("GET", "/api/files", "username", username, "path", relPath)
+  slog.Debug("request", "event", "recv", "method", "GET", "path", "/api/files", "username", username, "path", relPath)
 
   // 根目录特殊处理：合并工作区文件和共享文件夹
   if relPath == "" || relPath == "." || relPath == "/" {
@@ -418,7 +417,7 @@ func (s *Server) handleFileUpload(c *gin.Context) {
   }
 
   relPath := c.PostForm("path")
-  logger.DebugRecv("POST", "/api/files/upload", "username", username, "path", relPath)
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/files/upload", "username", username, "path", relPath)
 
   // 限制请求体大小
   c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadSize)
@@ -456,7 +455,7 @@ func (s *Server) handleFileUpload(c *gin.Context) {
   defer file.Close()
 
   filename := filepath.Base(header.Filename)
-  logger.DebugProcess("upload_file", "username", username, "path", relPath, "filename", filename, "size", header.Size)
+  slog.Debug("process", "event", "process", "phase", "upload_file", "username", username, "path", relPath, "filename", filename, "size", header.Size)
   dst, err := fr.root.OpenFile(filepath.Join(fr.safePath, filename), os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "创建文件失败")
@@ -469,7 +468,7 @@ func (s *Server) handleFileUpload(c *gin.Context) {
     return
   }
 
-  logger.DebugSend("POST", "/api/files/upload", http.StatusOK, "filename", filename)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/files/upload", "status", http.StatusOK, "filename", filename)
   writeSuccess(c, fmt.Sprintf("文件 %s 上传成功", filename))
 }
 
@@ -481,7 +480,7 @@ func (s *Server) handleFileDownload(c *gin.Context) {
   }
 
   relPath := c.Query("path")
-  logger.DebugRecv("GET", "/api/files/download", "username", username, "path", relPath)
+  slog.Debug("request", "event", "recv", "method", "GET", "path", "/api/files/download", "username", username, "path", relPath)
 
   fr, err := s.resolveFileRoot(username, relPath)
   if err != nil {
@@ -503,7 +502,7 @@ func (s *Server) handleFileDownload(c *gin.Context) {
   }
   defer file.Close()
 
-  logger.DebugSend("GET", "/api/files/download", http.StatusOK, "path", relPath, "size", info.Size())
+  slog.Debug("response", "event", "send", "method", "GET", "path", "/api/files/download", "status", http.StatusOK, "path", relPath, "size", info.Size())
   c.Writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(fr.safePath)))
   http.ServeContent(c.Writer, c.Request, filepath.Base(fr.safePath), info.ModTime(), file)
 }
@@ -520,7 +519,7 @@ func (s *Server) handleFileDelete(c *gin.Context) {
   }
 
   relPath := c.PostForm("path")
-  logger.DebugRecv("POST", "/api/files/delete", "username", username, "path", relPath)
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/files/delete", "username", username, "path", relPath)
 
   fr, err := s.resolveFileRoot(username, relPath)
   if err != nil {
@@ -549,7 +548,7 @@ func (s *Server) handleFileDelete(c *gin.Context) {
   }
 
   name := filepath.Base(fr.safePath)
-  logger.DebugProcess("delete_file", "username", username, "path", relPath, "is_dir", info.IsDir())
+  slog.Debug("process", "event", "process", "phase", "delete_file", "username", username, "path", relPath, "is_dir", info.IsDir())
   if info.IsDir() {
     err = fr.root.RemoveAll(fr.safePath)
   } else {
@@ -560,7 +559,7 @@ func (s *Server) handleFileDelete(c *gin.Context) {
     return
   }
 
-  logger.DebugSend("POST", "/api/files/delete", http.StatusOK, "path", relPath)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/files/delete", "status", http.StatusOK, "path", relPath)
   writeSuccess(c, fmt.Sprintf("%s 已删除", name))
 }
 
@@ -577,7 +576,7 @@ func (s *Server) handleFileMkdir(c *gin.Context) {
 
   relPath := c.PostForm("path")
   name := filepath.Base(c.PostForm("name"))
-  logger.DebugRecv("POST", "/api/files/mkdir", "username", username, "path", relPath, "name", name)
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/files/mkdir", "username", username, "path", relPath, "name", name)
 
   if name == "" || name == "." || name == ".." {
     writeError(c, http.StatusBadRequest, "目录名无效")
@@ -599,13 +598,13 @@ func (s *Server) handleFileMkdir(c *gin.Context) {
     return
   }
 
-  logger.DebugProcess("mkdir", "username", username, "path", relPath, "name", name)
+  slog.Debug("process", "event", "process", "phase", "mkdir", "username", username, "path", relPath, "name", name)
   if err := fr.root.Mkdir(filepath.Join(fr.safePath, name), 0755); err != nil {
     writeError(c, http.StatusInternalServerError, "创建目录失败")
     return
   }
 
-  logger.DebugSend("POST", "/api/files/mkdir", http.StatusOK, "path", relPath+"/"+name)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/files/mkdir", "status", http.StatusOK, "path", relPath+"/"+name)
   writeSuccess(c, fmt.Sprintf("目录 %s 已创建", name))
 }
 
@@ -617,7 +616,7 @@ func (s *Server) handleFileEditGet(c *gin.Context) {
   }
 
   relPath := c.Query("path")
-  logger.DebugRecv("GET", "/api/files/edit", "username", username, "path", relPath)
+  slog.Debug("request", "event", "recv", "method", "GET", "path", "/api/files/edit", "username", username, "path", relPath)
   if relPath == "" {
     writeError(c, http.StatusBadRequest, "缺少文件路径")
     return
@@ -649,7 +648,7 @@ func (s *Server) handleFileEditGet(c *gin.Context) {
     return
   }
 
-  logger.DebugSend("GET", "/api/files/edit", http.StatusOK, "path", relPath, "size", len(data))
+  slog.Debug("response", "event", "send", "method", "GET", "path", "/api/files/edit", "status", http.StatusOK, "path", relPath, "size", len(data))
   writeJSON(c, http.StatusOK, editResponse{
     Success:  true,
     Filename: filepath.Base(fr.safePath),
@@ -669,7 +668,7 @@ func (s *Server) handleFileEditSave(c *gin.Context) {
   if relPath == "" {
     relPath = c.Query("path")
   }
-  logger.DebugRecv("POST", "/api/files/edit", "username", username, "path", relPath)
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/files/edit", "username", username, "path", relPath)
   if relPath == "" {
     writeError(c, http.StatusBadRequest, "缺少文件路径")
     return
@@ -708,12 +707,12 @@ func (s *Server) handleFileEditSave(c *gin.Context) {
   }
   defer file.Close()
   content := c.PostForm("content")
-  logger.DebugProcess("save_file", "username", username, "path", relPath, "size", len(content))
+  slog.Debug("process", "event", "process", "phase", "save_file", "username", username, "path", relPath, "size", len(content))
   if _, err := file.WriteString(content); err != nil {
     writeError(c, http.StatusInternalServerError, "保存文件失败")
     return
   }
 
-  logger.DebugSend("POST", "/api/files/edit", http.StatusOK, "path", relPath)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/files/edit", "status", http.StatusOK, "path", relPath)
   writeSuccess(c, fmt.Sprintf("文件 %s 已保存", filepath.Base(fr.safePath)))
 }

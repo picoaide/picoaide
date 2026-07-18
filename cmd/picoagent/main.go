@@ -19,6 +19,8 @@ import (
   "time"
 
   "github.com/picoaide/picoaide/internal/agent"
+  "google.golang.org/adk/v2/session"
+  "google.golang.org/adk/v2/tool"
 )
 
 func main() {
@@ -103,23 +105,25 @@ func main() {
   slog.Debug("picoagent.registering_tools")
   tools := agent.NewToolRegistry()
   cmdTimeout := time.Duration(cfg.RequestTimeout) * time.Second
-  tools.Register(&agent.CommandTool{Timeout: cmdTimeout})
-  tools.Register(&agent.ReadFileTool{})
-  tools.Register(&agent.GrepTool{})
-  tools.Register(&agent.WriteFileTool{})
-  tools.Register(&agent.EditFileTool{})
-  tools.Register(&agent.AppendFileTool{})
-  tools.Register(&agent.ListDirTool{})
-  tools.Register(&agent.GlobTool{})
-  tools.Register(&agent.DeleteFileTool{})
-  tools.Register(&agent.WebFetchTool{})
-  tools.Register(&agent.UpdateMemoryTool{Workspace: cfg.Workspace})
+  tools.Register(agent.NewCommandTool(cmdTimeout))
+  tools.Register(agent.NewReadFileTool())
+  tools.Register(agent.NewGrepTool())
+  tools.Register(agent.NewWriteFileTool())
+  tools.Register(agent.NewEditFileTool())
+  tools.Register(agent.NewAppendFileTool())
+  tools.Register(agent.NewListDirTool())
+  tools.Register(agent.NewGlobTool())
+  tools.Register(agent.NewDeleteFileTool())
+  tools.Register(agent.NewWebFetchTool())
+  tools.Register(agent.NewUpdateMemoryTool(cfg.Workspace))
   slog.Debug("picoagent.tools_registered", "count", 11)
 
   // 连接 MCP 服务器（使用独立 context，不影响主流程超时）
+  var mcpToolsets []tool.Toolset
+  var mcpManager *agent.MCPManager
   mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 10*time.Second)
   if len(cfg.MCPServers) > 0 {
-    mcpManager := agent.NewMCPToolManager()
+    mcpManager = agent.NewMCPManager()
     mcpManager.WorkspaceDir = cfg.Workspace
     mcpManager.SetToken(token)
     for serverName, serverCfg := range cfg.MCPServers {
@@ -132,39 +136,19 @@ func main() {
       }
       slog.Debug("picoagent.mcp_connected", "server", serverName, "socket", serverCfg.Socket)
     }
-    mcpManager.RegisterAll(tools)
+    mcpToolsets = mcpManager.Toolsets()
   }
   mcpCancel()
 
-  // 6. 创建引擎 + 设置压缩器摘要 LLM
-  slog.Debug("picoagent.creating_engine")
-  engine := agent.NewEngine(cfg, provider, tools, store)
-  summarizer := agent.NewLLMSummarizer(provider, cfg.Model.ModelID, cfg.Model.MaxTokens)
-  engine.SetSummarizer(summarizer)
+	// 6. 注册 MCP 代理调用工具
+	slog.Debug("picoagent.registering_mcp_tools")
+	tools.Register(&agent.QueryServerTool{Manager: mcpManager})
 
-  // 6a. 创建子代理管理器 + 注册子代理工具（spawn + collect 分离以实现并行）
-  subAgentMgr := agent.NewSubAgentManager(cfg, provider, tools)
-  engine.SetSubAgentManager(subAgentMgr)
-  tools.Register(&agent.SubAgentSpawnTool{Manager: subAgentMgr})
-  tools.Register(&agent.SubAgentCollectTool{Manager: subAgentMgr})
-
-  // 6ab. 注册 MCP 代理调用工具
-  tools.Register(&agent.QueryServerTool{Registry: tools})
-
-  // 6b. 加载技能
-  skills, err := agent.LoadSkills(cfg.Workspace)
-  if err != nil {
-    slog.Debug("picoagent.skills_load_failed", "error", err.Error())
-  } else if len(skills) > 0 {
-    engine.SetSkills(skills)
-    slog.Debug("picoagent.skills_loaded", "count", len(skills))
-  }
+	// 6a. 创建 ADK session 服务
+	adkSessionSvc := session.InMemoryService()
+	slog.Debug("picoagent.adk_session_ready")
 
   // 7. 计算 session key（跨渠道，定时任务使用独立渠道避免混淆聊天历史）
-  channel := os.Getenv("PICOAGENT_CHANNEL")
-  if channel == "" {
-    channel = "unified"
-  }
   scope := agent.SessionScope{
     Version:    1,
     AgentID:    "pico",
@@ -184,14 +168,6 @@ func main() {
   // 8. 多轮消息循环 — 每轮从 stdin 读取一条消息并处理，
   //    完成后等待下一条消息（沙箱可追加），stdin 关闭（EOF）或空闲超时退出
   slog.Debug("picoagent.reading_input")
-  timeout := cfg.RequestTimeout
-  engine.SetSessionKey(sessionKey)
-  heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
-  defer heartbeatCancel()
-  agent.StartHeartbeat(heartbeatCtx, 15*time.Second, func(event agent.StreamEvent) {
-    data, _ := json.Marshal(event)
-    fmt.Println(string(data))
-  })
 
   // 信号处理（只需注册一次，作用所有消息）
   signalCtx, signalCancel := context.WithCancel(context.Background())
@@ -263,77 +239,29 @@ msgLoop:
       lastProcessInterrupted = false
     }
 
-    // 保存用户消息
-    store.AppendMessage(sessionKey, inputMsg)
+    // 使用 ADKRun 处理消息
+    slog.Debug("picoagent.adk_process_start", "input_length", len(inputMsg.Content))
 
-    // 处理消息：使用 WithCancel 而非 WithTimeout，避免累计超时掐断多轮迭代
-    // 单轮迭代的超时由 engine 内部的 perIterTimeout 控制
-    ctx, cancel := context.WithCancel(signalCtx)
-
-    slog.Debug("picoagent.engine_process_start",
-      "model_id", cfg.Model.ModelID,
-      "timeout", timeout,
-      "history_count", len(history),
-      "input_length", len(inputMsg.Content),
-    )
-
-    var fullResponse string
-    err = engine.Process(ctx, sysPrompt, history, inputMsg, func(event agent.StreamEvent) {
+    adkCtx, adkCancel := context.WithCancel(signalCtx)
+    err = agent.ADKRun(adkCtx, cfg, provider, tools, mcpToolsets, adkSessionSvc, sysPrompt, inputMsg, func(event agent.StreamEvent) {
       data, _ := json.Marshal(event)
       fmt.Println(string(data))
-      if event.Type == "text_delta" {
-        var text string
-        if json.Unmarshal(event.Data, &text) == nil {
-          fullResponse += text
-        }
-      }
     })
-    cancel()
+    adkCancel()
 
     if err != nil {
-      slog.Debug("picoagent.engine_error", "error", err.Error(), "response_length", len(fullResponse))
+      slog.Debug("picoagent.adk_error", "error", err.Error())
       errorEvent := agent.ErrorEvent(err.Error())
       data, _ := json.Marshal(errorEvent)
       fmt.Println(string(data))
-
-      if fullResponse != "" {
-        partialMsg := &agent.Message{
-          Role:    agent.RoleAssistant,
-          Content: fullResponse + "\n\n[响应中断: " + err.Error() + "]",
-        }
-        store.AppendMessage(sessionKey, partialMsg)
-      }
-      // 从 store 重新加载 history，确保下一轮包含当前轮已保存的内容
-      history, _ = store.LoadLive(sessionKey)
-      // 继续读取下一条消息，不退出
       continue
     }
-
-    slog.Debug("picoagent.engine_complete",
-      "response_length", len(fullResponse),
-      "response_preview", truncateString(fullResponse, 100),
-    )
-
-    // 保存助手响应到会话
-    if fullResponse != "" {
-      assistantMsg := &agent.Message{
-        Role:    agent.RoleAssistant,
-        Content: fullResponse,
-      }
-      store.AppendMessage(sessionKey, assistantMsg)
-    }
-
-    // 从 store 重新加载 history，确保下一轮包含本轮完整上下文
-    history, _ = store.LoadLive(sessionKey)
   }
 
   // 会话结束，触发记忆进化
   slog.Debug("picoagent.evolving_memory")
   evolver := agent.NewMemoryEvolution(cfg.Workspace, store)
   evolver.SetMaxTokens(cfg.Model.MaxTokens)
-  if summarizer != nil {
-    evolver.SetSummarizer(summarizer)
-  }
   evolveCtx, evolveCancel := context.WithTimeout(context.Background(), 30*time.Second)
   result, evolveErr := evolver.Evolve(evolveCtx, sessionKey)
   evolveCancel()

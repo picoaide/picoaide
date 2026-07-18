@@ -8,10 +8,8 @@ import (
   "path/filepath"
   "sort"
   "strings"
-
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/store"
-  "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/skill"
   "github.com/picoaide/picoaide/internal/user"
   "github.com/picoaide/picoaide/internal/util"
@@ -116,7 +114,7 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
   targetUser := strings.TrimSpace(c.PostForm("username"))
   targetGroup := strings.TrimSpace(c.PostForm("group_name"))
   skillSource := strings.TrimSpace(c.PostForm("source"))
-  logger.DebugRecv("POST", "/api/admin/skills/deploy", "skill", skillName, "user", targetUser, "group", targetGroup, "operator", s.getSessionUser(c))
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/admin/skills/deploy", "skill", skillName, "user", targetUser, "group", targetGroup, "operator", s.getSessionUser(c))
 
   if skillName == "" {
     writeError(c, http.StatusBadRequest, "技能名称不能为空")
@@ -143,12 +141,12 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
   }
 
   if targetUser != "" {
-    logger.DebugProcess("deploy_skill_to_user", "skill", skillName, "username", targetUser)
+    slog.Debug("process", "event", "process", "phase", "deploy_skill_to_user", "skill", skillName, "username", targetUser)
     if err := deployFn(targetUser); err != nil {
       writeError(c, http.StatusInternalServerError, err.Error())
       return
     }
-    logger.DebugSend("POST", "/api/admin/skills/deploy", http.StatusOK, "skill", skillName, "target", targetUser)
+    slog.Debug("response", "event", "send", "method", "POST", "path", "/api/admin/skills/deploy", "status", http.StatusOK, "skill", skillName, "target", targetUser)
     writeJSON(c, http.StatusOK, map[string]interface{}{
       "success":     true,
       "message":     fmt.Sprintf("已将技能 %s 部署到 %s", skillName, targetUser),
@@ -178,13 +176,13 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
     }
   }
 
-  logger.DebugProcess("deploy_skill_async", "skill", skillName, "target_count", len(targets), "target_group", targetGroup)
+  slog.Debug("process", "event", "process", "phase", "deploy_skill_async", "skill", skillName, "target_count", len(targets), "target_group", targetGroup)
   taskID, err := enqueueTask("skills-deploy", targets, deployFn)
   if err != nil {
     writeError(c, http.StatusConflict, err.Error())
     return
   }
-  logger.DebugSend("POST", "/api/admin/skills/deploy", http.StatusOK, "skill", skillName, "task_id", taskID)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/admin/skills/deploy", "status", http.StatusOK, "skill", skillName, "task_id", taskID)
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success":     true,
     "message":     fmt.Sprintf("已提交技能部署任务，共 %d 个用户", len(targets)),

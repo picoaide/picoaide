@@ -12,16 +12,20 @@ PicoAide（`picoaide`）是一个 Go 语言编写的 CLI 工具，用于管理�
 
 ### ⚠️ 重要：必须全量编译
 
-每次构建必须使用 `make build` **从头全量编译**，包含三个步骤：
-1. 构建 picoagent（`cmd/picoagent/main.go`）
-2. 准备 Alpine rootfs（`bundle/alpine-rootfs.tar.gz`）
-3. 构建 picoaide（`cmd/picoaide/main.go`）
+每次构建必须使用 `make build` **从头全量编译**，包含四个步骤：
+1. 构建前端（`web/ui/` → `internal/web/dist/`）
+2. 构建 picoagent（`cmd/picoagent/main.go`）
+3. 准备 Alpine rootfs（`bundle/alpine-rootfs.tar.gz`）
+4. 构建 picoaide（`cmd/picoaide/main.go`，嵌入前端产物）
 
-> 禁止只执行 `go build ./cmd/picoaide/` 跳过 picoagent 和 rootfs，否则部署后沙箱功能不可用。
+> 禁止只执行 `go build ./cmd/picoaide/` 跳过前端和 picoagent，否则部署后 Web 界面和沙箱功能不可用。
 
 ```bash
-# 标准构建（picoagent + Alpine rootfs + picoaide）
+# 标准构建（前端 + picoagent + Alpine rootfs + picoaide）
 make build
+
+# 仅构建前端
+make build-ui
 
 # 运行 CLI（必须以 root 运行）
 ./picoaide <命令> [选项]
@@ -40,6 +44,19 @@ GOOS=linux GOARCH=amd64 go build -ldflags "-X github.com/picoaide/picoaide/inter
 # 全平台发布构建
 make release PICOCLAW_VERSION=v1.0.0
 ```
+
+### 前端开发
+
+前端源码位于 `web/ui/`，基于 Vue 3 + TypeScript + Ant Design Vue。
+
+```bash
+cd web/ui
+npm install      # 安装依赖
+npm run dev      # 启动开发服务器 (localhost:5173)
+npm run build    # 构建到 internal/web/dist/
+```
+
+开发服务器会自动代理 `/api` 请求到 `http://localhost:8080`。构建产物通过 `go:embed` 嵌入到 Go 二进制中，不提交到 Git 仓库。
 
 ### 测试命令
 

@@ -7,20 +7,18 @@ import (
 
 func TestDefaultGlobalConfigToKV(t *testing.T) {
   cfg := DefaultGlobalConfig()
-  kv, err := configToKV(cfg)
-  if err != nil {
-    t.Fatalf("configToKV: %v", err)
+  raw := structToRaw(cfg)
+  flat := flattenConfig(raw)
+  if flat["web.listen"] != ":80" {
+    t.Fatalf("web.listen = %q", flat["web.listen"])
   }
-  if kv["web.listen"] != ":80" {
-    t.Fatalf("web.listen = %q", kv["web.listen"])
-  }
-  if _, ok := kv["web.password"]; ok {
+  if _, ok := flat["web.password"]; ok {
     t.Fatal("web.password should not be stored in global config")
   }
-  if kv["security"] == "" {
+  if flat["security"] == "" {
     t.Fatal("security default should be stored as JSON")
   }
-  if kv["skills"] == "" {
+  if flat["skills"] == "" {
     t.Fatal("skills default should be stored as JSON")
   }
 }

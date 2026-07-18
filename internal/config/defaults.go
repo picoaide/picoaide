@@ -71,11 +71,9 @@ func InitDBDefaults() error {
     return fmt.Errorf("开启事务失败: %w", err)
   }
 
-  kv, err := configToKV(cfg)
-  if err != nil {
-    return err
-  }
-  for key, value := range kv {
+  raw := structToRaw(cfg)
+  flat := flattenConfig(raw)
+  for key, value := range flat {
     if _, err := session.Exec(
       "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
       key, value,

@@ -48,8 +48,6 @@ func LoadFromDB() (*GlobalConfig, error) {
   }
 
   cfg := &GlobalConfig{}
-
-  // 简单字段直接赋值
   cfg.LDAP.Host = kv["ldap.host"]
   cfg.LDAP.BindDN = kv["ldap.bind_dn"]
   cfg.LDAP.BindPassword = kv["ldap.bind_password"]
@@ -76,7 +74,6 @@ func LoadFromDB() (*GlobalConfig, error) {
   cfg.Web.LogRetention = kv["web.log_retention"]
   cfg.Web.LogLevel = kv["web.log_level"]
 
-  // web.ldap_enabled 需要解析为 bool 指针
   if v, ok := kv["web.ldap_enabled"]; ok && v != "" {
     b, err := strconv.ParseBool(v)
     if err == nil {
@@ -85,16 +82,11 @@ func LoadFromDB() (*GlobalConfig, error) {
   }
   cfg.LDAP.WhitelistEnabled, _ = strconv.ParseBool(kv["ldap.whitelist_enabled"])
   cfg.OIDC.WhitelistEnabled, _ = strconv.ParseBool(kv["oidc.whitelist_enabled"])
-
-  // debug_mode
   cfg.Web.DebugMode, _ = strconv.ParseBool(kv["web.debug_mode"])
-
-  // TLS 配置
   cfg.Web.TLS.Enabled, _ = strconv.ParseBool(kv["web.tls.enabled"])
   cfg.Web.TLS.CertPEM = kv["web.tls.cert_pem"]
   cfg.Web.TLS.KeyPEM = kv["web.tls.key_pem"]
 
-  // 结构化字段从 JSON 反序列化
   if v, ok := kv["security"]; ok && v != "" {
     var security interface{}
     if err := json.Unmarshal([]byte(v), &security); err == nil {
@@ -114,127 +106,47 @@ func LoadFromDB() (*GlobalConfig, error) {
   return cfg, nil
 }
 
-func configToKV(cfg *GlobalConfig) (map[string]string, error) {
-  kv := make(map[string]string)
-  kv["ldap.host"] = cfg.LDAP.Host
-  kv["ldap.bind_dn"] = cfg.LDAP.BindDN
-  kv["ldap.bind_password"] = cfg.LDAP.BindPassword
-  kv["ldap.base_dn"] = cfg.LDAP.BaseDN
-  kv["ldap.filter"] = cfg.LDAP.Filter
-  kv["ldap.username_attribute"] = cfg.LDAP.UsernameAttribute
-  kv["ldap.group_search_mode"] = cfg.LDAP.GroupSearchMode
-  kv["ldap.group_base_dn"] = cfg.LDAP.GroupBaseDN
-  kv["ldap.group_filter"] = cfg.LDAP.GroupFilter
-  kv["ldap.group_member_attribute"] = cfg.LDAP.GroupMemberAttribute
-  kv["ldap.whitelist_enabled"] = strconv.FormatBool(cfg.LDAP.WhitelistEnabled)
-  kv["ldap.sync_interval"] = cfg.LDAP.SyncInterval
-  kv["oidc.issuer_url"] = cfg.OIDC.IssuerURL
-  kv["oidc.client_id"] = cfg.OIDC.ClientID
-  kv["oidc.client_secret"] = cfg.OIDC.ClientSecret
-  kv["oidc.redirect_url"] = cfg.OIDC.RedirectURL
-  kv["oidc.scopes"] = cfg.OIDC.Scopes
-  kv["oidc.username_claim"] = cfg.OIDC.UsernameClaim
-  kv["oidc.groups_claim"] = cfg.OIDC.GroupsClaim
-  kv["oidc.whitelist_enabled"] = strconv.FormatBool(cfg.OIDC.WhitelistEnabled)
-  kv["oidc.sync_interval"] = cfg.OIDC.SyncInterval
-  kv["users_root"] = cfg.UsersRoot
-  kv["archive_root"] = cfg.ArchiveRoot
-  kv["web.listen"] = cfg.Web.Listen
-  kv["web.auth_mode"] = cfg.Web.AuthMode
-  kv["web.log_retention"] = cfg.Web.LogRetention
-  kv["web.log_level"] = cfg.Web.LogLevel
-
-  if cfg.Web.LDAPEnabled != nil {
-    kv["web.ldap_enabled"] = strconv.FormatBool(*cfg.Web.LDAPEnabled)
-  }
-
-  // Debug 模式
-  kv["web.debug_mode"] = strconv.FormatBool(cfg.Web.DebugMode)
-
-  // TLS 配置
-  kv["web.tls.enabled"] = strconv.FormatBool(cfg.Web.TLS.Enabled)
-  kv["web.tls.cert_pem"] = cfg.Web.TLS.CertPEM
-  kv["web.tls.key_pem"] = cfg.Web.TLS.KeyPEM
-
-  // 结构化字段序列化为 JSON
-  if cfg.Security != nil {
-    b, err := json.Marshal(cfg.Security)
-    if err != nil {
-      return nil, fmt.Errorf("序列化 security 配置失败: %w", err)
-    }
-    kv["security"] = string(b)
-  }
-  // skills 即使为空值也需要保存（保留默认结构）
-  {
-    b, err := json.Marshal(cfg.Skills)
-    if err != nil {
-      return nil, fmt.Errorf("序列化 skills 配置失败: %w", err)
-    }
-    kv["skills"] = string(b)
-  }
-  return kv, nil
+// SaveToDB 将全局配置保存到数据库（委托 SaveRawToDB）
+func SaveToDB(cfg *GlobalConfig, changedBy string) error {
+  return SaveRawToDB(structToRaw(cfg), changedBy)
 }
 
-// SaveToDB 将全局配置保存到数据库
-func SaveToDB(cfg *GlobalConfig, changedBy string) error {
-  engine, err := getEngine()
-  if err != nil {
-    return fmt.Errorf("获取数据库引擎失败: %w", err)
+func structToRaw(cfg *GlobalConfig) map[string]interface{} {
+  raw := map[string]interface{}{
+    "ldap": map[string]interface{}{
+      "host": cfg.LDAP.Host, "bind_dn": cfg.LDAP.BindDN,
+      "bind_password": cfg.LDAP.BindPassword, "base_dn": cfg.LDAP.BaseDN,
+      "filter": cfg.LDAP.Filter, "username_attribute": cfg.LDAP.UsernameAttribute,
+      "group_search_mode": cfg.LDAP.GroupSearchMode, "group_base_dn": cfg.LDAP.GroupBaseDN,
+      "group_filter": cfg.LDAP.GroupFilter, "group_member_attribute": cfg.LDAP.GroupMemberAttribute,
+      "whitelist_enabled": cfg.LDAP.WhitelistEnabled, "sync_interval": cfg.LDAP.SyncInterval,
+    },
+    "oidc": map[string]interface{}{
+      "issuer_url": cfg.OIDC.IssuerURL, "client_id": cfg.OIDC.ClientID,
+      "client_secret": cfg.OIDC.ClientSecret, "redirect_url": cfg.OIDC.RedirectURL,
+      "scopes": cfg.OIDC.Scopes, "username_claim": cfg.OIDC.UsernameClaim,
+      "groups_claim": cfg.OIDC.GroupsClaim, "whitelist_enabled": cfg.OIDC.WhitelistEnabled,
+      "sync_interval": cfg.OIDC.SyncInterval,
+    },
+    "users_root": cfg.UsersRoot, "archive_root": cfg.ArchiveRoot,
+    "web": map[string]interface{}{
+      "listen": cfg.Web.Listen, "auth_mode": cfg.Web.AuthMode,
+      "log_retention": cfg.Web.LogRetention, "log_level": cfg.Web.LogLevel,
+      "debug_mode": cfg.Web.DebugMode,
+      "tls": map[string]interface{}{
+        "enabled": cfg.Web.TLS.Enabled, "cert_pem": cfg.Web.TLS.CertPEM,
+        "key_pem": cfg.Web.TLS.KeyPEM,
+      },
+    },
   }
-
-  kv, err := configToKV(cfg)
-  if err != nil {
-    return err
+  if cfg.Web.LDAPEnabled != nil {
+    raw["web"].(map[string]interface{})["ldap_enabled"] = *cfg.Web.LDAPEnabled
   }
-
-  // 事务写入
-  session := engine.NewSession()
-  defer session.Close()
-
-  if err := session.Begin(); err != nil {
-    return fmt.Errorf("开启事务失败: %w", err)
+  if cfg.Security != nil {
+    raw["security"] = cfg.Security
   }
-
-  for key, newValue := range kv {
-    // 查询当前值
-    var existing storePkg.Setting
-    has, err := session.Where("key = ?", key).Get(&existing)
-    if err != nil {
-      return fmt.Errorf("查询配置失败: %w", err)
-    }
-
-    // 值相同则跳过
-    if has && existing.Value == newValue {
-      continue
-    }
-
-    // 记录变更历史
-    if has {
-      history := &storePkg.SettingsHistory{
-        Key:       key,
-        OldValue:  existing.Value,
-        NewValue:  newValue,
-        ChangedBy: changedBy,
-      }
-      if _, err := session.Insert(history); err != nil {
-        return fmt.Errorf("写入配置历史失败: %w", err)
-      }
-    }
-
-    // 写入新值（INSERT OR REPLACE）
-    if _, err := session.Exec(
-      "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))",
-      key, newValue,
-    ); err != nil {
-      return fmt.Errorf("写入配置失败: %w", err)
-    }
-  }
-
-  if _, err := session.Exec("DELETE FROM settings WHERE key = ?", "web.password"); err != nil {
-    return fmt.Errorf("删除废弃配置失败: %w", err)
-  }
-
-  return session.Commit()
+  raw["skills"] = cfg.Skills
+  return raw
 }
 
 // LoadRawFromDB 从数据库加载配置并返回嵌套 JSON 结构（与 LoadRaw 返回格式一致）

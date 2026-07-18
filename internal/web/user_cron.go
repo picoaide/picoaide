@@ -8,7 +8,7 @@ import (
 
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/scheduler"
-  "github.com/picoaide/picoaide/internal/logger"
+  "log/slog"
 )
 
 // ============================================================
@@ -83,7 +83,7 @@ func (s *Server) handleCronCreate(c *gin.Context) {
     return
   }
 
-  logger.DebugProcess("cron_create", "user", username, "job_id", job.ID, "schedule", schedule)
+  slog.Debug("process", "event", "process", "phase", "cron_create", "user", username, "job_id", job.ID, "schedule", schedule)
   writeJSON(c, http.StatusOK, gin.H{"success": true, "job": job})
 }
 
@@ -143,7 +143,7 @@ func (s *Server) handleCronUpdate(c *gin.Context) {
     return
   }
 
-  logger.DebugProcess("cron_update", "user", username, "job_id", id)
+  slog.Debug("process", "event", "process", "phase", "cron_update", "user", username, "job_id", id)
   writeJSON(c, http.StatusOK, gin.H{"success": true, "job": existing})
 }
 
@@ -181,7 +181,7 @@ func (s *Server) handleCronDelete(c *gin.Context) {
     return
   }
 
-  logger.DebugProcess("cron_delete", "user", username, "job_id", id)
+  slog.Debug("process", "event", "process", "phase", "cron_delete", "user", username, "job_id", id)
   writeJSON(c, http.StatusOK, gin.H{"success": true})
 }
 
@@ -220,6 +220,6 @@ func (s *Server) handleCronToggle(c *gin.Context) {
     return
   }
 
-  logger.DebugProcess("cron_toggle", "user", username, "job_id", id, "enabled", existing.Enabled)
+  slog.Debug("process", "event", "process", "phase", "cron_toggle", "user", username, "job_id", id, "enabled", existing.Enabled)
   writeJSON(c, http.StatusOK, gin.H{"success": true, "enabled": existing.Enabled})
 }

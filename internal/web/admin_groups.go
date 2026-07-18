@@ -8,7 +8,6 @@ import (
   "path/filepath"
   "strconv"
   "strings"
-
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/authsource"
@@ -73,7 +72,7 @@ func (s *Server) handleAdminGroupCreate(c *gin.Context) {
   name := strings.TrimSpace(c.PostForm("name"))
   description := strings.TrimSpace(c.PostForm("description"))
   parentIDStr := strings.TrimSpace(c.PostForm("parent_id"))
-  logger.DebugRecv("POST", "/api/admin/groups/create", "group", name, "operator", s.getSessionUser(c))
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/admin/groups/create", "group", name, "operator", s.getSessionUser(c))
   if name == "" {
     writeError(c, http.StatusBadRequest, "组名不能为空")
     return
@@ -87,12 +86,12 @@ func (s *Server) handleAdminGroupCreate(c *gin.Context) {
     }
     parentID = &pid
   }
-  logger.DebugProcess("create_group", "group", name, "parent_id", parentID)
+  slog.Debug("process", "event", "process", "phase", "create_group", "group", name, "parent_id", parentID)
   if err := store.CreateGroup(name, "local", description, parentID); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
-  logger.DebugSend("POST", "/api/admin/groups/create", http.StatusOK, "group", name)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/admin/groups/create", "status", http.StatusOK, "group", name)
   writeSuccess(c, "组 "+name+" 创建成功")
 }
 
@@ -106,14 +105,14 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
   }
 
   name := strings.TrimSpace(c.PostForm("name"))
-  logger.DebugRecv("POST", "/api/admin/groups/delete", "group", name, "operator", s.getSessionUser(c))
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/admin/groups/delete", "group", name, "operator", s.getSessionUser(c))
   if name == "" {
     writeError(c, http.StatusBadRequest, "组名不能为空")
     return
   }
   gid, _ := store.GetGroupID(name)
 
-  logger.DebugProcess("delete_group", "group", name)
+  slog.Debug("process", "event", "process", "phase", "delete_group", "group", name)
   if err := store.DeleteGroup(name); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
@@ -124,7 +123,7 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
     store.RemoveGroupFromAllSharedFolders(gid)
   }
 
-  logger.DebugSend("POST", "/api/admin/groups/delete", http.StatusOK, "group", name)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/admin/groups/delete", "status", http.StatusOK, "group", name)
   writeSuccess(c, "组 "+name+" 已删除")
 }
 

@@ -3,13 +3,13 @@ package web
 import (
   "fmt"
   "log/slog"
+  "net/http"
   "sync"
   "sync/atomic"
   "time"
 
-  "github.com/picoaide/picoaide/internal/store"
-  "github.com/picoaide/picoaide/internal/logger"
-)
+  "github.com/gin-gonic/gin"
+  "github.com/picoaide/picoaide/internal/store")
 
 // ============================================================
 // 批量任务队列（支持排队）
@@ -70,7 +70,7 @@ func enqueueTask(taskType string, users []string, fn func(username string) error
     return "", fmt.Errorf("没有可操作的用户")
   }
 
-  logger.DebugProcess("enqueue_task", "type", taskType, "total", len(users), "filtered", len(filtered))
+  slog.Debug("process", "event", "process", "phase", "enqueue_task", "type", taskType, "total", len(users), "filtered", len(filtered))
 
   taskQueue.mu.Lock()
 
@@ -82,7 +82,7 @@ func enqueueTask(taskType string, users []string, fn func(username string) error
     })
     taskID := fmt.Sprintf("%s-%d", taskType, time.Now().Unix())
     slog.Info("批量任务已排队", "task_id", taskID, "total", len(filtered))
-    logger.DebugProcess("task_queued", "task_id", taskID, "type", taskType, "pending_count", len(taskQueue.pending))
+    slog.Debug("process", "event", "process", "phase", "task_queued", "task_id", taskID, "type", taskType, "pending_count", len(taskQueue.pending))
     taskQueue.mu.Unlock()
     return taskID, nil
   }
@@ -111,7 +111,7 @@ func enqueueTask(taskType string, users []string, fn func(username string) error
   }()
 
   slog.Info("批量任务已提交", "task_id", taskID, "total", len(filtered))
-  logger.DebugProcess("task_submitted", "task_id", taskID, "type", taskType, "total", len(filtered))
+  slog.Debug("process", "event", "process", "phase", "task_submitted", "task_id", taskID, "type", taskType, "total", len(filtered))
   return taskID, nil
 }
 
@@ -123,15 +123,15 @@ func processQueue(fn func(username string) error) {
       break
     }
 
-    logger.DebugProcess("task_execute", "username", item.Username)
+    slog.Debug("process", "event", "process", "phase", "task_execute", "username", item.Username)
     taskErr := item.Fn(item.Username)
     if taskErr != nil {
       atomic.AddInt32(&taskQueue.failed, 1)
       slog.Error("任务执行失败", "username", item.Username, "error", taskErr)
-      logger.DebugProcess("task_failed", "username", item.Username, "error", taskErr.Error())
+      slog.Debug("process", "event", "process", "phase", "task_failed", "username", item.Username, "error", taskErr.Error())
     } else {
       atomic.AddInt32(&taskQueue.done, 1)
-      logger.DebugProcess("task_succeeded", "username", item.Username)
+      slog.Debug("process", "event", "process", "phase", "task_succeeded", "username", item.Username)
     }
 
     done := atomic.LoadInt32(&taskQueue.done)
@@ -165,7 +165,7 @@ func processQueue(fn func(username string) error) {
     taskQueue.status.Message = fmt.Sprintf("完成：%d 成功，%d 失败", done, failed)
     taskQueue.status.Pending = len(taskQueue.pending)
   }
-  logger.DebugProcess("task_batch_complete", "done", atomic.LoadInt32(&taskQueue.done), "failed", atomic.LoadInt32(&taskQueue.failed))
+  slog.Debug("process", "event", "process", "phase", "task_batch_complete", "done", atomic.LoadInt32(&taskQueue.done), "failed", atomic.LoadInt32(&taskQueue.failed))
 
   if len(taskQueue.pending) > 0 {
     next := taskQueue.pending[0]
@@ -186,7 +186,7 @@ func processQueue(fn func(username string) error) {
     }
     taskQueue.mu.Unlock()
 
-    logger.DebugProcess("process_next_queued_task", "task_id", taskQueue.status.ID, "type", next.taskType, "total", len(next.users))
+    slog.Debug("process", "event", "process", "phase", "process_next_queued_task", "task_id", taskQueue.status.ID, "type", next.taskType, "total", len(next.users))
     go processQueue(next.fn)
     go func() {
       for _, u := range next.users {
@@ -198,6 +198,19 @@ func processQueue(fn func(username string) error) {
 
   taskQueue.mu.Unlock()
   slog.Info("批量任务完成", "done", taskQueue.done, "failed", taskQueue.failed)
+}
+
+// handleAdminTaskStatus 返回当前任务队列状态
+func (s *Server) handleAdminTaskStatus(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
+    return
+  }
+  if c.Request.Method != "GET" {
+    writeError(c, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+    return
+  }
+  status := getTaskStatus()
+  writeJSON(c, http.StatusOK, status)
 }
 
 func getTaskStatus() *TaskStatus {

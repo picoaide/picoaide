@@ -9,6 +9,7 @@ import (
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/authsource"
+  "github.com/picoaide/picoaide/internal/ldap"
   "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
 )
@@ -39,7 +40,7 @@ func (s *Server) handleAdminAuthTestLDAP(c *gin.Context) {
     return
   }
 
-  users, err := authsource.LDAPTestConnection(host, bindDN, bindPassword, baseDN, filter, usernameAttr)
+  users, err := ldap.TestConnection(host, bindDN, bindPassword, baseDN, filter, usernameAttr)
   if err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
@@ -47,21 +48,21 @@ func (s *Server) handleAdminAuthTestLDAP(c *gin.Context) {
 
   // 测试组查询（失败不影响用户测试结果）
   var groupError string
-  groups, gerr := authsource.LDAPTestGroups(host, bindDN, bindPassword, baseDN, groupSearchMode, groupBaseDN, groupFilter, groupMemberAttr, usernameAttr)
+  groups, gerr := ldap.TestGroups(host, bindDN, bindPassword, baseDN, groupSearchMode, groupBaseDN, groupFilter, groupMemberAttr, usernameAttr)
   if gerr != nil {
     groupError = gerr.Error()
   }
   if groups == nil {
-    groups = []authsource.GroupPreview{}
+    groups = []ldap.GroupPreview{}
   }
 
   writeJSON(c, http.StatusOK, struct {
-    Success    bool                      `json:"success"`
-    Message    string                    `json:"message"`
-    UserCount  int                       `json:"user_count"`
-    Users      []string                  `json:"users"`
-    Groups     []authsource.GroupPreview `json:"groups"`
-    GroupError string                    `json:"group_error"`
+    Success    bool              `json:"success"`
+    Message    string            `json:"message"`
+    UserCount  int               `json:"user_count"`
+    Users      []string          `json:"users"`
+    Groups     []ldap.GroupPreview `json:"groups"`
+    GroupError string            `json:"group_error"`
   }{true, fmt.Sprintf("连接成功，找到 %d 个用户", len(users)), len(users), users, groups, groupError})
 }
 

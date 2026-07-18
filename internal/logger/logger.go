@@ -233,35 +233,4 @@ func Audit(action string, args ...any) {
   slog.Info("audit", allArgs...)
 }
 
-// Debug 记录调试日志（仅在 debug 模式下有意义，会同时写入 debug.log）
-func Debug(msg string, args ...any) {
-  slog.Debug(msg, args...)
-}
 
-// DebugOp 记录操作调试日志，自动添加 "op" 标签标识操作类型
-func DebugOp(operation string, args ...any) {
-  allArgs := []any{"op", operation}
-  allArgs = append(allArgs, args...)
-  slog.Debug("operation", allArgs...)
-}
-
-// DebugRecv 记录接收到的请求调试日志
-func DebugRecv(method, path string, args ...any) {
-  allArgs := []any{"event", "recv", "method", method, "path", path}
-  allArgs = append(allArgs, args...)
-  slog.Debug("request", allArgs...)
-}
-
-// DebugSend 记录发送响应调试日志
-func DebugSend(method, path string, status int, args ...any) {
-  allArgs := []any{"event", "send", "method", method, "path", path, "status", status}
-  allArgs = append(allArgs, args...)
-  slog.Debug("response", allArgs...)
-}
-
-// DebugProcess 记录处理过程中的调试日志
-func DebugProcess(phase string, args ...any) {
-  allArgs := []any{"event", "process", "phase", phase}
-  allArgs = append(allArgs, args...)
-  slog.Debug("process", allArgs...)
-}

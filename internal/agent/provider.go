@@ -1,19 +1,20 @@
 package agent
 
 import (
-  "bytes"
-  "context"
-  "encoding/json"
-  "fmt"
-  "io"
-  "log/slog"
-  "net/http"
-  "strings"
-  "time"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
 
-  "github.com/openai/openai-go/v3"
-  "github.com/openai/openai-go/v3/option"
-  "github.com/openai/openai-go/v3/shared"
+	"github.com/avast/retry-go/v4"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/shared"
 )
 
 // reasoningEvent 发出推理/思考内容增量事件
@@ -98,30 +99,16 @@ func isRetryable(err error) bool {
 // retryStream 包装流式 LLM 调用，自动重试可恢复的网络和服务端错误。
 // 不重试：4xx(除429)、context overflow、context canceled/deadline exceeded。
 func retryStream(ctx context.Context, name string, fn func(context.Context) error) error {
-  var lastErr error
-  policy := DefaultRetryPolicy()
-  for attempt := 0; attempt < policy.MaxAttempts; attempt++ {
-    if ctx.Err() != nil {
-      return ctx.Err()
-    }
-    if attempt > 0 {
-      slog.Debug("provider.retry", "name", name, "attempt", attempt+1, "max", policy.MaxAttempts, "delay_ms", policy.Delay(attempt-1).Milliseconds())
-      select {
-      case <-time.After(policy.Delay(attempt - 1)):
-      case <-ctx.Done():
-        return ctx.Err()
-      }
-    }
-    err := fn(ctx)
-    if err == nil {
-      return nil
-    }
-    if !isRetryable(err) {
-      return err
-    }
-    lastErr = err
-  }
-  return fmt.Errorf("%s 重试 %d 次后仍然失败: %w", name, policy.MaxAttempts, lastErr)
+	return retry.Do(
+		func() error { return fn(ctx) },
+		retry.Attempts(3),
+		retry.Delay(2*time.Second),
+		retry.MaxDelay(30*time.Second),
+		retry.DelayType(retry.BackOffDelay),
+		retry.RetryIf(func(err error) bool { return isRetryable(err) }),
+		retry.Context(ctx),
+		retry.LastErrorOnly(true),
+	)
 }
 
 // ============================================================

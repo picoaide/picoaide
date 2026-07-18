@@ -10,6 +10,7 @@ import (
   "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
+  "log/slog"
 )
 
 // ============================================================
@@ -116,7 +117,7 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
   }
 
   username := c.PostForm("username")
-  logger.DebugRecv("POST", "/api/admin/users/create", "username", username, "operator", s.getSessionUser(c))
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/admin/users/create", "username", username, "operator", s.getSessionUser(c))
   if err := user.ValidateUsername(username); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
@@ -127,13 +128,13 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
   }
 
   password := store.GenerateRandomPassword(12)
-  logger.DebugProcess("create_user", "username", username)
+  slog.Debug("process", "event", "process", "phase", "create_user", "username", username)
   if err := store.CreateUser(username, password, "user"); err != nil {
     writeError(c, http.StatusInternalServerError, "创建用户失败: "+err.Error())
     return
   }
 
-  logger.DebugProcess("init_user", "username", username)
+  slog.Debug("process", "event", "process", "phase", "init_user", "username", username)
   if err := s.initializeUser(username); err != nil {
     // 回滚：删除已创建的用户记录
     store.DeleteUser(username)
@@ -142,7 +143,7 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
   }
 
   logger.Audit("user.create", "username", username, "operator", s.getSessionUser(c))
-  logger.DebugSend("POST", "/api/admin/users/create", http.StatusOK, "username", username)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/admin/users/create", "status", http.StatusOK, "username", username)
   writeJSON(c, http.StatusOK, struct {
     Success  bool   `json:"success"`
     Message  string `json:"message"`
@@ -262,7 +263,7 @@ func (s *Server) handleAdminUserDelete(c *gin.Context) {
   }
 
   username := c.PostForm("username")
-  logger.DebugRecv("POST", "/api/admin/users/delete", "username", username, "operator", s.getSessionUser(c))
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/admin/users/delete", "username", username, "operator", s.getSessionUser(c))
   if username == "" {
     writeError(c, http.StatusBadRequest, "用户名不能为空")
     return
@@ -277,14 +278,14 @@ func (s *Server) handleAdminUserDelete(c *gin.Context) {
   }
 
   // 归档用户目录
-  logger.DebugProcess("archive_user", "username", username)
+  slog.Debug("process", "event", "process", "phase", "archive_user", "username", username)
   if err := user.ArchiveUser(s.loadConfig(), username); err != nil {
     writeError(c, http.StatusInternalServerError, "归档用户目录失败: "+err.Error())
     return
   }
 
   // 删除本地用户记录
-  logger.DebugProcess("delete_user_record", "username", username)
+  slog.Debug("process", "event", "process", "phase", "delete_user_record", "username", username)
   if err := store.DeleteUser(username); err != nil {
     writeError(c, http.StatusInternalServerError, err.Error())
     return
@@ -294,6 +295,6 @@ func (s *Server) handleAdminUserDelete(c *gin.Context) {
   store.DeleteSharedFolderMountsByUser(username)
 
   logger.Audit("user.delete", "username", username, "operator", s.getSessionUser(c))
-  logger.DebugSend("POST", "/api/admin/users/delete", http.StatusOK, "username", username)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/admin/users/delete", "status", http.StatusOK, "username", username)
   writeSuccess(c, "用户 "+username+" 已删除并归档")
 }

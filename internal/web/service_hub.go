@@ -5,15 +5,18 @@ import (
   "encoding/json"
   "fmt"
   "log/slog"
+  "net"
   "sync"
   "time"
-
-  "github.com/gorilla/websocket"
-
-  "github.com/picoaide/picoaide/internal/logger"
-)
+  "github.com/gorilla/websocket")
 
 const commandTimeout = 30 * time.Second
+
+// browserSvc 浏览器服务的连接管理器
+var browserSvc = NewServiceHub("browser")
+
+// computerSvc 桌面控制服务的连接管理器
+var computerSvc = NewServiceHub("computer")
 
 // PendingCall 跟踪一个等待代理响应的工具调用
 type PendingCall struct {
@@ -56,7 +59,7 @@ func (h *ServiceHub) Register(username string, ws *websocket.Conn, extra interfa
 
   // 踢掉旧连接
   if old, ok := h.conns[username]; ok {
-    logger.DebugProcess("kick_old_connection", "service", h.name, "username", username)
+    slog.Debug("process", "event", "process", "phase", "kick_old_connection", "service", h.name, "username", username)
     old.Close()
   }
 
@@ -69,10 +72,9 @@ func (h *ServiceHub) Register(username string, ws *websocket.Conn, extra interfa
   h.conns[username] = conn
 
   go conn.readPump(h)
-  go conn.keepAlive()
 
   slog.Info("代理注册", "service", h.name, "username", username)
-  logger.DebugProcess("agent_registered", "service", h.name, "username", username)
+  slog.Debug("process", "event", "process", "phase", "agent_registered", "service", h.name, "username", username)
   return conn
 }
 
@@ -83,7 +85,7 @@ func (h *ServiceHub) Unregister(conn *AgentConn) {
   if current, ok := h.conns[conn.username]; ok && current == conn {
     delete(h.conns, conn.username)
     slog.Info("代理注销", "service", h.name, "username", conn.username)
-    logger.DebugProcess("agent_unregistered", "service", h.name, "username", conn.username)
+    slog.Debug("process", "event", "process", "phase", "agent_unregistered", "service", h.name, "username", conn.username)
   }
 }
 
@@ -140,7 +142,7 @@ func (c *AgentConn) SendCommand(ctx context.Context, tool string, params map[str
     return nil, fmt.Errorf("序列化命令失败: %w", err)
   }
 
-  logger.DebugProcess("send_command", "service", c.serviceName, "username", c.username, "tool", tool, "cmd_id", id)
+  slog.Debug("process", "event", "process", "phase", "send_command", "service", c.serviceName, "username", c.username, "tool", tool, "cmd_id", id)
 
   resultCh := make(chan json.RawMessage, 1)
   call := &PendingCall{resultCh: resultCh}
@@ -172,7 +174,7 @@ func (c *AgentConn) SendCommand(ctx context.Context, tool string, params map[str
     if !ok {
       return nil, fmt.Errorf("工具调用超时 (%v)", commandTimeout)
     }
-    logger.DebugProcess("command_response", "service", c.serviceName, "username", c.username, "tool", tool, "cmd_id", id)
+    slog.Debug("process", "event", "process", "phase", "command_response", "service", c.serviceName, "username", c.username, "tool", tool, "cmd_id", id)
     return result, nil
   case <-ctx.Done():
     call.timer.Stop()
@@ -183,7 +185,7 @@ func (c *AgentConn) SendCommand(ctx context.Context, tool string, params map[str
   }
 }
 
-// readPump 从代理 WebSocket 读取消息并分发到等待中的调用
+// readPump 从代理 WebSocket 读取消息并分发到等待中的调用，同时处理 keep-alive ping
 func (c *AgentConn) readPump(hub *ServiceHub) {
   defer func() {
     close(c.done)
@@ -192,8 +194,18 @@ func (c *AgentConn) readPump(hub *ServiceHub) {
   }()
 
   for {
+    c.ws.SetReadDeadline(time.Now().Add(35 * time.Second))
     _, data, err := c.ws.ReadMessage()
     if err != nil {
+      if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+        c.mu.Lock()
+        perr := c.ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+        c.mu.Unlock()
+        if perr != nil {
+          return
+        }
+        continue
+      }
       if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
         slog.Error("代理连接读取错误", "service", hub.name, "username", c.username, "error", err)
       }
@@ -232,21 +244,4 @@ func (c *AgentConn) readPump(hub *ServiceHub) {
   }
 }
 
-// keepAlive 每 30 秒发送一次 ping
-func (c *AgentConn) keepAlive() {
-  ticker := time.NewTicker(30 * time.Second)
-  defer ticker.Stop()
-  for {
-    select {
-    case <-ticker.C:
-      c.mu.Lock()
-      err := c.ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
-      c.mu.Unlock()
-      if err != nil {
-        return
-      }
-    case <-c.done:
-      return
-    }
-  }
-}
+

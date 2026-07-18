@@ -3,8 +3,10 @@ PROGRAM_VERSION := $(patsubst v%,%,$(PICOAIDE_VERSION))
 SERVER_VERSION_LDFLAGS := -X github.com/picoaide/picoaide/internal/config.Version=$(PROGRAM_VERSION)
 
 BUNDLE_DIR := internal/rootfs/bundle
+UI_SRC := web/ui
+UI_DIST := internal/web/dist
 
-.PHONY: test lint format check clean validate-release-version build release
+.PHONY: test lint format check clean validate-release-version build build-ui release
 
 test:
 	go test ./internal/... -v -count=1
@@ -19,24 +21,31 @@ check: format lint test
 
 clean:
 	rm -f picoaide picoagent
-	rm -rf dist/
+	rm -rf dist/ $(UI_DIST)
 
 validate-release-version:
 	@case "$(PROGRAM_VERSION)" in \
 		""|*[!0-9a-zA-Z._+-]*|.*|*.) \
 			echo "发布版本号格式无效，例如: make release PICOAIDE_VERSION=v1.0.0 或 v1.0.0-rc.1"; \
-			exit 1; \
+			exit 1 \
 			;; \
 		*..*) \
 			echo "发布版本号格式无效，例如: make release PICOAIDE_VERSION=v1.0.0 或 v1.0.0-rc.1"; \
-			exit 1; \
+			exit 1 \
 			;; \
 	esac
 
 # ============================================================
-# build: 编译 picoagent + Alpine rootfs + 嵌入 picoagent → 编译 picoaide
+# build-ui: 编译前端
 # ============================================================
-build:
+build-ui:
+	@echo "  编译前端..."
+	@cd $(UI_SRC) && npm install --silent && npm run build
+
+# ============================================================
+# build: 编译前端 + picoagent + Alpine rootfs + picoaide
+# ============================================================
+build: build-ui
 	@mkdir -p $(BUNDLE_DIR)
 	@ARCH="$$(uname -m)"; \
 	case "$$ARCH" in \
@@ -55,7 +64,7 @@ build:
 # ============================================================
 # release: 交叉编译多架构二进制（版本号注入）
 # ============================================================
-release: validate-release-version
+release: validate-release-version build-ui
 	@echo "构建发布版本 $(PROGRAM_VERSION)..."
 	@mkdir -p dist $(BUNDLE_DIR)
 	@for pair in "amd64" "arm64"; do \

@@ -1,6 +1,7 @@
 package web
 
 import (
+  "context"
   "crypto/rand"
   "encoding/hex"
   "encoding/json"
@@ -11,7 +12,6 @@ import (
   "strings"
   "sync"
   "time"
-
   "github.com/gin-gonic/gin"
 )
 
@@ -325,12 +325,12 @@ func (s *Server) handleMCPToolCall(c *gin.Context, id json.Number, params json.R
     }
     // 转发到浏览器 Hub
     if strings.HasPrefix(p.Name, "browser_") {
-      s.forwardToHub(c, id, p.Name, p.Arguments, username, browserSvc, "浏览器")
+      s.callHub(c.Writer, id, p.Name, p.Arguments, username, browserSvc, "浏览器")
       return
     }
     // 转发到桌面代理 Hub
     if strings.HasPrefix(p.Name, "computer_") {
-      s.forwardToHub(c, id, p.Name, p.Arguments, username, computerSvc, "桌面代理")
+      s.callHub(c.Writer, id, p.Name, p.Arguments, username, computerSvc, "桌面代理")
       return
     }
     // 都没找到，返回错误
@@ -343,75 +343,25 @@ func (s *Server) handleMCPToolCall(c *gin.Context, id json.Number, params json.R
     return
   }
 
-  // 查找代理连接
-  conn, ok := info.Hub.GetConnection(username)
-  if !ok {
-    writeMCPResult(c.Writer, id, map[string]interface{}{
-      "content": []map[string]interface{}{
-        {"type": "text", "text": info.ServerName + " 代理未连接"},
-      },
-      "isError": true,
-    })
-    return
-  }
-
-  // 发送命令到代理并等待响应
-  result, err := conn.SendCommand(c.Request.Context(), p.Name, p.Arguments)
-  if err != nil {
-    writeMCPResult(c.Writer, id, map[string]interface{}{
-      "content": []map[string]interface{}{
-        {"type": "text", "text": "执行失败: " + err.Error()},
-      },
-      "isError": true,
-    })
-    return
-  }
-
-  // 解析代理返回的结果
-  var extResp struct {
-    Result interface{} `json:"result"`
-    Error  interface{} `json:"error"`
-  }
-  json.Unmarshal(result, &extResp)
-
-  if extResp.Error != nil {
-    errMsg := fmt.Sprintf("%v", extResp.Error)
-    if m, ok := extResp.Error.(map[string]interface{}); ok {
-      if msg, ok := m["message"].(string); ok {
-        errMsg = msg
-      }
-    }
-    writeMCPResult(c.Writer, id, map[string]interface{}{
-      "content": []map[string]interface{}{
-        {"type": "text", "text": errMsg},
-      },
-      "isError": true,
-    })
-    return
-  }
-
-  writeMCPResult(c.Writer, id, formatMCPResult(extResp.Result))
+  // 通过 Hub 代理执行工具调用
+  s.callHub(c.Writer, id, p.Name, p.Arguments, username, info.Hub, info.ServerName)
 }
 
-// forwardToHub 将 agent 服务收到的工具调用转发到对应 Hub（浏览器/桌面代理）
-func (s *Server) forwardToHub(c *gin.Context, id json.Number, toolName string, args map[string]interface{}, username string, hub *ServiceHub, displayName string) {
+// callHub 通过 Hub 代理执行工具调用并写入 MCP 响应
+func (s *Server) callHub(w gin.ResponseWriter, id json.Number, toolName string, args map[string]interface{}, username string, hub *ServiceHub, displayName string) {
   conn, ok := hub.GetConnection(username)
   if !ok {
-    writeMCPResult(c.Writer, id, map[string]interface{}{
-      "content": []map[string]interface{}{
-        {"type": "text", "text": displayName + " 代理未连接"},
-      },
+    writeMCPResult(w, id, map[string]interface{}{
+      "content": []map[string]interface{}{{"type": "text", "text": displayName + " 代理未连接"}},
       "isError": true,
     })
     return
   }
 
-  result, err := conn.SendCommand(c.Request.Context(), toolName, args)
+  result, err := conn.SendCommand(context.Background(), toolName, args)
   if err != nil {
-    writeMCPResult(c.Writer, id, map[string]interface{}{
-      "content": []map[string]interface{}{
-        {"type": "text", "text": "执行失败: " + err.Error()},
-      },
+    writeMCPResult(w, id, map[string]interface{}{
+      "content": []map[string]interface{}{{"type": "text", "text": "执行失败: " + err.Error()}},
       "isError": true,
     })
     return
@@ -430,14 +380,12 @@ func (s *Server) forwardToHub(c *gin.Context, id json.Number, toolName string, a
         errMsg = msg
       }
     }
-    writeMCPResult(c.Writer, id, map[string]interface{}{
-      "content": []map[string]interface{}{
-        {"type": "text", "text": errMsg},
-      },
+    writeMCPResult(w, id, map[string]interface{}{
+      "content": []map[string]interface{}{{"type": "text", "text": errMsg}},
       "isError": true,
     })
     return
   }
 
-  writeMCPResult(c.Writer, id, formatMCPResult(extResp.Result))
+  writeMCPResult(w, id, formatMCPResult(extResp.Result))
 }

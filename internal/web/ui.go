@@ -4,18 +4,16 @@ import (
   "embed"
   "io/fs"
   "net/http"
-  "strings"
-
   "github.com/gin-gonic/gin"
 
   "github.com/picoaide/picoaide/internal/store"
 )
 
-//go:embed ui/*
+//go:embed all:dist
 var webUI embed.FS
 
 func (s *Server) registerUIRoutes(r *gin.Engine) {
-  uiFS, err := fs.Sub(webUI, "ui")
+  uiFS, err := fs.Sub(webUI, "dist")
   if err != nil {
     panic(err)
   }
@@ -24,8 +22,8 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
   serveFile := func(c *gin.Context) {
     fileServer.ServeHTTP(c.Writer, c.Request)
   }
-  serveHTML := func(c *gin.Context, name string) {
-    data, err := fs.ReadFile(uiFS, name)
+  serveSPA := func(c *gin.Context) {
+    data, err := fs.ReadFile(uiFS, "index.html")
     if err != nil {
       c.String(http.StatusNotFound, "404 page not found")
       return
@@ -57,7 +55,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
       return false
     }
     if !store.IsSuperadmin(username) {
-      c.Redirect(http.StatusFound, "/user")
+      c.Redirect(http.StatusFound, "/user/chat")
       return false
     }
     return true
@@ -67,98 +65,59 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
     c.Redirect(http.StatusFound, "/login")
   })
   r.GET("/login", func(c *gin.Context) {
-    serveHTML(c, "login.html")
-  })
-  r.GET("/initializing", func(c *gin.Context) {
-    if !requireManageUser(c) {
-      return
-    }
-    serveHTML(c, "initializing.html")
+    serveSPA(c)
   })
 
-  manageSections := []string{"welcome", "chat", "skills", "channels", "email", "files", "teamspace", "authorization", "password", "cron"}
-
-  // 新路径 /user/*
-  r.GET("/user", func(c *gin.Context) {
-    c.Redirect(http.StatusMovedPermanently, "/user/welcome")
-  })
-  for _, section := range manageSections {
-    sectionPath := "/user/" + section
-    r.GET(sectionPath, func(c *gin.Context) {
+  // 用户页面
+  userPaths := []string{
+    "/user", "/user/chat", "/user/skills", "/user/files", "/user/settings",
+    "/user/channels", "/user/email", "/user/teamspace", "/user/authorization",
+    "/user/password", "/user/cron",
+  }
+  for _, path := range userPaths {
+    r.GET(path, func(c *gin.Context) {
       if !requireManageUser(c) {
         return
       }
-      serveHTML(c, "manage/index.html")
+      serveSPA(c)
     })
   }
 
-  // 旧路径 /manage/* → 301 重定向到 /user/*（向后兼容）
+  // 旧路径兼容
   r.GET("/manage", func(c *gin.Context) {
-    c.Redirect(http.StatusMovedPermanently, "/user")
+    c.Redirect(http.StatusMovedPermanently, "/user/chat")
   })
-  for _, section := range manageSections {
-    r.GET("/manage/"+section, func(c *gin.Context) {
-      c.Redirect(http.StatusMovedPermanently, "/user/"+section)
-    })
+  r.GET("/manage/*path", func(c *gin.Context) {
+    c.Redirect(http.StatusMovedPermanently, "/user/chat")
+  })
+
+  // 管理页面
+  adminPaths := []string{
+    "/admin", "/admin/dashboard", "/admin/users", "/admin/groups",
+    "/admin/skills", "/admin/settings", "/admin/superadmins", "/admin/channels",
+    "/admin/models", "/admin/auth", "/admin/teamspace", "/admin/password",
+    "/admin/mcp-servers", "/admin/tls",
   }
-  r.GET("/admin", func(c *gin.Context) {
-    c.Redirect(http.StatusMovedPermanently, "/admin/dashboard")
-  })
-  r.GET("/admin/", func(c *gin.Context) {
-    c.Redirect(http.StatusMovedPermanently, "/admin/dashboard")
-  })
-  adminSections := []string{"dashboard", "superadmins", "users", "groups", "channels", "models", "skills", "auth", "teamspace", "password", "mcpservers", "tls", "settings"}
-  for _, section := range adminSections {
-    sectionPath := "/admin/" + section
-    r.GET(sectionPath, func(c *gin.Context) {
+  for _, path := range adminPaths {
+    r.GET(path, func(c *gin.Context) {
       if !requireAdminUser(c) {
         return
       }
-      serveHTML(c, "admin/index.html")
+      serveSPA(c)
     })
   }
 
-  // /user/ 路径的静态文件映射到 manage/ 目录
-  staticMap := map[string]string{
-    "/user/manage.js":      "/manage/manage.js",
-    "/user/templates/":     "/manage/templates/",
-    "/user/modules/":       "/manage/modules/",
-  }
-  for prefix, mapped := range staticMap {
-    if strings.HasSuffix(prefix, "/") {
-      r.GET(prefix+"*filepath", func(c *gin.Context) {
-        c.Request.URL.Path = "/" + strings.TrimPrefix(mapped, "/") + c.Param("filepath")
-        serveFile(c)
-      })
-    } else {
-      r.GET(prefix, func(c *gin.Context) {
-        c.Request.URL.Path = mapped
-        serveFile(c)
-      })
-    }
-  }
+  // 静态资源
+  r.GET("/assets/*filepath", func(c *gin.Context) {
+    serveFile(c)
+  })
+  r.GET("/favicon.ico", func(c *gin.Context) {
+    c.Request.URL.Path = "/favicon.svg"
+    serveFile(c)
+  })
 
-  staticPrefixes := []string{"/css/", "/js/", "/images/", "/admin/modules/", "/admin/templates/", "/manage/modules/", "/manage/templates/"}
-  for _, prefix := range staticPrefixes {
-    r.GET(prefix+"*filepath", func(c *gin.Context) {
-      cleanPath := strings.TrimPrefix(c.Request.URL.Path, "/")
-      c.Request.URL.Path = "/" + cleanPath
-      serveFile(c)
-    })
-  }
-  r.GET("/manage/manage.js", serveFile)
-  r.GET("/manage.js", serveFile)
-  r.GET("/login.js", serveFile)
-  r.GET("/initializing.js", serveFile)
-  r.GET("/admin/admin.js", serveFile)
-
-  // Web 聊天页面
+  // 旧 /chat → 301 到 /user/chat
   r.GET("/chat", func(c *gin.Context) {
-    username, ok := requireUIUser(c)
-    if !ok {
-      return
-    }
-    _ = username
-    serveHTML(c, "chat.html")
+    c.Redirect(http.StatusMovedPermanently, "/user/chat")
   })
 }

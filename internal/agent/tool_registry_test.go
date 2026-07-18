@@ -30,7 +30,7 @@ func tempWorkspace(t *testing.T) string {
 func TestWriteFileTool_Create(t *testing.T) {
   dir := tempWorkspace(t)
   path := filepath.Join(dir, "test.txt")
-  tool := &WriteFileTool{}
+  tool := NewWriteFileTool()
 
   args, _ := json.Marshal(map[string]interface{}{
     "path":    path,
@@ -56,7 +56,7 @@ func TestWriteFileTool_OverwriteDefault(t *testing.T) {
   path := filepath.Join(dir, "existing.txt")
   os.WriteFile(filepath.Clean(path), []byte("original"), 0644)
 
-  tool := &WriteFileTool{}
+  tool := NewWriteFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path":    path,
     "content": "new content",
@@ -84,7 +84,7 @@ func TestWriteFileTool_OverwriteExplicit(t *testing.T) {
   path := filepath.Join(dir, "existing.txt")
   os.WriteFile(filepath.Clean(path), []byte("original"), 0644)
 
-  tool := &WriteFileTool{}
+  tool := NewWriteFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path":      path,
     "content":   "new content",
@@ -106,7 +106,7 @@ func TestWriteFileTool_OverwriteExplicit(t *testing.T) {
 }
 
 func TestWriteFileTool_EmptyPath(t *testing.T) {
-  tool := &WriteFileTool{}
+  tool := NewWriteFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path":    "",
     "content": "test",
@@ -130,7 +130,7 @@ func TestEditFileTool_Replace(t *testing.T) {
   path := filepath.Join(dir, "test.txt")
   os.WriteFile(filepath.Clean(path), []byte("hello world foo"), 0644)
 
-  tool := &EditFileTool{}
+  tool := NewEditFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path":     path,
     "old_text": "world",
@@ -156,7 +156,7 @@ func TestEditFileTool_NotFound(t *testing.T) {
   path := filepath.Join(dir, "test.txt")
   os.WriteFile(filepath.Clean(path), []byte("hello world"), 0644)
 
-  tool := &EditFileTool{}
+  tool := NewEditFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path":     path,
     "old_text": "nonexistent",
@@ -180,7 +180,7 @@ func TestEditFileTool_Ambiguous(t *testing.T) {
   path := filepath.Join(dir, "test.txt")
   os.WriteFile(filepath.Clean(path), []byte("foo foo foo"), 0644)
 
-  tool := &EditFileTool{}
+  tool := NewEditFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path":     path,
     "old_text": "foo",
@@ -200,7 +200,7 @@ func TestEditFileTool_Ambiguous(t *testing.T) {
 }
 
 func TestEditFileTool_FileNotExist(t *testing.T) {
-  tool := &EditFileTool{}
+  tool := NewEditFileTool()
   dir := tempWorkspace(t)
   args, _ := json.Marshal(map[string]interface{}{
     "path":     filepath.Join(dir, "nonexistent", "path.txt"),
@@ -226,7 +226,7 @@ func TestAppendFileTool_Append(t *testing.T) {
   path := filepath.Join(dir, "test.txt")
   os.WriteFile(filepath.Clean(path), []byte("hello"), 0644)
 
-  tool := &AppendFileTool{}
+  tool := NewAppendFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path":    path,
     "content": " world",
@@ -250,7 +250,7 @@ func TestAppendFileTool_CreateNew(t *testing.T) {
   dir := tempWorkspace(t)
   path := filepath.Join(dir, "new.txt")
 
-  tool := &AppendFileTool{}
+  tool := NewAppendFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path":    path,
     "content": "fresh",
@@ -280,7 +280,7 @@ func TestListDirTool_Basic(t *testing.T) {
   os.WriteFile(filepath.Join(dir, "b.txt"), []byte("bb"), 0644)
   os.MkdirAll(filepath.Join(dir, "sub"), 0755)
 
-  tool := &ListDirTool{}
+  tool := NewListDirTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path": dir,
   })
@@ -305,7 +305,7 @@ func TestListDirTool_Basic(t *testing.T) {
 }
 
 func TestListDirTool_DefaultPath(t *testing.T) {
-  tool := &ListDirTool{}
+  tool := NewListDirTool()
   args, _ := json.Marshal(map[string]interface{}{})
 
   result, err := tool.Execute(context.Background(), args)
@@ -319,7 +319,7 @@ func TestListDirTool_DefaultPath(t *testing.T) {
 }
 
 func TestListDirTool_NotExist(t *testing.T) {
-  tool := &ListDirTool{}
+  tool := NewListDirTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path": "/nonexistent_dir_12345",
   })
@@ -346,7 +346,7 @@ func TestGlobTool_Basic(t *testing.T) {
   os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0644)
   os.WriteFile(filepath.Join(dir, "c.go"), []byte("c"), 0644)
 
-  tool := &GlobTool{}
+  tool := NewGlobTool()
   args, _ := json.Marshal(map[string]interface{}{
     "pattern": filepath.Join(dir, "*.txt"),
   })
@@ -368,7 +368,7 @@ func TestGlobTool_Basic(t *testing.T) {
 func TestGlobTool_NoMatches(t *testing.T) {
   dir := t.TempDir()
 
-  tool := &GlobTool{}
+  tool := NewGlobTool()
   args, _ := json.Marshal(map[string]interface{}{
     "pattern": filepath.Join(dir, "*.xyz"),
   })
@@ -394,7 +394,7 @@ func TestDeleteFileTool_DeleteFile(t *testing.T) {
   path := filepath.Join(dir, "test.txt")
   os.WriteFile(filepath.Clean(path), []byte("hello"), 0644)
 
-  tool := &DeleteFileTool{}
+  tool := NewDeleteFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path": path,
   })
@@ -418,7 +418,7 @@ func TestDeleteFileTool_DeleteDir(t *testing.T) {
   os.MkdirAll(subdir, 0755)
   os.WriteFile(filepath.Join(subdir, "nested.txt"), []byte("nested"), 0644)
 
-  tool := &DeleteFileTool{}
+  tool := NewDeleteFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path": subdir,
   })
@@ -438,7 +438,7 @@ func TestDeleteFileTool_DeleteDir(t *testing.T) {
 
 func TestDeleteFileTool_NotExist(t *testing.T) {
   dir := tempWorkspace(t)
-  tool := &DeleteFileTool{}
+  tool := NewDeleteFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path": filepath.Join(dir, "nonexistent_file_xyz"),
   })
@@ -453,7 +453,7 @@ func TestDeleteFileTool_NotExist(t *testing.T) {
 }
 
 func TestDeleteFileTool_EmptyPath(t *testing.T) {
-  tool := &DeleteFileTool{}
+  tool := NewDeleteFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path": "",
   })
@@ -468,7 +468,7 @@ func TestDeleteFileTool_EmptyPath(t *testing.T) {
 }
 
 func TestCommandTool_ErrorReturnsSuccessFalse(t *testing.T) {
-  tool := &CommandTool{Timeout: time.Second}
+  tool := NewCommandTool(time.Second)
   result, err := tool.Execute(context.Background(), json.RawMessage(`{"command": "exit 1"}`))
   if err != nil {
     t.Fatal(err)
@@ -480,7 +480,7 @@ func TestCommandTool_ErrorReturnsSuccessFalse(t *testing.T) {
 
 func TestReadFileTool_NotFoundReturnsSuccessFalse(t *testing.T) {
   dir := tempWorkspace(t)
-  tool := &ReadFileTool{}
+  tool := NewReadFileTool()
   args, _ := json.Marshal(map[string]string{"path": filepath.Join(dir, "nonexistent_file_xyz")})
   result, err := tool.Execute(context.Background(), args)
   if err != nil {
@@ -499,7 +499,7 @@ func TestWriteFileTool_DirCreationFailureReturnsSuccessFalse(t *testing.T) {
   os.WriteFile(blockPath, []byte("block"), 0644)
   blockedPath := filepath.Join(blockPath, "subdir", "file.txt")
 
-  tool := &WriteFileTool{}
+  tool := NewWriteFileTool()
   args, _ := json.Marshal(map[string]interface{}{
     "path":    blockedPath,
     "content": "test",

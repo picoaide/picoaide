@@ -51,6 +51,13 @@ website/.hugo_build.lock
 # CMake 构建目录
 /build/
 
+# 前端编译产物
+/internal/web/dist/
+
+# 前端依赖
+web/ui/node_modules/
+node_modules/
+
 # 嵌入的 bundle（由 CMake 构建时复制）
 /internal/rootfs/bundle/
 
@@ -59,4 +66,3 @@ website/.hugo_build.lock
 picoaide-extension/dist/
 picoaide-extension/node_modules/
 images/
--

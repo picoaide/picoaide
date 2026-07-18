@@ -197,9 +197,48 @@ func ErrorEvent(err string) StreamEvent {
 // ============================================================
 
 type ToolDef struct {
-  Name        string                 `json:"name"`
-  Description string                 `json:"description"`
-  InputSchema map[string]interface{} `json:"inputSchema"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	InputSchema map[string]interface{} `json:"inputSchema"`
+}
+
+// ============================================================
+// ToolCallData 流式事件中的工具调用数据
+// ============================================================
+
+type ToolCallData struct {
+	ID    string          `json:"id"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+// ============================================================
+// JSON 工具函数（从 engine.go 迁移至此）
+// ============================================================
+
+func mustJSON(v interface{}) json.RawMessage {
+	data, _ := json.Marshal(v)
+	return data
+}
+
+// estimateTokens 粗略估算 token 数（英文 4 字符/token，中文 1.5 字符/token）
+func estimateTokens(sysPrompt string, msgs []LLMMessage) int {
+	total := estimateStringTokens(sysPrompt)
+	for _, m := range msgs {
+		total += estimateStringTokens(m.Content)
+	}
+	return total
+}
+
+func estimateStringTokens(s string) int {
+	var chineseCount int
+	for _, r := range s {
+		if r > '\u007f' {
+			chineseCount++
+		}
+	}
+	asciiCount := len(s) - chineseCount
+	return asciiCount/4 + chineseCount*2/3 + 1
 }
 
 

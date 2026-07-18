@@ -4,10 +4,13 @@ import (
   "fmt"
   "net/http"
   "strconv"
-
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/store"
 )
+
+// ============================================================
+// MCP 服务器管理（超管 CRUD）
+// ============================================================
 
 // ============================================================
 // MCP 服务器管理（超管 CRUD）
@@ -129,7 +132,7 @@ func (s *Server) handleAdminMCPServerCreate(c *gin.Context) {
 
   _, err = engine.Exec(
     `INSERT INTO mcp_servers (name, transport, command, args, url, env, headers, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    req.Name, req.Transport, req.Command, req.Args, req.URL, req.Env, req.Headers, boolToInt(req.Enabled),
+    req.Name, req.Transport, req.Command, req.Args, req.URL, req.Env, req.Headers, map[bool]int{true: 1, false: 0}[req.Enabled],
   )
   if err != nil {
     writeError(c, http.StatusInternalServerError, "创建失败: "+err.Error())
@@ -169,7 +172,7 @@ func (s *Server) handleAdminMCPServerUpdate(c *gin.Context) {
 
   _, err = engine.Exec(
     `UPDATE mcp_servers SET name=?, transport=?, command=?, args=?, url=?, env=?, headers=?, enabled=?, updated_at=datetime('now','localtime') WHERE id=?`,
-    req.Name, req.Transport, req.Command, req.Args, req.URL, req.Env, req.Headers, boolToInt(req.Enabled), id,
+    req.Name, req.Transport, req.Command, req.Args, req.URL, req.Env, req.Headers, map[bool]int{true: 1, false: 0}[req.Enabled], id,
   )
   if err != nil {
     writeError(c, http.StatusInternalServerError, "更新失败: "+err.Error())
@@ -354,10 +357,4 @@ func (s *Server) handleAdminMCPServersReload(c *gin.Context) {
   writeJSON(c, http.StatusOK, gin.H{"success": true, "message": "MCP 服务器已重新加载"})
 }
 
-// boolToInt 将 bool 转为 int（SQLite 无 bool 类型）
-func boolToInt(b bool) int {
-  if b {
-    return 1
-  }
-  return 0
-}
+

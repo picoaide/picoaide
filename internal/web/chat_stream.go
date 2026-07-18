@@ -16,14 +16,12 @@ import (
   "strings"
   "sync"
   "time"
-
   "github.com/gin-gonic/gin"
 
   "github.com/picoaide/picoaide/internal/agent"
   "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/config"
   "github.com/picoaide/picoaide/internal/sandbox"
-  "github.com/picoaide/picoaide/internal/logger"
   "github.com/picoaide/picoaide/internal/user"
 )
 
@@ -375,7 +373,7 @@ func (s *Server) handleChatSend(c *gin.Context) {
   }
 
   message := c.PostForm("message")
-  logger.DebugRecv("POST", "/api/user/chat/send", "username", username, "message_length", len(message))
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/user/chat/send", "username", username, "message_length", len(message))
   if message == "" {
     writeError(c, http.StatusBadRequest, "请输入消息")
     return
@@ -393,7 +391,7 @@ func (s *Server) handleChatSend(c *gin.Context) {
 
   run := s.startChatSandbox(username, message, inputJSON)
 
-  logger.DebugSend("POST", "/api/user/chat/send", http.StatusOK, "run_id", run.runID)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/user/chat/send", "status", http.StatusOK, "run_id", run.runID)
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success": true,
     "run_id":  run.runID,

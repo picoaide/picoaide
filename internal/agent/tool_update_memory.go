@@ -2,7 +2,6 @@ package agent
 
 import (
   "context"
-  "encoding/json"
   "fmt"
   "os"
   "path/filepath"
@@ -13,134 +12,84 @@ import (
 // update_memory — 主动更新长期记忆
 // ============================================================
 
-type UpdateMemoryTool struct {
-  Workspace string
-}
-
 type updateMemoryParams struct {
-  Section string            `json:"section"`
-  Action  string            `json:"action"`
-  Entries []updateEntry     `json:"entries"`
+  Section string        `json:"section" en:"decisions,knowledge,progress,preferences" dc:"要更新的章节：decisions/knowledge/progress -> MEMORY.md, preferences -> USER.md"`
+  Action  string        `json:"action" en:"add,update,delete" dc:"操作类型：add 追加新条目，update 按 topic 更新，delete 按 topic 删除"`
+  Entries []updateEntry `json:"entries" dc:"条目列表"`
 }
 
 type updateEntry struct {
-  Topic     string `json:"topic"`
-  Content   string `json:"content"`
-  Rationale string `json:"rationale,omitempty"`
+  Topic     string `json:"topic" dc:"条目主题（用于去重和匹配）"`
+  Content   string `json:"content" dc:"条目内容"`
+  Rationale string `json:"rationale,omitempty" dc:"决策理由（仅 decisions 需要）"`
 }
 
-func (t *UpdateMemoryTool) Name() string { return "update_memory" }
+func NewUpdateMemoryTool(workspace string) ToolExecutor {
+  return NewTypedTool[updateMemoryParams]("update_memory",
+    "主动更新长期记忆。用于记录重要决策、知识点、进度状态或用户偏好。数据会被合并到 MEMORY.md 或 USER.md",
+    func(ctx context.Context, p updateMemoryParams) *ToolResult {
+      validSections := map[string]bool{"decisions": true, "knowledge": true, "progress": true, "preferences": true}
+      validActions := map[string]bool{"add": true, "update": true, "delete": true}
 
-func (t *UpdateMemoryTool) Description() string {
-  return "主动更新长期记忆。用于记录重要决策、知识点、进度状态或用户偏好。数据会被合并到 MEMORY.md 或 USER.md"
-}
+      if !validSections[p.Section] {
+        return &ToolResult{Success: false, Data: fmt.Sprintf("无效的 section: %q，可选值: decisions, knowledge, progress, preferences", p.Section)}
+      }
+      if !validActions[p.Action] {
+        return &ToolResult{Success: false, Data: fmt.Sprintf("无效的 action: %q，可选值: add, update, delete", p.Action)}
+      }
+      if len(p.Entries) == 0 {
+        return &ToolResult{Success: false, Data: "entries 不能为空"}
+      }
 
-func (t *UpdateMemoryTool) Schema() map[string]interface{} {
-  return map[string]interface{}{
-    "type": "object",
-    "properties": map[string]interface{}{
-      "section": map[string]interface{}{
-        "type":        "string",
-        "enum":        []string{"decisions", "knowledge", "progress", "preferences"},
-        "description": "要更新的章节：decisions/knowledge/progress -> MEMORY.md, preferences -> USER.md",
-      },
-      "action": map[string]interface{}{
-        "type":        "string",
-        "enum":        []string{"add", "update", "delete"},
-        "description": "操作类型：add 追加新条目，update 按 topic 更新，delete 按 topic 删除",
-      },
-      "entries": map[string]interface{}{
-        "type": "array",
-        "items": map[string]interface{}{
-          "type": "object",
-          "properties": map[string]interface{}{
-            "topic":     map[string]interface{}{"type": "string", "description": "条目主题（用于去重和匹配）"},
-            "content":   map[string]interface{}{"type": "string", "description": "条目内容"},
-            "rationale": map[string]interface{}{"type": "string", "description": "决策理由（仅 decisions 需要）"},
-          },
-          "required": []string{"topic", "content"},
-        },
-        "description": "条目列表",
-      },
-    },
-    "required": []string{"section", "action", "entries"},
-  }
-}
+      var validEntries []updateEntry
+      for _, e := range p.Entries {
+        if strings.TrimSpace(e.Topic) != "" || strings.TrimSpace(e.Content) != "" {
+          validEntries = append(validEntries, e)
+        }
+      }
+      if len(validEntries) == 0 {
+        return &ToolResult{Success: false, Data: "所有条目均为空"}
+      }
+      p.Entries = validEntries
 
-func (t *UpdateMemoryTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
-  var params updateMemoryParams
-  if err := json.Unmarshal(args, &params); err != nil {
-    return &ToolResult{Success: false, Data: "参数解析失败：需要 section、action 和 entries"}, nil
-  }
+      isUserSection := p.Section == "preferences"
+      filePath := filepath.Join(workspace, "USER.md")
+      if !isUserSection {
+        filePath = filepath.Join(workspace, "memory", "MEMORY.md")
+      }
 
-  // 校验参数
-  validSections := map[string]bool{"decisions": true, "knowledge": true, "progress": true, "preferences": true}
-  validActions := map[string]bool{"add": true, "update": true, "delete": true}
+      existing := readFile(filePath)
 
-  if !validSections[params.Section] {
-    return &ToolResult{Success: false, Data: fmt.Sprintf("无效的 section: %q，可选值: decisions, knowledge, progress, preferences", params.Section)}, nil
-  }
-  if !validActions[params.Action] {
-    return &ToolResult{Success: false, Data: fmt.Sprintf("无效的 action: %q，可选值: add, update, delete", params.Action)}, nil
-  }
-  if len(params.Entries) == 0 {
-    return &ToolResult{Success: false, Data: "entries 不能为空"}, nil
-  }
+      if existing != "" {
+        backupDir := filepath.Join(workspace, "memory", "archive")
+        backupFile(filePath, backupDir)
+      }
 
-  // 过滤空条目
-  var validEntries []updateEntry
-  for _, e := range params.Entries {
-    if strings.TrimSpace(e.Topic) != "" || strings.TrimSpace(e.Content) != "" {
-      validEntries = append(validEntries, e)
-    }
-  }
-  if len(validEntries) == 0 {
-    return &ToolResult{Success: false, Data: "所有条目均为空"}, nil
-  }
-  params.Entries = validEntries
+      var newContent string
+      var affected int
+      switch p.Action {
+      case "add":
+        newContent = executeAdd(existing, p, isUserSection)
+        affected = len(p.Entries)
+      case "update":
+        newContent, affected = executeUpdate(existing, p, isUserSection)
+      case "delete":
+        newContent, affected = executeDelete(existing, p, isUserSection)
+      }
 
-  // 确定目标文件
-  isUserSection := params.Section == "preferences"
-  filePath := filepath.Join(t.Workspace, "USER.md")
-  if !isUserSection {
-    filePath = filepath.Join(t.Workspace, "memory", "MEMORY.md")
-  }
+      if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+        return &ToolResult{Success: false, Data: fmt.Sprintf("创建目录失败: %v", err)}
+      }
+      if err := os.WriteFile(filePath, []byte(newContent), 0600); err != nil {
+        return &ToolResult{Success: false, Data: fmt.Sprintf("写入文件失败: %v", err)}
+      }
 
-  // 读取当前内容
-  existing := readFile(filePath)
-
-  // 文件存在时才备份
-  if existing != "" {
-    backupDir := filepath.Join(t.Workspace, "memory", "archive")
-    backupFile(filePath, backupDir)
-  }
-
-  // 执行操作
-  var newContent string
-  var affected int
-  switch params.Action {
-  case "add":
-    newContent = executeAdd(existing, params, isUserSection)
-    affected = len(params.Entries)
-  case "update":
-    newContent, affected = executeUpdate(existing, params, isUserSection)
-  case "delete":
-    newContent, affected = executeDelete(existing, params, isUserSection)
-  }
-
-  // 写回文件
-  if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-    return &ToolResult{Success: false, Data: fmt.Sprintf("创建目录失败: %v", err)}, nil
-  }
-  if err := os.WriteFile(filePath, []byte(newContent), 0600); err != nil {
-    return &ToolResult{Success: false, Data: fmt.Sprintf("写入文件失败: %v", err)}, nil
-  }
-
-  summary := fmt.Sprintf("已%s %d 条记录到 %s", actionLabel(params.Action), affected, sectionLabel(params.Section))
-  if affected < len(params.Entries) && params.Action != "add" {
-    summary += fmt.Sprintf("（其中 %d 条未匹配到现有条目）", len(params.Entries)-affected)
-  }
-  return &ToolResult{Success: true, Data: summary}, nil
+      summary := fmt.Sprintf("已%s %d 条记录到 %s", actionLabel(p.Action), affected, sectionLabel(p.Section))
+      if affected < len(p.Entries) && p.Action != "add" {
+        summary += fmt.Sprintf("（其中 %d 条未匹配到现有条目）", len(p.Entries)-affected)
+      }
+      return &ToolResult{Success: true, Data: summary}
+    })
 }
 
 func actionLabel(action string) string {
