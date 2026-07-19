@@ -71,7 +71,7 @@ const deleting = ref(false)
 const loadEmail = async () => {
   try {
     const data = await api.get('/user/email')
-    if (data.email) Object.assign(form.value, data)
+    if (data.email) Object.assign(form.value, data.email)
   } catch { /* ignore */ }
 }
 

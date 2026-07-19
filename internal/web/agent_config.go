@@ -157,10 +157,20 @@ func (s *Server) handleAdminModelTest(c *gin.Context) {
     return
   }
 
-  provider := c.PostForm("provider")
-  modelID := c.PostForm("model_id")
-  baseURL := strings.TrimRight(c.PostForm("base_url"), "/")
-  apiKey := c.PostForm("api_key")
+  var req struct {
+    Provider string `json:"provider"`
+    ModelID  string `json:"model_id"`
+    BaseURL  string `json:"base_url"`
+    APIKey   string `json:"api_key"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  provider := req.Provider
+  modelID := req.ModelID
+  baseURL := strings.TrimRight(req.BaseURL, "/")
+  apiKey := req.APIKey
 
   if provider == "" || modelID == "" {
     writeError(c, http.StatusBadRequest, "供应商和模型 ID 不能为空")
@@ -221,17 +231,17 @@ func (s *Server) handleAdminModelTest(c *gin.Context) {
   ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
   defer cancel()
 
-  req, err := http.NewRequestWithContext(ctx, "POST", parsedURL.String(), bytes.NewReader(body))
+  httpReq, err := http.NewRequestWithContext(ctx, "POST", parsedURL.String(), bytes.NewReader(body))
   if err != nil {
     writeError(c, http.StatusBadRequest, fmt.Sprintf("创建请求失败: %s", err.Error()))
     return
   }
   for k, v := range headers {
-    req.Header.Set(k, v)
+    httpReq.Header.Set(k, v)
   }
 
-  req.URL = parsedURL
-  resp, err := http.DefaultClient.Do(req)
+  httpReq.URL = parsedURL
+  resp, err := http.DefaultClient.Do(httpReq)
   if err != nil {
     writeError(c, http.StatusBadRequest, fmt.Sprintf("连接失败: %s", err.Error()))
     return

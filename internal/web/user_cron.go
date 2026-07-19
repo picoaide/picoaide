@@ -3,7 +3,6 @@ package web
 import (
   "fmt"
   "net/http"
-  "strconv"
   "strings"
 
   "github.com/gin-gonic/gin"
@@ -55,9 +54,18 @@ func (s *Server) handleCronCreate(c *gin.Context) {
     writeError(c, http.StatusInternalServerError, "定时任务服务未就绪")
     return
   }
-  schedule := strings.TrimSpace(c.PostForm("schedule"))
-  prompt := strings.TrimSpace(c.PostForm("prompt"))
-  channelID := strings.TrimSpace(c.PostForm("channel_id"))
+  var req struct {
+    Schedule  string `json:"schedule"`
+    Prompt    string `json:"prompt"`
+    ChannelID string `json:"channel_id"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  schedule := strings.TrimSpace(req.Schedule)
+  prompt := strings.TrimSpace(req.Prompt)
+  channelID := strings.TrimSpace(req.ChannelID)
 
   if schedule == "" || prompt == "" {
     writeError(c, http.StatusBadRequest, "schedule 和 prompt 不能为空")
@@ -99,12 +107,17 @@ func (s *Server) handleCronUpdate(c *gin.Context) {
     return
   }
 
-  idStr := strings.TrimSpace(c.PostForm("id"))
-  id, err := strconv.ParseInt(idStr, 10, 64)
-  if err != nil {
-    writeError(c, http.StatusBadRequest, "无效的任务 ID")
+  var req struct {
+    ID        int64  `json:"id"`
+    Schedule  string `json:"schedule"`
+    Prompt    string `json:"prompt"`
+    ChannelID string `json:"channel_id"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
+  id := req.ID
 
   existing, err := store.GetByID(c.Request.Context(), id)
   if err != nil || existing == nil {
@@ -116,9 +129,9 @@ func (s *Server) handleCronUpdate(c *gin.Context) {
     return
   }
 
-  schedule := strings.TrimSpace(c.PostForm("schedule"))
-  prompt := strings.TrimSpace(c.PostForm("prompt"))
-  channelID := strings.TrimSpace(c.PostForm("channel_id"))
+  schedule := strings.TrimSpace(req.Schedule)
+  prompt := strings.TrimSpace(req.Prompt)
+  channelID := strings.TrimSpace(req.ChannelID)
   if schedule == "" {
     schedule = existing.Schedule
   }
@@ -159,12 +172,14 @@ func (s *Server) handleCronDelete(c *gin.Context) {
     return
   }
 
-  idStr := strings.TrimSpace(c.PostForm("id"))
-  id, err := strconv.ParseInt(idStr, 10, 64)
-  if err != nil {
-    writeError(c, http.StatusBadRequest, "无效的任务 ID")
+  var req struct {
+    ID int64 `json:"id"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
+  id := req.ID
 
   existing, err := store.GetByID(c.Request.Context(), id)
   if err != nil || existing == nil {
@@ -197,12 +212,14 @@ func (s *Server) handleCronToggle(c *gin.Context) {
     return
   }
 
-  idStr := strings.TrimSpace(c.PostForm("id"))
-  id, err := strconv.ParseInt(idStr, 10, 64)
-  if err != nil {
-    writeError(c, http.StatusBadRequest, "无效的任务 ID")
+  var req struct {
+    ID int64 `json:"id"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
+  id := req.ID
 
   existing, err := store.GetByID(c.Request.Context(), id)
   if err != nil || existing == nil {

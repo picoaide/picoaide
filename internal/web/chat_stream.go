@@ -372,7 +372,14 @@ func (s *Server) handleChatSend(c *gin.Context) {
     return
   }
 
-  message := c.PostForm("message")
+  var req struct {
+    Message string `json:"message"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  message := req.Message
   slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/user/chat/send", "username", username, "message_length", len(message))
   if message == "" {
     writeError(c, http.StatusBadRequest, "请输入消息")

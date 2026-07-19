@@ -179,7 +179,7 @@ const fetchWhitelist = async () => {
   wlTableLoading.value = true
   try {
     const data = await api.get('/admin/whitelist')
-    whitelist.value = data.users || data.whitelist || []
+    whitelist.value = (data.users || []).map((u: string) => ({ username: u, added_by: '' }))
     wlPagination.total = whitelist.value.length
   } catch {
     message.error('获取白名单失败')

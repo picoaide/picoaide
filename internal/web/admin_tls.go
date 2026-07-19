@@ -131,13 +131,17 @@ func (s *Server) handleAdminTLSVerify(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusBadRequest, "无效的 CSRF 令牌")
+
+  var req struct {
+    CertPEM string `json:"cert_pem"`
+    KeyPEM  string `json:"key_pem"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
-
-  certPEM := c.PostForm("cert_pem")
-  keyPEM := c.PostForm("key_pem")
+  certPEM := req.CertPEM
+  keyPEM := req.KeyPEM
 
   if certPEM == "" || keyPEM == "" {
     writeError(c, http.StatusBadRequest, "证书和私钥不能为空")
@@ -167,14 +171,18 @@ func (s *Server) handleAdminTLSSave(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusBadRequest, "无效的 CSRF 令牌")
+
+  var req struct {
+    CertPEM string `json:"cert_pem"`
+    KeyPEM  string `json:"key_pem"`
+    Enabled bool   `json:"enabled"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
-
-  certPEM := c.PostForm("cert_pem")
-  keyPEM := c.PostForm("key_pem")
-  enabledStr := c.PostForm("enabled")
+  certPEM := req.CertPEM
+  keyPEM := req.KeyPEM
 
   if certPEM == "" || keyPEM == "" {
     writeError(c, http.StatusBadRequest, "证书和私钥不能为空")
@@ -187,15 +195,13 @@ func (s *Server) handleAdminTLSSave(c *gin.Context) {
     return
   }
 
-  enabled := enabledStr == "true"
-
   // 保存到配置
   raw := map[string]interface{}{
     "web": map[string]interface{}{
       "tls": map[string]interface{}{
-        "enabled":  enabled,
-        "cert_pem": certPEM,
-        "key_pem":  keyPEM,
+    "enabled":  req.Enabled,
+    "cert_pem": certPEM,
+    "key_pem":  keyPEM,
       },
     },
   }
@@ -215,7 +221,7 @@ func (s *Server) handleAdminTLSSave(c *gin.Context) {
   }
 
   msg := "证书已保存"
-  if enabled {
+  if req.Enabled {
     msg += "，HTTPS 已启用"
   } else {
     msg += "，HTTPS 已关闭"
@@ -225,7 +231,7 @@ func (s *Server) handleAdminTLSSave(c *gin.Context) {
     "success": true,
     "message": msg,
     "data": gin.H{
-      "enabled":  enabled,
+      "enabled":  req.Enabled,
       "has_cert": true,
     },
   })
@@ -236,16 +242,17 @@ func (s *Server) handleAdminTLSToggle(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusBadRequest, "无效的 CSRF 令牌")
+
+  var req struct {
+    Enabled bool `json:"enabled"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
 
-  enabledStr := c.PostForm("enabled")
-  enabled := enabledStr == "true"
-
   // 如果要启用但无证书，报错
-  if enabled {
+  if req.Enabled {
     cfg := s.loadConfig()
     if cfg.Web.TLS.CertPEM == "" || cfg.Web.TLS.KeyPEM == "" {
       writeError(c, http.StatusBadRequest, "请先上传证书后再启用 HTTPS")
@@ -256,7 +263,7 @@ func (s *Server) handleAdminTLSToggle(c *gin.Context) {
   raw := map[string]interface{}{
     "web": map[string]interface{}{
       "tls": map[string]interface{}{
-        "enabled": enabled,
+        "enabled": req.Enabled,
       },
     },
   }
@@ -275,7 +282,7 @@ func (s *Server) handleAdminTLSToggle(c *gin.Context) {
   }
 
   msg := "HTTPS 已关闭"
-  if enabled {
+  if req.Enabled {
     msg = "HTTPS 已启用"
   }
 

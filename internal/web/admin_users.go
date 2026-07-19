@@ -111,12 +111,15 @@ func (s *Server) handleAdminUserCreate(c *gin.Context) {
     writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
+
+  var req struct {
+    Username string `json:"username"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
-
-  username := c.PostForm("username")
+  username := req.Username
   slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/admin/users/create", "username", username, "operator", s.getSessionUser(c))
   if err := user.ValidateUsername(username); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
@@ -171,12 +174,15 @@ func (s *Server) handleAdminUserBatchCreate(c *gin.Context) {
     writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
+
+  var req struct {
+    Usernames []string `json:"usernames"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
-
-  usernames := parseBatchUsernames(c.PostForm("usernames"))
+  usernames := req.Usernames
   if len(usernames) == 0 {
     writeError(c, http.StatusBadRequest, "请至少输入一个用户名")
     return
@@ -257,12 +263,15 @@ func (s *Server) handleAdminUserDelete(c *gin.Context) {
     writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
+
+  var req struct {
+    Username string `json:"username"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
-
-  username := c.PostForm("username")
+  username := req.Username
   slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/admin/users/delete", "username", username, "operator", s.getSessionUser(c))
   if username == "" {
     writeError(c, http.StatusBadRequest, "用户名不能为空")

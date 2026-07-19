@@ -76,7 +76,14 @@ func (s *Server) handleUserSkillsInstall(c *gin.Context) {
     return
   }
 
-  skillName := strings.TrimSpace(c.PostForm("skill_name"))
+  var req struct {
+    SkillName string `json:"skill_name"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  skillName := strings.TrimSpace(req.SkillName)
   if skillName == "" {
     writeError(c, http.StatusBadRequest, "技能名称不能为空")
     return
@@ -119,7 +126,14 @@ func (s *Server) handleUserSkillsUninstall(c *gin.Context) {
     return
   }
 
-  skillName := strings.TrimSpace(c.PostForm("skill_name"))
+  var req struct {
+    SkillName string `json:"skill_name"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  skillName := strings.TrimSpace(req.SkillName)
   if skillName == "" {
     writeError(c, http.StatusBadRequest, "技能名称不能为空")
     return

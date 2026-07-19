@@ -272,16 +272,15 @@ func (s *Server) csrfToken(username string) string {
   return hex.EncodeToString(mac.Sum(nil))[:32]
 }
 
-// checkCSRF 验证请求中的 CSRF token 是否有效
+// checkCSRF 验证请求中的 CSRF token 是否有效（从 X-CSRF-Token header 读取）
 func (s *Server) checkCSRF(c *gin.Context) bool {
   username := s.getSessionUser(c)
   if username == "" {
     return false
   }
-  // 优先从 POST 表单获取，也检查 query 参数
-  token := c.PostForm("csrf_token")
+  token := c.Request.Header.Get("X-CSRF-Token")
   if token == "" {
-    token = c.Query("csrf_token")
+    return false
   }
   return hmac.Equal([]byte(token), []byte(s.csrfToken(username)))
 }
@@ -764,11 +763,15 @@ func Serve() error {
   sigCh := make(chan os.Signal, 1)
   signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-  // 外部监听 :80（动态判断是否需要 301 跳转 HTTPS）
+  // 外部监听配置端口（动态判断是否需要 301 跳转 HTTPS）
   extHandler := s.tlsAwareHandler(combinedHandler)
 
+  listenAddr := cfg.Web.Listen
+  if listenAddr == "" {
+    listenAddr = ":80"
+  }
   s.extSrv = &http.Server{
-    Addr:    ":80",
+    Addr:    listenAddr,
     Handler: extHandler,
   }
   go func() {

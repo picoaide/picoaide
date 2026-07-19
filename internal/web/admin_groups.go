@@ -6,7 +6,6 @@ import (
   "net/http"
   "os"
   "path/filepath"
-  "strconv"
   "strings"
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/store"
@@ -69,25 +68,24 @@ func (s *Server) handleAdminGroupCreate(c *gin.Context) {
     return
   }
 
-  name := strings.TrimSpace(c.PostForm("name"))
-  description := strings.TrimSpace(c.PostForm("description"))
-  parentIDStr := strings.TrimSpace(c.PostForm("parent_id"))
+  var req struct {
+    Name        string `json:"name"`
+    Description string `json:"description"`
+    ParentID    *int64 `json:"parent_id,omitempty"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  name := strings.TrimSpace(req.Name)
+  description := strings.TrimSpace(req.Description)
   slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/admin/groups/create", "group", name, "operator", s.getSessionUser(c))
   if name == "" {
     writeError(c, http.StatusBadRequest, "组名不能为空")
     return
   }
-  var parentID *int64
-  if parentIDStr != "" {
-    pid, err := strconv.ParseInt(parentIDStr, 10, 64)
-    if err != nil {
-      writeError(c, http.StatusBadRequest, "无效的父组 ID")
-      return
-    }
-    parentID = &pid
-  }
-  slog.Debug("process", "event", "process", "phase", "create_group", "group", name, "parent_id", parentID)
-  if err := store.CreateGroup(name, "local", description, parentID); err != nil {
+  slog.Debug("process", "event", "process", "phase", "create_group", "group", name, "parent_id", req.ParentID)
+  if err := store.CreateGroup(name, "local", description, req.ParentID); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
@@ -104,7 +102,14 @@ func (s *Server) handleAdminGroupDelete(c *gin.Context) {
     return
   }
 
-  name := strings.TrimSpace(c.PostForm("name"))
+  var req struct {
+    Name string `json:"name"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  name := strings.TrimSpace(req.Name)
   slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/admin/groups/delete", "group", name, "operator", s.getSessionUser(c))
   if name == "" {
     writeError(c, http.StatusBadRequest, "组名不能为空")
@@ -136,13 +141,20 @@ func (s *Server) handleAdminGroupMembersAdd(c *gin.Context) {
     return
   }
 
-  groupName := strings.TrimSpace(c.PostForm("group_name"))
-  usersStr := strings.TrimSpace(c.PostForm("usernames"))
-  if groupName == "" || usersStr == "" {
+  var req struct {
+    GroupName string   `json:"group_name"`
+    Usernames []string `json:"usernames"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  groupName := strings.TrimSpace(req.GroupName)
+  if groupName == "" || len(req.Usernames) == 0 {
     writeError(c, http.StatusBadRequest, "组名和用户名不能为空")
     return
   }
-  usernames := parseBatchUsernames(usersStr)
+  usernames := req.Usernames
   if len(usernames) == 0 {
     writeError(c, http.StatusBadRequest, "用户名不能为空")
     return
@@ -186,8 +198,16 @@ func (s *Server) handleAdminGroupMembersRemove(c *gin.Context) {
     return
   }
 
-  groupName := strings.TrimSpace(c.PostForm("group_name"))
-  username := strings.TrimSpace(c.PostForm("username"))
+  var req struct {
+    GroupName string `json:"group_name"`
+    Username  string `json:"username"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  groupName := strings.TrimSpace(req.GroupName)
+  username := strings.TrimSpace(req.Username)
   if groupName == "" || username == "" {
     writeError(c, http.StatusBadRequest, "组名和用户名不能为空")
     return
@@ -208,8 +228,16 @@ func (s *Server) handleAdminGroupSkillsBind(c *gin.Context) {
     return
   }
 
-  groupName := strings.TrimSpace(c.PostForm("group_name"))
-  skillName := strings.TrimSpace(c.PostForm("skill_name"))
+  var req struct {
+    GroupName string `json:"group_name"`
+    SkillName string `json:"skill_name"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  groupName := strings.TrimSpace(req.GroupName)
+  skillName := strings.TrimSpace(req.SkillName)
   if groupName == "" || skillName == "" {
     writeError(c, http.StatusBadRequest, "组名和技能名不能为空")
     return
@@ -246,8 +274,16 @@ func (s *Server) handleAdminGroupSkillsUnbind(c *gin.Context) {
     return
   }
 
-  groupName := strings.TrimSpace(c.PostForm("group_name"))
-  skillName := strings.TrimSpace(c.PostForm("skill_name"))
+  var req struct {
+    GroupName string `json:"group_name"`
+    SkillName string `json:"skill_name"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  groupName := strings.TrimSpace(req.GroupName)
+  skillName := strings.TrimSpace(req.SkillName)
   if groupName == "" || skillName == "" {
     writeError(c, http.StatusBadRequest, "组名和技能名不能为空")
     return

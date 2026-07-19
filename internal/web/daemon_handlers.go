@@ -28,14 +28,21 @@ import (
 // ============================================================
 
 // handleTaskSubmit 提交任务
-// POST /api/user/task/submit (form-encoded: message, priority)
+// POST /api/user/task/submit
 func (s *Server) handleTaskSubmit(c *gin.Context) {
   username := s.requireRegularUser(c)
   if username == "" {
     return
   }
 
-  message := c.PostForm("message")
+  var req struct {
+    Message string `json:"message"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  message := req.Message
   if message == "" {
     writeError(c, http.StatusBadRequest, "消息不能为空")
     return
@@ -163,7 +170,14 @@ func (s *Server) updateTaskStatus(c *gin.Context, taskStatus, eventType, auditDe
     return
   }
 
-  taskID := c.PostForm("task_id")
+  var req struct {
+    TaskID string `json:"task_id"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  taskID := req.TaskID
   if taskID == "" {
     writeError(c, http.StatusBadRequest, "缺少 task_id")
     return

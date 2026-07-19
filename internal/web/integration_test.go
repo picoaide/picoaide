@@ -10,7 +10,6 @@ import (
   "net/url"
   "os"
   "path/filepath"
-  "strings"
   "testing"
   "github.com/gin-gonic/gin"
 
@@ -121,20 +120,35 @@ func setupTestServer(t *testing.T) *testEnv {
 // testEnv 辅助方法
 // ============================================================
 
+// urlValuesToJSON 将 url.Values 转为适合 JSON 的 map，自动推断 bool
+func urlValuesToJSON(form url.Values) map[string]interface{} {
+  m := make(map[string]interface{}, len(form))
+  for k, v := range form {
+    val := v[0]
+    if val == "true" || val == "false" {
+      m[k] = val == "true"
+    } else if len(v) > 1 {
+      m[k] = v
+    } else {
+      m[k] = val
+    }
+  }
+  return m
+}
+
 // authRequest 发送带 session cookie 和 CSRF token 的 HTTP 请求
 func (env *testEnv) authRequest(t *testing.T, method, path, username string, form url.Values) *http.Response {
   t.Helper()
 
-  // POST 请求需要 CSRF token
-  if method == "POST" && form == nil {
-    form = url.Values{}
-  }
-
   var bodyReader io.Reader
-  if form != nil {
-    // 在编码前注入 CSRF token
-    form.Set("csrf_token", env.Server.csrfToken(username))
-    bodyReader = strings.NewReader(form.Encode())
+  var contentType string
+  if method == "POST" {
+    if form != nil {
+      m := urlValuesToJSON(form)
+      data, _ := json.Marshal(m)
+      bodyReader = bytes.NewReader(data)
+      contentType = "application/json"
+    }
   }
 
   req, err := http.NewRequest(method, env.HTTP.URL+path, bodyReader)
@@ -142,8 +156,11 @@ func (env *testEnv) authRequest(t *testing.T, method, path, username string, for
     t.Fatalf("创建请求失败: %v", err)
   }
 
-  if form != nil {
-    req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+  if contentType != "" {
+    req.Header.Set("Content-Type", contentType)
+  }
+  if method == "POST" {
+    req.Header.Set("X-CSRF-Token", env.Server.csrfToken(username))
   }
 
   // 添加 session cookie
@@ -165,10 +182,61 @@ func (env *testEnv) get(t *testing.T, path, username string) *http.Response {
   return env.authRequest(t, "GET", path, username, nil)
 }
 
-// postForm 发送带认证和 CSRF token 的 POST 请求
+// postForm 发送带认证和 CSRF token 的 POST 请求（表单编码）
 func (env *testEnv) postForm(t *testing.T, path, username string, form url.Values) *http.Response {
   t.Helper()
   return env.authRequest(t, "POST", path, username, form)
+}
+
+// postMap 发送带认证和 CSRF token 的 JSON POST 请求（map 类型）
+func (env *testEnv) postMap(t *testing.T, path, username string, body map[string]interface{}) *http.Response {
+  t.Helper()
+  data, _ := json.Marshal(body)
+  req, err := http.NewRequest("POST", env.HTTP.URL+path, bytes.NewReader(data))
+  if err != nil {
+    t.Fatalf("创建请求失败: %v", err)
+  }
+  req.Header.Set("Content-Type", "application/json")
+  req.Header.Set("X-CSRF-Token", env.Server.csrfToken(username))
+  req.AddCookie(&http.Cookie{
+    Name:  "session",
+    Value: env.Server.createSessionToken(username),
+  })
+  resp, err := http.DefaultClient.Do(req)
+  if err != nil {
+    t.Fatalf("发送请求失败: %v", err)
+  }
+  return resp
+}
+
+// postJSON 发送带认证和 CSRF token 的 JSON POST 请求
+func (env *testEnv) postJSON(t *testing.T, path, username string, body interface{}) *http.Response {
+  t.Helper()
+  var reqBody io.Reader
+  if body != nil {
+    data, err := json.Marshal(body)
+    if err != nil {
+      t.Fatalf("JSON 序列化失败: %v", err)
+    }
+    reqBody = bytes.NewReader(data)
+  }
+  req, err := http.NewRequest("POST", env.HTTP.URL+path, reqBody)
+  if err != nil {
+    t.Fatalf("创建请求失败: %v", err)
+  }
+  if body != nil {
+    req.Header.Set("Content-Type", "application/json")
+  }
+  req.Header.Set("X-CSRF-Token", env.Server.csrfToken(username))
+  req.AddCookie(&http.Cookie{
+    Name:  "session",
+    Value: env.Server.createSessionToken(username),
+  })
+  resp, err := http.DefaultClient.Do(req)
+  if err != nil {
+    t.Fatalf("发送请求失败: %v", err)
+  }
+  return resp
 }
 
 func (env *testEnv) postMultipartFile(t *testing.T, path, username, fieldName, fileName string, data []byte) *http.Response {

@@ -55,8 +55,16 @@ func (s *Server) handleMCPCookiesPost(c *gin.Context) {
     return
   }
 
-  domain := strings.TrimSpace(c.PostForm("domain"))
-  cookieStr := strings.TrimSpace(c.PostForm("cookies"))
+  var req struct {
+    Domain  string `json:"domain"`
+    Cookies string `json:"cookies"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  domain := strings.TrimSpace(req.Domain)
+  cookieStr := strings.TrimSpace(req.Cookies)
 
   if domain == "" || cookieStr == "" {
     writeError(c, http.StatusBadRequest, "域名和 Cookie 不能为空")

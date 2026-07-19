@@ -518,7 +518,14 @@ func (s *Server) handleFileDelete(c *gin.Context) {
     return
   }
 
-  relPath := c.PostForm("path")
+  var req struct {
+    Path string `json:"path"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  relPath := req.Path
   slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/files/delete", "username", username, "path", relPath)
 
   fr, err := s.resolveFileRoot(username, relPath)
@@ -574,8 +581,16 @@ func (s *Server) handleFileMkdir(c *gin.Context) {
     return
   }
 
-  relPath := c.PostForm("path")
-  name := filepath.Base(c.PostForm("name"))
+  var req struct {
+    Path string `json:"path"`
+    Name string `json:"name"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  relPath := req.Path
+  name := filepath.Base(req.Name)
   slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/files/mkdir", "username", username, "path", relPath, "name", name)
 
   if name == "" || name == "." || name == ".." {
@@ -663,8 +678,20 @@ func (s *Server) handleFileEditSave(c *gin.Context) {
   if username == "" {
     return
   }
+  if !s.checkCSRF(c) {
+    writeError(c, http.StatusForbidden, "无效请求")
+    return
+  }
 
-  relPath := c.PostForm("path")
+  var req struct {
+    Path    string `json:"path"`
+    Content string `json:"content"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  relPath := req.Path
   if relPath == "" {
     relPath = c.Query("path")
   }
@@ -695,18 +722,13 @@ func (s *Server) handleFileEditSave(c *gin.Context) {
     return
   }
 
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
-    return
-  }
-
   file, err := fr.root.OpenFile(fr.safePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "保存文件失败")
     return
   }
   defer file.Close()
-  content := c.PostForm("content")
+  content := req.Content
   slog.Debug("process", "event", "process", "phase", "save_file", "username", username, "path", relPath, "size", len(content))
   if _, err := file.WriteString(content); err != nil {
     writeError(c, http.StatusInternalServerError, "保存文件失败")

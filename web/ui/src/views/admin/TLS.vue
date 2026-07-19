@@ -88,7 +88,7 @@ const fetchStatus = async () => {
   statusLoading.value = true
   try {
     const data = await api.get('/admin/tls/status')
-    Object.assign(status, data)
+    Object.assign(status, data.data)
   } catch {
     message.error('获取证书状态失败')
   } finally {
@@ -113,7 +113,7 @@ const handleVerify = async () => {
   verifyResult.value = null
   try {
     const data = await api.post('/admin/tls/verify', { cert_pem: certPem.value, key_pem: keyPem.value })
-    verifyResult.value = data
+    verifyResult.value = data.data
   } catch {
     message.error('验证请求失败')
   } finally {
@@ -128,7 +128,7 @@ const handleSave = async () => {
   }
   saveLoading.value = true
   try {
-    await api.post('/admin/tls/save', { cert_pem: certPem.value, key_pem: keyPem.value, enabled: 'true' })
+    await api.post('/admin/tls/save', { cert_pem: certPem.value, key_pem: keyPem.value, enabled: true })
     message.success('保存成功')
     certPem.value = ''
     keyPem.value = ''
@@ -144,7 +144,7 @@ const handleSave = async () => {
 const handleToggle = async (checked: boolean) => {
   toggleLoading.value = true
   try {
-    await api.post('/admin/tls/toggle', { enabled: String(checked) })
+    await api.post('/admin/tls/toggle', { enabled: checked })
     message.success(checked ? '已启用 HTTPS' : '已禁用 HTTPS')
     fetchStatus()
   } catch {

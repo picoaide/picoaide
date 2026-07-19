@@ -95,7 +95,7 @@ const fetchAdmins = async () => {
   loading.value = true
   try {
     const data = await api.get('/admin/superadmins')
-    admins.value = data.superadmins || data.users || []
+    admins.value = (data.admins || []).map((u: string) => ({ username: u }))
   } catch {
     message.error('获取超管列表失败')
   } finally {

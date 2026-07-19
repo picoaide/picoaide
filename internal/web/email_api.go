@@ -2,7 +2,6 @@ package web
 
 import (
   "net/http"
-  "strconv"
 
   "github.com/gin-gonic/gin"
   "github.com/picoaide/picoaide/internal/email"
@@ -48,6 +47,18 @@ func (s *Server) handleEmailGet(c *gin.Context) {
   })
 }
 
+type emailConfigReq struct {
+  Email         string `json:"email"`
+  SMTPHost      string `json:"smtpHost"`
+  SMTPPort      int    `json:"smtpPort"`
+  SMTPTLS       bool   `json:"smtpTls"`
+  IMAPHost      string `json:"imapHost"`
+  IMAPPort      int    `json:"imapPort"`
+  IMAPTLS       bool   `json:"imapTls"`
+  LoginUser     string `json:"loginUser"`
+  LoginPassword string `json:"loginPassword"`
+}
+
 // handleEmailSave 保存当前用户的邮件配置
 // POST /api/user/email
 func (s *Server) handleEmailSave(c *gin.Context) {
@@ -56,49 +67,38 @@ func (s *Server) handleEmailSave(c *gin.Context) {
     return
   }
 
-  emailAddr := c.PostForm("email")
-  smtpHost := c.PostForm("smtpHost")
-  smtpPortStr := c.PostForm("smtpPort")
-  smtpTlsStr := c.PostForm("smtpTls")
-  imapHost := c.PostForm("imapHost")
-  imapPortStr := c.PostForm("imapPort")
-  imapTlsStr := c.PostForm("imapTls")
-  loginUser := c.PostForm("loginUser")
-  loginPassword := c.PostForm("loginPassword")
+  var req emailConfigReq
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
 
-  if emailAddr == "" || smtpHost == "" || imapHost == "" || loginUser == "" || loginPassword == "" {
+  if req.Email == "" || req.SMTPHost == "" || req.IMAPHost == "" || req.LoginUser == "" || req.LoginPassword == "" {
     writeError(c, http.StatusBadRequest, "所有字段均为必填")
     return
   }
 
-  smtpPort := 587
-  if smtpPortStr != "" {
-    if p, err := strconv.Atoi(smtpPortStr); err == nil {
-      smtpPort = p
-    }
+  smtpPort := req.SMTPPort
+  if smtpPort == 0 {
+    smtpPort = 587
   }
 
-  imapPort := 993
-  if imapPortStr != "" {
-    if p, err := strconv.Atoi(imapPortStr); err == nil {
-      imapPort = p
-    }
+  imapPort := req.IMAPPort
+  if imapPort == 0 {
+    imapPort = 993
   }
-
-  smtpTls := smtpTlsStr == "true"
-  imapTls := imapTlsStr == "true"
 
   ue := &store.UserEmail{
     Username:      username,
-    Email:         emailAddr,
-    SMTPHost:      smtpHost,
+    Email:         req.Email,
+    SMTPHost:      req.SMTPHost,
     SMTPPort:      smtpPort,
-    SMTPTLS:       smtpTls,
-    IMAPHost:      imapHost,
+    SMTPTLS:       req.SMTPTLS,
+    IMAPHost:      req.IMAPHost,
     IMAPPort:      imapPort,
-    IMAPTLS:       imapTls,
-    LoginUser:     loginUser,
-    LoginPassword: loginPassword,
+    IMAPTLS:       req.IMAPTLS,
+    LoginUser:     req.LoginUser,
+    LoginPassword: req.LoginPassword,
     Enabled:       true,
   }
 
@@ -113,7 +113,7 @@ func (s *Server) handleEmailSave(c *gin.Context) {
   })
 }
 
-// handleEmailTest 测试邮件连接（优先用表单参数，否则用已保存的配置）
+// handleEmailTest 测试邮件连接（优先用传入参数，否则用已保存的配置）
 // POST /api/user/email/test
 func (s *Server) handleEmailTest(c *gin.Context) {
   username := s.requireRegularUser(c)
@@ -121,38 +121,28 @@ func (s *Server) handleEmailTest(c *gin.Context) {
     return
   }
 
-  // 优先用表单提交的参数（未保存时测试用）
-  emailAddr := c.PostForm("email")
-  smtpHost := c.PostForm("smtpHost")
-  smtpPortStr := c.PostForm("smtpPort")
-  smtpTlsStr := c.PostForm("smtpTls")
-  imapHost := c.PostForm("imapHost")
-  imapPortStr := c.PostForm("imapPort")
-  imapTlsStr := c.PostForm("imapTls")
-  loginUser := c.PostForm("loginUser")
-  loginPassword := c.PostForm("loginPassword")
-
   var cfg *email.Config
+  var req emailConfigReq
 
-  if emailAddr != "" && smtpHost != "" && loginUser != "" && loginPassword != "" {
-    smtpPort := 587
-    if smtpPortStr != "" {
-      if p, err := strconv.Atoi(smtpPortStr); err == nil { smtpPort = p }
+  if err := c.ShouldBindJSON(&req); err == nil && req.Email != "" && req.SMTPHost != "" && req.LoginUser != "" && req.LoginPassword != "" {
+    smtpPort := req.SMTPPort
+    if smtpPort == 0 {
+      smtpPort = 587
     }
-    imapPort := 993
-    if imapPortStr != "" {
-      if p, err := strconv.Atoi(imapPortStr); err == nil { imapPort = p }
+    imapPort := req.IMAPPort
+    if imapPort == 0 {
+      imapPort = 993
     }
     cfg = &email.Config{
-      Email:     emailAddr,
-      SMTPHost:  smtpHost,
+      Email:     req.Email,
+      SMTPHost:  req.SMTPHost,
       SMTPPort:  smtpPort,
-      SMTPTLS:   smtpTlsStr == "true",
-      IMAPHost:  imapHost,
+      SMTPTLS:   req.SMTPTLS,
+      IMAPHost:  req.IMAPHost,
       IMAPPort:  imapPort,
-      IMAPTLS:   imapTlsStr == "true",
-      LoginUser: loginUser,
-      LoginPass: loginPassword,
+      IMAPTLS:   req.IMAPTLS,
+      LoginUser: req.LoginUser,
+      LoginPass: req.LoginPassword,
     }
   } else {
     ue, err := store.GetUserEmailWithDecryptedPassword(username)

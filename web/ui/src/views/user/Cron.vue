@@ -147,7 +147,7 @@ const handleUpdate = async () => {
   }
   submitting.value = true
   try {
-    const data = await api.post('/cron/update', { id: String(editForm.value.id), schedule: editForm.value.schedule, prompt: editForm.value.prompt, channel_id: editForm.value.channel_id })
+    const data = await api.post('/cron/update', { id: editForm.value.id, schedule: editForm.value.schedule, prompt: editForm.value.prompt, channel_id: editForm.value.channel_id })
     if (data.success) {
       message.success('更新成功')
       showEdit.value = false
@@ -164,7 +164,7 @@ const handleUpdate = async () => {
 
 const handleDelete = async (id: number) => {
   try {
-    const data = await api.post('/cron/delete', { id: String(id) })
+    const data = await api.post('/cron/delete', { id })
     if (data.success) {
       message.success('删除成功')
       fetchJobs()
@@ -178,7 +178,7 @@ const handleDelete = async (id: number) => {
 
 const handleToggle = async (record: any) => {
   try {
-    const data = await api.post('/cron/toggle', { id: String(record.id) })
+    const data = await api.post('/cron/toggle', { id: record.id })
     if (data.success) {
       message.success(data.enabled ? '已启用' : '已禁用')
       fetchJobs()

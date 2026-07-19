@@ -96,6 +96,7 @@
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
+import { api } from '../../composables/api'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 
@@ -167,17 +168,17 @@ const loadHistory = async () => {
     const res = await fetch('/api/user/chat/history')
     if (!res.ok) return
     const data = await res.json()
-    if (Array.isArray(data) && data.length > 0) {
-      chatList.value = data.map((h: any) => ({
-        id: h.id || Date.now().toString(),
-        title: h.title || '',
-        messages: (h.messages || []).map((m: any, i: number) => ({
-          id: `${h.id || Date.now()}-${i}`,
+    if (data.messages?.length) {
+      chatList.value = [{
+        id: Date.now().toString(),
+        title: data.messages[0]?.content?.slice(0, 20) || '历史对话',
+        messages: data.messages.map((m: any, i: number) => ({
+          id: `${Date.now()}-${i}`,
           role: m.role || 'assistant',
           content: m.content || '',
-          timestamp: m.timestamp || Date.now(),
+          timestamp: Date.now(),
         })),
-      }))
+      }]
       currentChatId.value = chatList.value[0]?.id || ''
     }
   } catch { /* ignore */ }
@@ -217,22 +218,12 @@ const sendMessage = async () => {
 
   isSending.value = true
   try {
-    const res = await fetch('/api/user/chat/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ message: content }),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      message.error(err.message || '发送失败')
-      return
-    }
-    const data = await res.json()
+    const data = await api.post('/user/chat/send', { message: content })
     if (data.run_id) {
       connectSSE(data.run_id)
     }
-  } catch {
-    message.error('网络错误，请重试')
+  } catch (e: any) {
+    message.error(e.message || '网络错误，请重试')
   } finally {
     isSending.value = false
   }

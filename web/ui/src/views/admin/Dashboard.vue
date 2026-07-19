@@ -38,22 +38,20 @@ const stats = reactive({
 
 onMounted(async () => {
   try {
-    const [usersRes, containersRes, groupsRes, skillsRes] = await Promise.all([
+    const [usersRes, groupsRes, skillsRes] = await Promise.all([
       fetch('/api/admin/users'),
-      fetch('/api/admin/containers'),
       fetch('/api/admin/groups'),
       fetch('/api/admin/skills'),
     ])
-    const [usersData, containersData, groupsData, skillsData] = await Promise.all([
+    const [usersData, groupsData, skillsData] = await Promise.all([
       usersRes.json(),
-      containersRes.json(),
       groupsRes.json(),
       skillsRes.json(),
     ])
     stats.users = usersData.total || 0
-    stats.containers = containersData.filter?.((c: any) => c.status === 'running').length || 0
     stats.groups = groupsData.total || 0
     stats.skills = skillsData.total || 0
+    stats.containers = 0
   } catch {
     // ignore
   }

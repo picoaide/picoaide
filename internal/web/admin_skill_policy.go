@@ -18,7 +18,15 @@ func (s *Server) handleAdminSkillInstallPolicySet(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  disabled := c.PostForm("disabled") == "true"
+  var req struct {
+    Disabled  bool   `json:"disabled"`
+    ChangedBy string `json:"changed_by"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  disabled := req.Disabled
 
   // 加载当前配置（嵌套结构）
   rawCfg, err := config.LoadRawFromDB()
@@ -41,7 +49,7 @@ func (s *Server) handleAdminSkillInstallPolicySet(c *gin.Context) {
   installSkill["enabled"] = !disabled
 
   // 保存合并后的配置
-  if err := config.SaveRawToDB(rawCfg, c.PostForm("changed_by")); err != nil {
+  if err := config.SaveRawToDB(rawCfg, req.ChangedBy); err != nil {
     writeError(c, http.StatusInternalServerError, "保存配置失败: "+err.Error())
     return
   }

@@ -5,7 +5,6 @@ import (
   "net/http"
   "os"
   "path/filepath"
-  "strconv"
   "strings"
   "time"
   "github.com/gin-gonic/gin"
@@ -48,6 +47,13 @@ func (s *Server) handleAdminSharedFolders(c *gin.Context) {
   })
 }
 
+type adminSharedFolderCreateReq struct {
+  Name        string  `json:"name"`
+  Description string  `json:"description"`
+  IsPublic    bool    `json:"is_public"`
+  GroupIDs    []int64 `json:"group_ids"`
+}
+
 // handleAdminSharedFoldersCreate 创建共享文件夹
 func (s *Server) handleAdminSharedFoldersCreate(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
@@ -55,10 +61,13 @@ func (s *Server) handleAdminSharedFoldersCreate(c *gin.Context) {
   }
 
   username := s.getSessionUser(c)
-  name := strings.TrimSpace(c.PostForm("name"))
-  description := strings.TrimSpace(c.PostForm("description"))
-  isPublic := c.PostForm("is_public") == "1"
-  groupIDsStr := strings.TrimSpace(c.PostForm("group_ids"))
+  var req adminSharedFolderCreateReq
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  name := strings.TrimSpace(req.Name)
+  description := strings.TrimSpace(req.Description)
 
   if name == "" {
     writeError(c, http.StatusBadRequest, "名称不能为空")
@@ -77,7 +86,7 @@ func (s *Server) handleAdminSharedFoldersCreate(c *gin.Context) {
   }
 
   // 创建数据库记录
-  if err := store.CreateSharedFolder(name, description, isPublic, username); err != nil {
+  if err := store.CreateSharedFolder(name, description, req.IsPublic, username); err != nil {
     // 目录已创建，需要回滚
     os.RemoveAll(shareDir)
     writeError(c, http.StatusBadRequest, err.Error())
@@ -85,20 +94,10 @@ func (s *Server) handleAdminSharedFoldersCreate(c *gin.Context) {
   }
 
   // 关联组
-  if groupIDsStr != "" {
+  if len(req.GroupIDs) > 0 {
     sf, err := store.GetSharedFolderByName(name)
     if err == nil {
-      parts := strings.Split(groupIDsStr, ",")
-      gids := make([]int64, 0, len(parts))
-      for _, p := range parts {
-        gid, err := strconv.ParseInt(strings.TrimSpace(p), 10, 64)
-        if err == nil {
-          gids = append(gids, gid)
-        }
-      }
-      if len(gids) > 0 {
-        store.SetSharedFolderGroups(sf.ID, gids)
-      }
+      store.SetSharedFolderGroups(sf.ID, req.GroupIDs)
     }
   }
 
@@ -111,16 +110,19 @@ func (s *Server) handleAdminSharedFoldersUpdate(c *gin.Context) {
     return
   }
 
-  idStr := strings.TrimSpace(c.PostForm("id"))
-  newName := strings.TrimSpace(c.PostForm("name"))
-  description := strings.TrimSpace(c.PostForm("description"))
-  newIsPublic := c.PostForm("is_public") == "1"
-
-  id, err := strconv.ParseInt(idStr, 10, 64)
-  if err != nil {
-    writeError(c, http.StatusBadRequest, "无效的 ID")
+  var req struct {
+    ID          int64  `json:"id"`
+    Name        string `json:"name"`
+    Description string `json:"description"`
+    IsPublic    bool   `json:"is_public"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
+  id := req.ID
+  newName := strings.TrimSpace(req.Name)
+  description := strings.TrimSpace(req.Description)
   if newName == "" {
     writeError(c, http.StatusBadRequest, "名称不能为空")
     return
@@ -152,7 +154,7 @@ func (s *Server) handleAdminSharedFoldersUpdate(c *gin.Context) {
   }
 
   // 更新数据库
-  if err := store.UpdateSharedFolder(id, newName, description, newIsPublic); err != nil {
+  if err := store.UpdateSharedFolder(id, newName, description, req.IsPublic); err != nil {
     // 回滚目录改名
     if needsRename {
       oldDir := filepath.Join(filepath.Dir(s.loadConfig().UsersRoot), "shared", oldSF.Name)
@@ -172,12 +174,14 @@ func (s *Server) handleAdminSharedFoldersDelete(c *gin.Context) {
     return
   }
 
-  idStr := strings.TrimSpace(c.PostForm("id"))
-  id, err := strconv.ParseInt(idStr, 10, 64)
-  if err != nil {
-    writeError(c, http.StatusBadRequest, "无效的 ID")
+  var req struct {
+    ID int64 `json:"id"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
+  id := req.ID
 
   sf, err := store.GetSharedFolder(id)
   if err != nil {
@@ -210,33 +214,20 @@ func (s *Server) handleAdminSharedFoldersSetGroups(c *gin.Context) {
     return
   }
 
-  folderIDStr := strings.TrimSpace(c.PostForm("folder_id"))
-  groupIDsStr := strings.TrimSpace(c.PostForm("group_ids"))
-
-  folderID, err := strconv.ParseInt(folderIDStr, 10, 64)
-  if err != nil {
-    writeError(c, http.StatusBadRequest, "无效的文件夹 ID")
+  var req struct {
+    FolderID int64   `json:"folder_id"`
+    GroupIDs []int64 `json:"group_ids"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
+  folderID := req.FolderID
 
   // 获取旧成员
   oldMembers, _ := store.GetSharedFolderMembers(folderID)
 
-  // 解析新的组 ID 列表
-  var gids []int64
-  if groupIDsStr != "" {
-    parts := strings.Split(groupIDsStr, ",")
-    for _, p := range parts {
-      gid, err := strconv.ParseInt(strings.TrimSpace(p), 10, 64)
-      if err != nil {
-        writeError(c, http.StatusBadRequest, "无效的组 ID: "+p)
-        return
-      }
-      gids = append(gids, gid)
-    }
-  }
-
-  if err := store.SetSharedFolderGroups(folderID, gids); err != nil {
+  if err := store.SetSharedFolderGroups(folderID, req.GroupIDs); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
   }
@@ -260,14 +251,16 @@ func (s *Server) handleAdminSharedFoldersTest(c *gin.Context) {
     return
   }
 
-  folderIDStr := strings.TrimSpace(c.PostForm("folder_id"))
-  testUsername := strings.TrimSpace(c.PostForm("username"))
-
-  folderID, err := strconv.ParseInt(folderIDStr, 10, 64)
-  if err != nil {
-    writeError(c, http.StatusBadRequest, "无效的文件夹 ID")
+  var req struct {
+    FolderID int64  `json:"folder_id"`
+    Username string `json:"username"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
+  folderID := req.FolderID
+  testUsername := strings.TrimSpace(req.Username)
   if testUsername == "" {
     writeError(c, http.StatusBadRequest, "用户名不能为空")
     return
@@ -326,12 +319,14 @@ func (s *Server) handleAdminSharedFoldersMount(c *gin.Context) {
     return
   }
 
-  folderIDStr := strings.TrimSpace(c.PostForm("folder_id"))
-  folderID, err := strconv.ParseInt(folderIDStr, 10, 64)
-  if err != nil {
-    writeError(c, http.StatusBadRequest, "无效的文件夹 ID")
+  var req struct {
+    FolderID int64 `json:"folder_id"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
+  folderID := req.FolderID
 
   if _, err := store.GetSharedFolder(folderID); err != nil {
     writeError(c, http.StatusBadRequest, "共享文件夹不存在")

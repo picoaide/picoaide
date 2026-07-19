@@ -109,11 +109,20 @@ func (s *Server) handleAdminSkillsDeploy(c *gin.Context) {
     return
   }
 
-
-  skillName := strings.TrimSpace(c.PostForm("skill_name"))
-  targetUser := strings.TrimSpace(c.PostForm("username"))
-  targetGroup := strings.TrimSpace(c.PostForm("group_name"))
-  skillSource := strings.TrimSpace(c.PostForm("source"))
+  var req struct {
+    SkillName  string `json:"skill_name"`
+    Username   string `json:"username"`
+    GroupName  string `json:"group_name"`
+    Source     string `json:"source"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  skillName := strings.TrimSpace(req.SkillName)
+  targetUser := strings.TrimSpace(req.Username)
+  targetGroup := strings.TrimSpace(req.GroupName)
+  skillSource := strings.TrimSpace(req.Source)
   slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/admin/skills/deploy", "skill", skillName, "user", targetUser, "group", targetGroup, "operator", s.getSessionUser(c))
 
   if skillName == "" {
@@ -200,7 +209,14 @@ func (s *Server) handleAdminSkillsRemove(c *gin.Context) {
     return
   }
 
-  name := strings.TrimSpace(c.PostForm("name"))
+  var req struct {
+    Name string `json:"name"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  name := strings.TrimSpace(req.Name)
   if name == "" {
     writeError(c, http.StatusBadRequest, "技能名称不能为空")
     return
@@ -283,10 +299,18 @@ func (s *Server) handleAdminSkillsUserBind(c *gin.Context) {
     return
   }
 
-
-  skillName := strings.TrimSpace(c.PostForm("skill_name"))
-  username := strings.TrimSpace(c.PostForm("username"))
-  skillSource := strings.TrimSpace(c.PostForm("source"))
+  var req struct {
+    SkillName string `json:"skill_name"`
+    Username  string `json:"username"`
+    Source    string `json:"source"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  skillName := strings.TrimSpace(req.SkillName)
+  username := strings.TrimSpace(req.Username)
+  skillSource := strings.TrimSpace(req.Source)
 
   if skillName == "" || username == "" {
     writeError(c, http.StatusBadRequest, "技能名和用户名不能为空")
@@ -315,9 +339,16 @@ func (s *Server) handleAdminSkillsUserUnbind(c *gin.Context) {
     return
   }
 
-
-  skillName := strings.TrimSpace(c.PostForm("skill_name"))
-  username := strings.TrimSpace(c.PostForm("username"))
+  var req struct {
+    SkillName string `json:"skill_name"`
+    Username  string `json:"username"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  skillName := strings.TrimSpace(req.SkillName)
+  username := strings.TrimSpace(req.Username)
 
   if skillName == "" || username == "" {
     writeError(c, http.StatusBadRequest, "技能名和用户名不能为空")
@@ -388,7 +419,14 @@ func (s *Server) handleAdminSkillsDefaultsToggle(c *gin.Context) {
     return
   }
 
-  name := strings.TrimSpace(c.PostForm("skill_name"))
+  var req struct {
+    SkillName string `json:"skill_name"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  name := strings.TrimSpace(req.SkillName)
   if name == "" {
     writeError(c, http.StatusBadRequest, "技能名称不能为空")
     return

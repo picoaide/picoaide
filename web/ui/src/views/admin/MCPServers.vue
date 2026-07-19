@@ -210,13 +210,12 @@ const handleSave = async () => {
   }
   saveLoading.value = true
   try {
-    const params: Record<string, string> = { name: form.name, transport: form.transport }
+    const params: Record<string, any> = { name: form.name, transport: form.transport, enabled: form.enabled }
     if (form.command) params.command = form.command
     if (form.args) params.args = form.args
     if (form.url) params.url = form.url
     if (form.env) params.env = form.env
     if (form.headers) params.headers = form.headers
-    params.enabled = String(form.enabled)
 
     const path = editingId.value ? `/admin/mcp/servers/update/${editingId.value}` : '/admin/mcp/servers/create'
     await api.post(path, params)

@@ -112,13 +112,17 @@ const openConfig = async (ch: Channel) => {
   formValues.value = {}
   try {
     const data = await api.get('/channels/config-fields', { section: ch.channel })
-    fields.value = (data.fields || data || []).map((f: any) => ({
-      name: f.name || '',
-      label: f.label || f.name || '',
-      type: f.type || 'string',
-      description: f.description || '',
+    fields.value = (data.fields || []).map((f: any) => ({
+      name: f.field?.key || '',
+      label: f.field?.label || f.field?.key || '',
+      type: f.field?.type || 'string',
+      description: f.field?.hint || '',
     }))
-    formValues.value = data.values || {}
+    const vals: Record<string, any> = {}
+    ;(data.fields || []).forEach((f: any) => {
+      vals[f.field?.key] = f.value
+    })
+    formValues.value = vals
   } catch {
     message.error('网络错误')
   } finally {
@@ -129,7 +133,7 @@ const openConfig = async (ch: Channel) => {
 const saveConfig = async () => {
   saving.value = true
   try {
-    await api.post('/channels/config-fields', { section: currentChannel.value, values: JSON.stringify(formValues.value) })
+    await api.post('/channels/config-fields', { section: currentChannel.value, values: formValues.value })
     message.success('保存成功')
     showConfig.value = false
     loadChannels()

@@ -70,24 +70,20 @@ const handleLogin = async () => {
   if (!form.username || !form.password) return
   loading.value = true
   try {
-    const csrfRes = await fetch('/api/csrf')
-    const { token: csrf } = await csrfRes.json()
-
     const res = await fetch('/api/login', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrf,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
     })
     const data = await res.json()
     if (res.ok) {
       localStorage.setItem('session', '1')
       localStorage.setItem('username', form.username)
-      localStorage.setItem('role', data.role || 'user')
+      const infoRes = await fetch('/api/user/info')
+      const role = infoRes.ok ? (await infoRes.json()).role : 'user'
+      localStorage.setItem('role', role || 'user')
       message.success('登录成功')
-      router.push(data.role === 'superadmin' ? '/admin' : '/user/chat')
+      router.push(role === 'superadmin' ? '/admin' : '/user/chat')
     } else {
       message.error(data.message || '登录失败')
     }

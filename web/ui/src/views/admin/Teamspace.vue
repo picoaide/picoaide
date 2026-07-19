@@ -114,7 +114,7 @@ const handleCreate = async () => {
   if (!form.name) { message.warning('请输入名称'); return }
   creating.value = true
   try {
-    const data = await api.post('/admin/shared-folders/create', { name: form.name, description: form.description, is_public: form.is_public ? '1' : '' })
+    const data = await api.post('/admin/shared-folders/create', { name: form.name, description: form.description, is_public: form.is_public })
     if (data.success) { message.success('创建成功'); showCreate.value = false; form.name = ''; form.description = ''; form.is_public = false; fetchFolders() }
     else message.error(data.error || '创建失败')
   } catch { message.error('创建失败') }
@@ -133,7 +133,7 @@ const handleEdit = (folder: any) => {
 const submitEdit = async () => {
   creating.value = true
   try {
-    const data = await api.post('/admin/shared-folders/update', { id: String(currentFolder.value.id), name: editForm.name, description: editForm.description, is_public: editForm.is_public ? '1' : '' })
+    const data = await api.post('/admin/shared-folders/update', { id: currentFolder.value.id, name: editForm.name, description: editForm.description, is_public: editForm.is_public })
     if (data.success) { message.success('更新成功'); showEdit.value = false; fetchFolders() }
     else message.error(data.error || '更新失败')
   } catch { message.error('更新失败') }
@@ -151,7 +151,7 @@ const handleSetGroups = async (folder: any) => {
 const submitGroups = async () => {
   creating.value = true
   try {
-    const data = await api.post('/admin/shared-folders/groups/set', { folder_id: String(currentFolder.value.id), group_ids: selectedGroupIds.value.join(',') })
+    const data = await api.post('/admin/shared-folders/groups/set', { folder_id: currentFolder.value.id, group_ids: selectedGroupIds.value.map(Number) })
     if (data.success) { message.success('设置成功'); showGroups.value = false; fetchFolders() }
     else message.error(data.error || '设置失败')
   } catch { message.error('设置失败') }
@@ -160,7 +160,7 @@ const submitGroups = async () => {
 
 const handleTest = async (folder: any) => {
   try {
-    const data = await api.post('/admin/shared-folders/test', { folder_id: String(folder.id), username: '' })
+    const data = await api.post('/admin/shared-folders/test', { folder_id: folder.id, username: '' })
     if (data.mounted) message.success('挂载正常')
     else message.warning(data.message || '挂载异常')
   } catch { message.error('测试失败') }
@@ -168,7 +168,7 @@ const handleTest = async (folder: any) => {
 
 const handleMount = async (folder: any) => {
   try {
-    const data = await api.post('/admin/shared-folders/mount', { folder_id: String(folder.id) })
+    const data = await api.post('/admin/shared-folders/mount', { folder_id: folder.id })
     if (data.success) message.success('挂载完成')
     else message.error(data.error || '挂载失败')
   } catch { message.error('挂载失败') }
@@ -176,7 +176,7 @@ const handleMount = async (folder: any) => {
 
 const handleDelete = async (folder: any) => {
   try {
-    const data = await api.post('/admin/shared-folders/delete', { id: String(folder.id) })
+    const data = await api.post('/admin/shared-folders/delete', { id: folder.id })
     if (data.success) { message.success('删除成功'); fetchFolders() }
     else message.error(data.error || '删除失败')
   } catch { message.error('删除失败') }

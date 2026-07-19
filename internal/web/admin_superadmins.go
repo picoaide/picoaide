@@ -45,12 +45,15 @@ func (s *Server) handleAdminSuperadminCreate(c *gin.Context) {
     writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
+
+  var req struct {
+    Username string `json:"username"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
-
-  username := c.PostForm("username")
+  username := req.Username
   if err := user.ValidateUsername(username); err != nil {
     writeError(c, http.StatusBadRequest, err.Error())
     return
@@ -85,12 +88,15 @@ func (s *Server) handleAdminSuperadminDelete(c *gin.Context) {
     writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
+
+  var req struct {
+    Username string `json:"username"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
-
-  username := c.PostForm("username")
+  username := req.Username
   if username == "" {
     writeError(c, http.StatusBadRequest, "用户名不能为空")
     return
@@ -132,12 +138,15 @@ func (s *Server) handleAdminSuperadminReset(c *gin.Context) {
     writeError(c, http.StatusMethodNotAllowed, "仅支持 POST 方法")
     return
   }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
+
+  var req struct {
+    Username string `json:"username"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
-
-  username := c.PostForm("username")
+  username := req.Username
   if username == "" {
     writeError(c, http.StatusBadRequest, "用户名不能为空")
     return
@@ -171,13 +180,17 @@ func (s *Server) handleAdminChangePassword(c *gin.Context) {
   if username == "" {
     return
   }
-  if !s.checkCSRF(c) {
-    writeError(c, http.StatusForbidden, "无效请求")
+
+  var req struct {
+    OldPassword string `json:"old_password"`
+    NewPassword string `json:"new_password"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
-
-  oldPassword := c.PostForm("old_password")
-  newPassword := c.PostForm("new_password")
+  oldPassword := req.OldPassword
+  newPassword := req.NewPassword
   if oldPassword == "" || newPassword == "" {
     writeError(c, http.StatusBadRequest, "请输入旧密码和新密码")
     return

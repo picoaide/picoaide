@@ -175,7 +175,7 @@ const handleBatchCreate = async () => {
   batchLoading.value = true
   batchResult.value = ''
   try {
-    const data = await api.post('/admin/users/batch-create', { usernames: names.join('\n') })
+    const data = await api.post('/admin/users/batch-create', { usernames: names })
     batchResult.value = data.result || JSON.stringify(data, null, 2)
     fetchUsers()
   } catch {

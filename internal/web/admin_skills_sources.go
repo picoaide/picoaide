@@ -79,13 +79,24 @@ func (s *Server) handleAdminSkillsSourcesGitAdd(c *gin.Context) {
     return
   }
 
-
-  name := strings.TrimSpace(c.PostForm("name"))
-  repoURL := strings.TrimSpace(c.PostForm("url"))
-  ref := strings.TrimSpace(c.PostForm("ref"))
-  refType := strings.TrimSpace(c.PostForm("ref_type"))
-  username := strings.TrimSpace(c.PostForm("username"))
-  password := c.PostForm("password") // 不 TrimSpace——密码可能有空格
+  var req struct {
+    Name     string `json:"name"`
+    URL      string `json:"url"`
+    Ref      string `json:"ref"`
+    RefType  string `json:"ref_type"`
+    Username string `json:"username"`
+    Password string `json:"password"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  name := strings.TrimSpace(req.Name)
+  repoURL := strings.TrimSpace(req.URL)
+  ref := strings.TrimSpace(req.Ref)
+  refType := strings.TrimSpace(req.RefType)
+  username := strings.TrimSpace(req.Username)
+  password := req.Password // 不 TrimSpace——密码可能有空格
 
   if name == "" || repoURL == "" {
     writeError(c, http.StatusBadRequest, "名称和 URL 不能为空")
@@ -165,8 +176,14 @@ func (s *Server) handleAdminSkillsSourcesRemove(c *gin.Context) {
     return
   }
 
-
-  name := strings.TrimSpace(c.PostForm("name"))
+  var req struct {
+    Name string `json:"name"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  name := strings.TrimSpace(req.Name)
   if name == "" {
     writeError(c, http.StatusBadRequest, "源名称不能为空")
     return
@@ -218,8 +235,14 @@ func (s *Server) handleAdminSkillsSourcesPull(c *gin.Context) {
     return
   }
 
-
-  name := strings.TrimSpace(c.PostForm("name"))
+  var req struct {
+    Name string `json:"name"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  name := strings.TrimSpace(req.Name)
   if name == "" {
     writeError(c, http.StatusBadRequest, "源名称不能为空")
     return
@@ -282,8 +305,14 @@ func (s *Server) handleAdminSkillsSourcesRefresh(c *gin.Context) {
     return
   }
 
-
-  name := strings.TrimSpace(c.PostForm("name"))
+  var req struct {
+    Name string `json:"name"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  name := strings.TrimSpace(req.Name)
   if name == "" {
     writeError(c, http.StatusBadRequest, "源名称不能为空")
     return
@@ -326,9 +355,16 @@ func (s *Server) handleAdminSkillsRegistryInstall(c *gin.Context) {
     return
   }
 
-
-  sourceName := strings.TrimSpace(c.PostForm("source"))
-  slug := strings.TrimSpace(c.PostForm("slug"))
+  var req struct {
+    Source string `json:"source"`
+    Slug   string `json:"slug"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  sourceName := strings.TrimSpace(req.Source)
+  slug := strings.TrimSpace(req.Slug)
   if sourceName == "" || slug == "" {
     writeError(c, http.StatusBadRequest, "源名称和技能 slug 不能为空")
     return

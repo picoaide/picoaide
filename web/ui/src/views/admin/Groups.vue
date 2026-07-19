@@ -236,7 +236,7 @@ const handleCreate = async () => {
   try {
     const params: Record<string, string> = { name: createForm.name.trim() }
     if (createForm.description) params.description = createForm.description
-    if (createForm.parent_id) params.parent_id = String(createForm.parent_id)
+    if (createForm.parent_id) (params as any).parent_id = createForm.parent_id
     await api.post('/admin/groups/create', params)
     message.success('创建成功')
     showCreate.value = false
@@ -278,7 +278,7 @@ const fetchMembers = async () => {
   membersLoading.value = true
   try {
     const data = await api.get('/admin/groups/members', { name: currentGroup.value, page: String(memberPagination.current), page_size: String(memberPagination.pageSize), search: memberSearch.value })
-    members.value = data.members || data.users || []
+    members.value = (data.members || []).map((u: string) => ({ username: u }))
     memberPagination.total = data.total || 0
   } catch {
     message.error('获取成员列表失败')
@@ -326,9 +326,8 @@ const handleRemoveMember = async (username: string) => {
 const fetchGroupSkills = async () => {
   skillsLoading.value = true
   try {
-    const data = await api.get('/admin/groups', { name: currentGroup.value })
-    const group = (data.groups || []).find((g: any) => g.name === currentGroup.value)
-    boundSkills.value = group?.skills || []
+    const data = await api.get('/admin/groups/members', { name: currentGroup.value })
+    boundSkills.value = data.skills || []
   } catch {
     // ignore
   } finally {

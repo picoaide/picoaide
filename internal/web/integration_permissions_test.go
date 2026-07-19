@@ -5,7 +5,6 @@ import (
   "io"
   "net/http"
   "net/http/httptest"
-  "net/url"
   "strings"
   "testing"
   "github.com/gin-gonic/gin"
@@ -205,13 +204,10 @@ func TestRegularUser_AdminEndpoints_Returns403(t *testing.T) {
 
 func TestPostWithoutCSRF_Returns403(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{
-    "old_password": {"user123"},
-    "new_password": {"newpass123"},
-  }
+  body := `{"old_password":"user123","new_password":"newpass123"}`
   req, _ := http.NewRequest("POST", env.HTTP.URL+"/api/user/password",
-    strings.NewReader(form.Encode()))
-  req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    strings.NewReader(body))
+  req.Header.Set("Content-Type", "application/json")
   req.AddCookie(&http.Cookie{
     Name:  "session",
     Value: env.Server.createSessionToken("testuser"),
@@ -225,18 +221,18 @@ func TestPostWithoutCSRF_Returns403(t *testing.T) {
 
 func TestLoginRateLimit_Returns429(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{"username": {"testuser"}, "password": {"wrong"}}
+  body := `{"username":"testuser","password":"wrong"}`
   for i := 0; i < 10; i++ {
-    req, _ := http.NewRequest("POST", env.HTTP.URL+"/api/login", strings.NewReader(form.Encode()))
-    req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    req, _ := http.NewRequest("POST", env.HTTP.URL+"/api/login", strings.NewReader(body))
+    req.Header.Set("Content-Type", "application/json")
     resp, err := http.DefaultClient.Do(req)
     if err != nil {
       t.Fatal(err)
     }
     resp.Body.Close()
   }
-  req, _ := http.NewRequest("POST", env.HTTP.URL+"/api/login", strings.NewReader(form.Encode()))
-  req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+  req, _ := http.NewRequest("POST", env.HTTP.URL+"/api/login", strings.NewReader(body))
+  req.Header.Set("Content-Type", "application/json")
   resp, err := http.DefaultClient.Do(req)
   if err != nil {
     t.Fatal(err)

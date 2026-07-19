@@ -17,39 +17,34 @@ import (
 // ============================================================
 
 type mcpServerReq struct {
-  Name      string
-  Transport string
-  Command   string
-  Args      string
-  URL       string
-  Env       string
-  Headers   string
-  Enabled   bool
+  Name      string `json:"name"`
+  Transport string `json:"transport"`
+  Command   string `json:"command"`
+  Args      string `json:"args"`
+  URL       string `json:"url"`
+  Env       string `json:"env"`
+  Headers   string `json:"headers"`
+  Enabled   bool   `json:"enabled"`
 }
 
-// parseMCPForm 从 POST 表单解析 mcpServerReq
+// parseMCPForm 从 JSON 解析 mcpServerReq
 func parseMCPForm(c *gin.Context) (mcpServerReq, error) {
   var req mcpServerReq
-  req.Name = c.PostForm("name")
-  req.Transport = c.PostForm("transport")
+  if err := c.ShouldBindJSON(&req); err != nil {
+    return req, err
+  }
   if req.Transport == "" {
     req.Transport = "stdio"
   }
-  req.Command = c.PostForm("command")
-  req.Args = c.PostForm("args")
   if req.Args == "" {
     req.Args = "[]"
   }
-  req.URL = c.PostForm("url")
-  req.Env = c.PostForm("env")
   if req.Env == "" {
     req.Env = "{}"
   }
-  req.Headers = c.PostForm("headers")
   if req.Headers == "" {
     req.Headers = "{}"
   }
-  req.Enabled = c.PostForm("enabled") == "true"
   if req.Name == "" {
     return req, fmt.Errorf("name 不能为空")
   }
@@ -267,10 +262,18 @@ func (s *Server) handleAdminMCPServerGrantAdd(c *gin.Context) {
     return
   }
 
-  serverIDStr := c.PostForm("server_id")
-  serverID, _ := strconv.ParseInt(serverIDStr, 10, 64)
-  grantType := c.PostForm("grant_type")
-  grantValue := c.PostForm("grant_value")
+  var req struct {
+    ServerID   int64  `json:"server_id"`
+    GrantType  string `json:"grant_type"`
+    GrantValue string `json:"grant_value"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  serverID := req.ServerID
+  grantType := req.GrantType
+  grantValue := req.GrantValue
 
   if grantType == "" || grantValue == "" {
     writeError(c, http.StatusBadRequest, "grant_type 和 grant_value 不能为空")

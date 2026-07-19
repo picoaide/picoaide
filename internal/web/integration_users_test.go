@@ -1,7 +1,6 @@
 package web
 
 import (
-  "net/url"
   "testing"
 
   "github.com/picoaide/picoaide/internal/store"
@@ -151,11 +150,7 @@ func TestAdminAuthLDAPUsers_DirectorySourceUsesLDAP(t *testing.T) {
 
 func TestAdminUserCreate_LocalModeSuccess(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{
-    "username":  {"newuser"},
-    "image_tag": {"test-tag"},
-  }
-  resp := env.postForm(t, "/api/admin/users/create", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/users/create", "testadmin", map[string]interface{}{"username": "newuser"})
   assertStatus(t, resp, 200)
   var result struct {
     Success  bool   `json:"success"`
@@ -179,26 +174,22 @@ func TestAdminUserCreate_LocalModeSuccess(t *testing.T) {
 
 func TestAdminUserCreate_LocalModeInvalidUsername(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{"username": {"bad/user"}}
-  resp := env.postForm(t, "/api/admin/users/create", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/users/create", "testadmin", map[string]interface{}{"username": "bad/user"})
   assertStatus(t, resp, 400)
 }
 
 func TestAdminUserCreate_UnifiedModeForbidden(t *testing.T) {
   env := setupTestServer(t)
   env.Cfg.Web.AuthMode = "ldap"
-  form := url.Values{"username": {"newuser"}}
-  resp := env.postForm(t, "/api/admin/users/create", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/users/create", "testadmin", map[string]interface{}{"username": "newuser"})
   assertStatus(t, resp, 403)
 }
 
 func TestAdminUserBatchCreate_LocalModeMixedResults(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{
-    "usernames": {"batch1\nbad/user\ntestuser\nbatch2"},
-    "image_tag": {"test-tag"},
-  }
-  resp := env.postForm(t, "/api/admin/users/batch-create", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/users/batch-create", "testadmin", map[string]interface{}{
+    "usernames": []string{"batch1", "bad/user", "testuser", "batch2"},
+  })
   assertStatus(t, resp, 200)
   var result struct {
     Success bool `json:"success"`
@@ -226,18 +217,15 @@ func TestAdminUserBatchCreate_LocalModeMixedResults(t *testing.T) {
 func TestAdminUserBatchCreate_UnifiedModeForbidden(t *testing.T) {
   env := setupTestServer(t)
   env.Cfg.Web.AuthMode = "ldap"
-  form := url.Values{
-    "usernames": {"batch1\nbatch2"},
-    "image_tag": {"test-tag"},
-  }
-  resp := env.postForm(t, "/api/admin/users/batch-create", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/users/batch-create", "testadmin", map[string]interface{}{
+    "usernames": []string{"batch1", "batch2"},
+  })
   assertStatus(t, resp, 403)
 }
 
 func TestAdminUserDelete_LocalModeSuccess(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{"username": {"testuser"}}
-  resp := env.postForm(t, "/api/admin/users/delete", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/users/delete", "testadmin", map[string]interface{}{"username": "testuser"})
   assertStatus(t, resp, 200)
   if store.UserExists("testuser") {
     t.Fatal("testuser should be deleted")
@@ -246,8 +234,7 @@ func TestAdminUserDelete_LocalModeSuccess(t *testing.T) {
 
 func TestAdminUserDelete_LocalModeRejectsSuperadmin(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{"username": {"testadmin"}}
-  resp := env.postForm(t, "/api/admin/users/delete", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/users/delete", "testadmin", map[string]interface{}{"username": "testadmin"})
   assertStatus(t, resp, 400)
   if !store.IsSuperadmin("testadmin") {
     t.Fatal("testadmin should still exist")
@@ -257,8 +244,7 @@ func TestAdminUserDelete_LocalModeRejectsSuperadmin(t *testing.T) {
 func TestAdminUserDelete_UnifiedModeForbidden(t *testing.T) {
   env := setupTestServer(t)
   env.Cfg.Web.AuthMode = "ldap"
-  form := url.Values{"username": {"testuser"}}
-  resp := env.postForm(t, "/api/admin/users/delete", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/users/delete", "testadmin", map[string]interface{}{"username": "testuser"})
   assertStatus(t, resp, 403)
   if !store.UserExists("testuser") {
     t.Fatal("testuser should not be deleted in unified mode")
@@ -281,8 +267,7 @@ func TestSuperadmins_List(t *testing.T) {
 
 func TestSuperadminCreate_Success(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{"username": {"newadmin"}}
-  resp := env.postForm(t, "/api/admin/superadmins/create", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/superadmins/create", "testadmin", map[string]interface{}{"username": "newadmin"})
   assertStatus(t, resp, 200)
   var result struct {
     Success  bool   `json:"success"`
@@ -303,8 +288,7 @@ func TestSuperadminCreate_Success(t *testing.T) {
 
 func TestSuperadminCreate_Duplicate(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{"username": {"testadmin"}}
-  resp := env.postForm(t, "/api/admin/superadmins/create", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/superadmins/create", "testadmin", map[string]interface{}{"username": "testadmin"})
   if resp.StatusCode != 400 && resp.StatusCode != 500 {
     t.Errorf("status=%d, want error", resp.StatusCode)
   }
@@ -312,8 +296,7 @@ func TestSuperadminCreate_Duplicate(t *testing.T) {
 
 func TestSuperadminDelete_SelfDeletion(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{"username": {"testadmin"}}
-  resp := env.postForm(t, "/api/admin/superadmins/delete", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/superadmins/delete", "testadmin", map[string]interface{}{"username": "testadmin"})
   // 自我删除应被拒绝
   assertStatus(t, resp, 400)
 }
@@ -324,8 +307,7 @@ func TestSuperadminDelete_Success(t *testing.T) {
   if err := store.CreateUser("otheradmin", "pass123", "superadmin"); err != nil {
     t.Fatalf("CreateUser: %v", err)
   }
-  form := url.Values{"username": {"otheradmin"}}
-  resp := env.postForm(t, "/api/admin/superadmins/delete", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/superadmins/delete", "testadmin", map[string]interface{}{"username": "otheradmin"})
   assertStatus(t, resp, 200)
   if store.IsSuperadmin("otheradmin") {
     t.Error("should be deleted")
@@ -334,8 +316,7 @@ func TestSuperadminDelete_Success(t *testing.T) {
 
 func TestSuperadminReset_Success(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{"username": {"testadmin"}}
-  resp := env.postForm(t, "/api/admin/superadmins/reset", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/superadmins/reset", "testadmin", map[string]interface{}{"username": "testadmin"})
   assertStatus(t, resp, 200)
   var result struct {
     Success  bool   `json:"success"`
@@ -349,8 +330,7 @@ func TestSuperadminReset_Success(t *testing.T) {
 
 func TestSuperadminReset_NotSuperadmin(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{"username": {"testuser"}}
-  resp := env.postForm(t, "/api/admin/superadmins/reset", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/superadmins/reset", "testadmin", map[string]interface{}{"username": "testuser"})
   if resp.StatusCode != 400 && resp.StatusCode != 404 {
     t.Errorf("status=%d, want error", resp.StatusCode)
   }

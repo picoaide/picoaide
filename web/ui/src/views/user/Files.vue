@@ -79,6 +79,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { FolderOutlined, FileOutlined, UploadOutlined } from '@ant-design/icons-vue'
+import { api } from '../../composables/api'
 import { getCsrf } from '../../composables/useCsrf'
 
 const route = useRoute()
@@ -150,18 +151,12 @@ const downloadFile = (record: any) => {
 
 const deleteFile = async (record: any) => {
   try {
-    const csrf_token = await getCsrf()
     const path = currentPath.value ? `${currentPath.value}/${record.name}` : record.name
-    const res = await fetch('/api/files/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ path, csrf_token }),
-    })
-    if (!res.ok) { const e = await res.json().catch(() => ({})); message.error(e.message || '删除失败'); return }
+    await api.post('/files/delete', { path })
     message.success('删除成功')
     loadFiles()
-  } catch {
-    message.error('网络错误')
+  } catch (e: any) {
+    message.error(e.message || '网络错误')
   }
 }
 
@@ -202,19 +197,13 @@ const newDirName = ref('')
 const doMkdir = async () => {
   if (!newDirName.value.trim()) { message.warning('请输入文件夹名称'); return }
   try {
-    const csrf_token = await getCsrf()
-    const res = await fetch('/api/files/mkdir', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ path: currentPath.value, name: newDirName.value.trim(), csrf_token }),
-    })
-    if (!res.ok) { const e = await res.json().catch(() => ({})); message.error(e.message || '创建失败'); return }
+    await api.post('/files/mkdir', { path: currentPath.value, name: newDirName.value.trim() })
     message.success('创建成功')
     showMkdir.value = false
     newDirName.value = ''
     loadFiles()
-  } catch {
-    message.error('网络错误')
+  } catch (e: any) {
+    message.error(e.message || '网络错误')
   }
 }
 
@@ -242,17 +231,11 @@ const editFile = async (record: any) => {
 const doSaveEdit = async () => {
   saving.value = true
   try {
-    const csrf_token = await getCsrf()
-    const res = await fetch('/api/files/edit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ path: editPath.value, content: editContent.value, csrf_token }),
-    })
-    if (!res.ok) { const e = await res.json().catch(() => ({})); message.error(e.message || '保存失败'); return }
+    await api.post('/files/edit', { path: editPath.value, content: editContent.value })
     message.success('保存成功')
     showEditor.value = false
-  } catch {
-    message.error('网络错误')
+  } catch (e: any) {
+    message.error(e.message || '网络错误')
   } finally {
     saving.value = false
   }

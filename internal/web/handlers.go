@@ -108,11 +108,21 @@ func (s *Server) handleLoginMode(c *gin.Context) {
   }{true, s.loadConfig().AuthMode(), authsource.ActiveProviderMeta(s.loadConfig())})
 }
 
+type loginReq struct {
+  Username string `json:"username"`
+  Password string `json:"password"`
+}
+
 // handleLogin 处理用户名密码登录请求
 // 流程：认证 → 超管逃生通道 → 本地/外部用户分流，不依赖具体认证源名称
 func (s *Server) handleLogin(c *gin.Context) {
-  username := c.PostForm("username")
-  password := c.PostForm("password")
+  var req loginReq
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  username := req.Username
+  password := req.Password
   slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/login", "username", username)
   if username == "" || password == "" {
     writeError(c, http.StatusBadRequest, "请输入用户名和密码")
@@ -325,6 +335,11 @@ func (s *Server) handleCSRF(c *gin.Context) {
 // Cookie 同步 Handler
 // ============================================================
 
+type cookiesReq struct {
+  Domain  string `json:"domain"`
+  Cookies string `json:"cookies"`
+}
+
 // handleCookies 将当前页面的 Cookie 写入数据库
 func (s *Server) handleCookies(c *gin.Context) {
   username := s.requireRegularUser(c)
@@ -336,8 +351,13 @@ func (s *Server) handleCookies(c *gin.Context) {
     return
   }
 
-  domain := strings.TrimSpace(c.PostForm("domain"))
-  cookieStr := strings.TrimSpace(c.PostForm("cookies"))
+  var req cookiesReq
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  domain := strings.TrimSpace(req.Domain)
+  cookieStr := strings.TrimSpace(req.Cookies)
 
   if domain == "" || cookieStr == "" {
     writeError(c, http.StatusBadRequest, "域名和 Cookie 不能为空")
@@ -388,7 +408,14 @@ func (s *Server) handleUserCookiesDelete(c *gin.Context) {
     return
   }
 
-  domain := strings.TrimSpace(c.PostForm("domain"))
+  var req struct {
+    Domain string `json:"domain"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  domain := strings.TrimSpace(req.Domain)
   if domain == "" {
     writeError(c, http.StatusBadRequest, "域名不能为空")
     return
@@ -508,6 +535,11 @@ func (s *Server) handleChatHistory(c *gin.Context) {
   })
 }
 
+type changePasswordReq struct {
+  OldPassword string `json:"old_password"`
+  NewPassword string `json:"new_password"`
+}
+
 // handleChangePassword 处理用户修改密码（仅本地模式）
 func (s *Server) handleChangePassword(c *gin.Context) {
   username := s.requireRegularUser(c)
@@ -525,8 +557,14 @@ func (s *Server) handleChangePassword(c *gin.Context) {
     return
   }
 
-  oldPassword := c.PostForm("old_password")
-  newPassword := c.PostForm("new_password")
+  var req changePasswordReq
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+
+  oldPassword := req.OldPassword
+  newPassword := req.NewPassword
   if oldPassword == "" || newPassword == "" {
     writeError(c, http.StatusBadRequest, "请输入旧密码和新密码")
     return
@@ -582,6 +620,10 @@ func (s *Server) handleConfigGet(c *gin.Context) {
   c.Data(http.StatusOK, "application/json; charset=utf-8", data)
 }
 
+type configSaveReq struct {
+  Config json.RawMessage `json:"config"`
+}
+
 // handleConfigSave 从 JSON 保存配置到数据库
 func (s *Server) handleConfigSave(c *gin.Context) {
   username := s.requireAuth(c)
@@ -601,8 +643,14 @@ func (s *Server) handleConfigSave(c *gin.Context) {
     return
   }
 
-  jsonStr := c.PostForm("config")
-  if jsonStr == "" {
+  var req configSaveReq
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+
+  jsonStr := string(req.Config)
+  if jsonStr == "" || jsonStr == "null" {
     writeError(c, http.StatusBadRequest, "配置内容不能为空")
     return
   }

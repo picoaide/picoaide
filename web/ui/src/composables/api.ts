@@ -1,22 +1,24 @@
 import { getCsrf } from './useCsrf'
 
+const BASE = '/api'
+
 export const api = {
   async get<T = any>(path: string, params?: Record<string, string>): Promise<T> {
     const qs = params ? '?' + new URLSearchParams(params).toString() : ''
-    const res = await fetch('/api' + path + qs)
+    const res = await fetch(BASE + path + qs, { credentials: 'include' })
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },
-  async post<T = any>(path: string, body?: Record<string, string>): Promise<T> {
-    const params: Record<string, string> = {}
+  async post<T = any>(path: string, body?: Record<string, any>): Promise<T> {
+    const heads: Record<string, string> = { 'Content-Type': 'application/json' }
     if (body) {
-      const csrf = await getCsrf()
-      params.csrf_token = csrf
-      Object.assign(params, body)
+      heads['X-CSRF-Token'] = await getCsrf()
     }
-    const res = await fetch('/api' + path, {
+    const res = await fetch(BASE + path, {
       method: 'POST',
-      body: body ? new URLSearchParams(params).toString() : undefined,
+      credentials: 'include',
+      headers: heads,
+      body: body ? JSON.stringify(body) : undefined,
     })
     if (!res.ok) throw new Error(await res.text())
     return res.json()

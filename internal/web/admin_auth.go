@@ -23,17 +23,32 @@ func (s *Server) handleAdminAuthTestLDAP(c *gin.Context) {
     return
   }
 
-
-  host := c.PostForm("host")
-  bindDN := c.PostForm("bind_dn")
-  bindPassword := c.PostForm("bind_password")
-  baseDN := c.PostForm("base_dn")
-  filter := c.PostForm("filter")
-  usernameAttr := c.PostForm("username_attribute")
-  groupSearchMode := c.PostForm("group_search_mode")
-  groupBaseDN := c.PostForm("group_base_dn")
-  groupFilter := c.PostForm("group_filter")
-  groupMemberAttr := c.PostForm("group_member_attribute")
+  var req struct {
+    Host            string `json:"host"`
+    BindDN          string `json:"bind_dn"`
+    BindPassword    string `json:"bind_password"`
+    BaseDN          string `json:"base_dn"`
+    Filter          string `json:"filter"`
+    UsernameAttr    string `json:"username_attribute"`
+    GroupSearchMode string `json:"group_search_mode"`
+    GroupBaseDN     string `json:"group_base_dn"`
+    GroupFilter     string `json:"group_filter"`
+    GroupMemberAttr string `json:"group_member_attribute"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  host := req.Host
+  bindDN := req.BindDN
+  bindPassword := req.BindPassword
+  baseDN := req.BaseDN
+  filter := req.Filter
+  usernameAttr := req.UsernameAttr
+  groupSearchMode := req.GroupSearchMode
+  groupBaseDN := req.GroupBaseDN
+  groupFilter := req.GroupFilter
+  groupMemberAttr := req.GroupMemberAttr
 
   if host == "" || bindDN == "" || baseDN == "" {
     writeError(c, http.StatusBadRequest, "LDAP 地址、Bind DN 和 Base DN 不能为空")
@@ -226,18 +241,19 @@ func (s *Server) handleAdminWhitelistPost(c *gin.Context) {
   if s.requireSuperadmin(c) == "" {
     return
   }
-  addStr := strings.TrimSpace(c.PostForm("add"))
-  removeStr := strings.TrimSpace(c.PostForm("remove"))
-  usersStr := c.PostForm("users")
-  var users []string
-  if usersStr != "" {
-    for _, u := range strings.Split(usersStr, ",") {
-      u = strings.TrimSpace(u)
-      if u != "" {
-        users = append(users, u)
-      }
-    }
+
+  var req struct {
+    Add    string   `json:"add"`
+    Remove string   `json:"remove"`
+    Users  []string `json:"users"`
   }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  addStr := strings.TrimSpace(req.Add)
+  removeStr := strings.TrimSpace(req.Remove)
+  users := req.Users
   sort.Strings(users)
   operator := s.getSessionUser(c)
 

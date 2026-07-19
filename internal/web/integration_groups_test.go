@@ -1,7 +1,6 @@
 package web
 
 import (
-  "net/url"
   "os"
   "path/filepath"
   "testing"
@@ -19,8 +18,9 @@ func TestWhitelist_GetEmpty(t *testing.T) {
 
 func TestWhitelist_UpdateAndGet(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{"users": {"user1,user2"}}
-  resp := env.postForm(t, "/api/admin/whitelist", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/whitelist", "testadmin", map[string]interface{}{
+    "users": []string{"user1", "user2"},
+  })
   assertStatus(t, resp, 200)
   // 验证更新后能读取
   resp = env.get(t, "/api/admin/whitelist", "testadmin")
@@ -35,11 +35,9 @@ func TestGroups_ListEmpty(t *testing.T) {
 
 func TestGroupCreate_LocalModeSuccess(t *testing.T) {
   env := setupTestServer(t)
-  form := url.Values{
-    "name":        {"dev-team"},
-    "description": {"Developers"},
-  }
-  resp := env.postForm(t, "/api/admin/groups/create", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/groups/create", "testadmin", map[string]interface{}{
+    "name": "dev-team", "description": "Developers",
+  })
   assertStatus(t, resp, 200)
   if _, err := store.GetGroupID("dev-team"); err != nil {
     t.Fatalf("group should exist: %v", err)
@@ -51,8 +49,7 @@ func TestGroupDelete_LocalModeSuccess(t *testing.T) {
   if err := store.CreateGroup("to-delete", "local", "", nil); err != nil {
     t.Fatalf("CreateGroup: %v", err)
   }
-  form := url.Values{"name": {"to-delete"}}
-  resp := env.postForm(t, "/api/admin/groups/delete", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/groups/delete", "testadmin", map[string]interface{}{"name": "to-delete"})
   assertStatus(t, resp, 200)
   if _, err := store.GetGroupID("to-delete"); err == nil {
     t.Fatal("group should be deleted")
@@ -71,11 +68,10 @@ func TestGroupMembers_ListAndMutationLocalModeSuccess(t *testing.T) {
     t.Fatalf("CreateUser another-user: %v", err)
   }
 
-  form := url.Values{
-    "group_name": {"team-a"},
-    "usernames":  {"another-user"},
-  }
-  resp := env.postForm(t, "/api/admin/groups/members/add", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/groups/members/add", "testadmin", map[string]interface{}{
+    "group_name": "team-a",
+    "usernames":  []string{"another-user"},
+  })
   assertStatus(t, resp, 200)
 
   resp = env.get(t, "/api/admin/groups/members?name=team-a", "testadmin")
@@ -101,11 +97,10 @@ func TestGroupMembers_ListAndMutationLocalModeSuccess(t *testing.T) {
     t.Error("another-user should be in team-a members")
   }
 
-  form = url.Values{
-    "group_name": {"team-a"},
-    "username":   {"testuser"},
-  }
-  resp = env.postForm(t, "/api/admin/groups/members/remove", "testadmin", form)
+  resp = env.postMap(t, "/api/admin/groups/members/remove", "testadmin", map[string]interface{}{
+    "group_name": "team-a",
+    "username":   "testuser",
+  })
   assertStatus(t, resp, 200)
   members, err := store.GetGroupMembers("team-a")
   if err != nil {
@@ -124,11 +119,10 @@ func TestGroupMembersAdd_LocalModeRejectsUnknownUser(t *testing.T) {
     t.Fatalf("CreateGroup: %v", err)
   }
 
-  form := url.Values{
-    "group_name": {"team-a"},
-    "usernames":  {"ghost-user"},
-  }
-  resp := env.postForm(t, "/api/admin/groups/members/add", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/groups/members/add", "testadmin", map[string]interface{}{
+    "group_name": "team-a",
+    "usernames":  []string{"ghost-user"},
+  })
   assertStatus(t, resp, 400)
 
   members, err := store.GetGroupMembers("team-a")
@@ -146,11 +140,10 @@ func TestGroupMembersAdd_LocalModeRejectsSuperadmin(t *testing.T) {
     t.Fatalf("CreateGroup: %v", err)
   }
 
-  form := url.Values{
-    "group_name": {"team-a"},
-    "usernames":  {"testadmin"},
-  }
-  resp := env.postForm(t, "/api/admin/groups/members/add", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/groups/members/add", "testadmin", map[string]interface{}{
+    "group_name": "team-a",
+    "usernames":  []string{"testadmin"},
+  })
   assertStatus(t, resp, 400)
 
   members, err := store.GetGroupMembers("team-a")
@@ -172,25 +165,25 @@ func TestGroupMutations_ForbiddenInUnifiedAuthExceptWhitelist(t *testing.T) {
     t.Fatalf("AddUsersToGroup: %v", err)
   }
 
-  resp := env.postForm(t, "/api/admin/groups/create", "testadmin", url.Values{"name": {"manual-team"}})
+  resp := env.postMap(t, "/api/admin/groups/create", "testadmin", map[string]interface{}{"name": "manual-team"})
   assertStatus(t, resp, 403)
 
-  resp = env.postForm(t, "/api/admin/groups/delete", "testadmin", url.Values{"name": {"ldap-team"}})
+  resp = env.postMap(t, "/api/admin/groups/delete", "testadmin", map[string]interface{}{"name": "ldap-team"})
   assertStatus(t, resp, 403)
 
-  resp = env.postForm(t, "/api/admin/groups/members/add", "testadmin", url.Values{
-    "group_name": {"ldap-team"},
-    "usernames":  {"another-user"},
+  resp = env.postMap(t, "/api/admin/groups/members/add", "testadmin", map[string]interface{}{
+    "group_name": "ldap-team",
+    "usernames":  []string{"another-user"},
   })
   assertStatus(t, resp, 403)
 
-  resp = env.postForm(t, "/api/admin/groups/members/remove", "testadmin", url.Values{
-    "group_name": {"ldap-team"},
-    "username":   {"testuser"},
+  resp = env.postMap(t, "/api/admin/groups/members/remove", "testadmin", map[string]interface{}{
+    "group_name": "ldap-team",
+    "username":   "testuser",
   })
   assertStatus(t, resp, 403)
 
-  resp = env.postForm(t, "/api/admin/whitelist", "testadmin", url.Values{"users": {"testuser"}})
+  resp = env.postMap(t, "/api/admin/whitelist", "testadmin", map[string]interface{}{"users": []string{"testuser"}})
   assertStatus(t, resp, 200)
 }
 
@@ -281,11 +274,10 @@ func TestGroupSkills_BindExpandsToMembers(t *testing.T) {
   os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test\n---\n# Content\n"), 0644)
 
   // Bind skill to group
-  form := url.Values{
-    "group_name": {"team-b"},
-    "skill_name": {"test-skill"},
-  }
-  resp := env.postForm(t, "/api/admin/groups/skills/bind", "testadmin", form)
+  resp := env.postMap(t, "/api/admin/groups/skills/bind", "testadmin", map[string]interface{}{
+    "group_name": "team-b",
+    "skill_name": "test-skill",
+  })
   assertStatus(t, resp, 200)
 
   // user_skills 记录应被创建（组成员获得了直接绑定）
@@ -301,11 +293,10 @@ func TestGroupSkills_BindExpandsToMembers(t *testing.T) {
   }
 
   // Unbind
-  form = url.Values{
-    "group_name": {"team-b"},
-    "skill_name": {"test-skill"},
-  }
-  resp = env.postForm(t, "/api/admin/groups/skills/unbind", "testadmin", form)
+  resp = env.postMap(t, "/api/admin/groups/skills/unbind", "testadmin", map[string]interface{}{
+    "group_name": "team-b",
+    "skill_name": "test-skill",
+  })
   assertStatus(t, resp, 200)
 
   // user_skills 记录应被删除
@@ -338,8 +329,7 @@ func TestDefaultSkills_ToggleAndList(t *testing.T) {
   }
 
   // Toggle 设为默认
-  form := url.Values{"skill_name": {"default-skill"}}
-  resp = env.postForm(t, "/api/admin/skills/defaults/toggle", "testadmin", form)
+  resp = env.postMap(t, "/api/admin/skills/defaults/toggle", "testadmin", map[string]interface{}{"skill_name": "default-skill"})
   var toggleResp struct {
     Success bool     `json:"success"`
     Skills  []string `json:"skills"`
@@ -353,7 +343,7 @@ func TestDefaultSkills_ToggleAndList(t *testing.T) {
   }
 
   // 再 Toggle 取消默认
-  resp = env.postForm(t, "/api/admin/skills/defaults/toggle", "testadmin", form)
+  resp = env.postMap(t, "/api/admin/skills/defaults/toggle", "testadmin", map[string]interface{}{"skill_name": "default-skill"})
   parseJSON(t, resp, &toggleResp)
   if !toggleResp.Success {
     t.Fatalf("toggle off failed: %v", toggleResp)
@@ -372,12 +362,11 @@ func TestDefaultSkills_AppliedToNewUser(t *testing.T) {
   os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: default-skill\ndescription: Default test\n---\n"), 0644)
 
   // 设置为默认技能
-  resp := env.postForm(t, "/api/admin/skills/defaults/toggle", "testadmin", url.Values{"skill_name": {"default-skill"}})
+  resp := env.postMap(t, "/api/admin/skills/defaults/toggle", "testadmin", map[string]interface{}{"skill_name": "default-skill"})
   assertStatus(t, resp, 200)
 
     // 创建新用户
-  form := url.Values{"username": {"newuser"}, "password": {"pass123"}, "image_tag": {"test-tag"}}
-  resp = env.postForm(t, "/api/admin/users/create", "testadmin", form)
+  resp = env.postMap(t, "/api/admin/users/create", "testadmin", map[string]interface{}{"username": "newuser"})
   assertStatus(t, resp, 200)
 
   // 验证新用户被绑定了默认技能

@@ -64,7 +64,7 @@ const handleSave = async () => {
   }
   saveLoading.value = true
   try {
-    await api.post('/config', { config: configText.value })
+    await api.post('/config', { config: JSON.parse(configText.value) })
     message.success('保存成功')
   } catch {
     message.error('保存失败')

@@ -232,7 +232,15 @@ func (s *Server) handleChannelConfigFieldsSave(c *gin.Context) {
     return
   }
 
-  section := c.PostForm("section")
+  var req struct {
+    Section string                 `json:"section"`
+    Values  map[string]interface{} `json:"values"`
+  }
+  if err := c.ShouldBindJSON(&req); err != nil {
+    writeError(c, http.StatusBadRequest, "无效的请求参数")
+    return
+  }
+  section := req.Section
   if section == "" {
     writeError(c, http.StatusBadRequest, "缺少 section 参数")
     return
@@ -249,13 +257,9 @@ func (s *Server) handleChannelConfigFieldsSave(c *gin.Context) {
     return
   }
 
-  valuesStr := c.PostForm("values")
-  var values map[string]interface{}
-  if valuesStr != "" {
-    if err := json.Unmarshal([]byte(valuesStr), &values); err != nil {
-      writeError(c, http.StatusBadRequest, "values 格式错误")
-      return
-    }
+  values := req.Values
+  if values == nil {
+    values = make(map[string]interface{})
   }
 
   // 检查用户是否启用该渠道
