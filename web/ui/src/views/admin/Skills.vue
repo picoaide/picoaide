@@ -23,7 +23,7 @@
             <template v-if="column.key === 'is_default'">
               <a-switch
                 :checked="record.is_default"
-                @change="toggleDefault(record.name)"
+                @change="toggleDefault(record)"
                 size="small"
               />
             </template>
@@ -57,31 +57,6 @@
                 <a-button type="link" size="small" :loading="pullingName === record.name" @click="handlePull(record.name)">拉取</a-button>
                 <a-button type="link" size="small" danger @click="handleRemoveSource(record.name)">移除</a-button>
               </a-space>
-            </template>
-          </template>
-        </a-table>
-      </a-tab-pane>
-
-      <a-tab-pane key="registry" tab="注册中心">
-        <a-row justify="space-between" align="middle" style="margin-bottom: 16px">
-          <a-input-search
-            v-model:value="registryQuery"
-            placeholder="搜索技能"
-            style="width: 300px"
-            @search="fetchRegistry"
-          />
-        </a-row>
-        <a-table
-          :columns="registryColumns"
-          :data-source="registryItems"
-          :loading="registryLoading"
-          :pagination="registryPagination"
-          @change="handleRegistryTableChange"
-          row-key="slug"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'action'">
-              <a-button type="link" size="small" :loading="installingSlug === record.slug" @click="handleInstall(record)">安装</a-button>
             </template>
           </template>
         </a-table>
@@ -142,7 +117,6 @@ import { usePagination } from '../../composables/usePagination'
 
 const activeTab = ref('installed')
 const { pagination: skillsPagination } = usePagination()
-const { pagination: registryPagination } = usePagination()
 
 const search = ref('')
 const skills = ref<any[]>([])
@@ -229,12 +203,14 @@ const handleRemove = (name: string) => {
   })
 }
 
-const toggleDefault = async (skillName: string) => {
+const toggleDefault = async (skill: any) => {
+  const prev = skill.is_default
+  skill.is_default = !prev
   try {
-    await api.post('/admin/skills/defaults/toggle', { skill_name: skillName })
-    message.success('已切换')
+    await api.post('/admin/skills/defaults/toggle', { skill_name: skill.name })
     fetchSkills()
   } catch {
+    skill.is_default = prev
     message.error('操作失败')
   }
 }
@@ -328,64 +304,9 @@ const handleRemoveSource = (name: string) => {
   })
 }
 
-const registryItems = ref<any[]>([])
-const registryLoading = ref(false)
-const registryQuery = ref('')
-const installingSlug = ref('')
-
-const registryColumns = [
-  { title: '名称', dataIndex: 'name', key: 'name' },
-  { title: '标识', dataIndex: 'slug', key: 'slug' },
-  { title: '描述', dataIndex: 'description', key: 'description' },
-  { title: '来源', dataIndex: 'source', key: 'source' },
-  { title: '操作', key: 'action', width: 100 },
-]
-
-const fetchRegistry = async () => {
-  registryLoading.value = true
-  try {
-    if (sources.value.length === 0) {
-      try {
-        const data = await api.get('/admin/skills/sources')
-        sources.value = data.sources || []
-      } catch {}
-    }
-    const src = sources.value.length > 0 ? sources.value[0].name : 'skillhub.cn'
-    const params: Record<string, string> = { source: src, page: String(registryPagination.current), page_size: String(registryPagination.pageSize) }
-    if (registryQuery.value) params.q = registryQuery.value
-    const data = await api.get('/admin/skills/registry/list', params)
-    registryItems.value = data.skills || []
-    registryPagination.total = data.total || 0
-  } catch {
-    message.error('获取注册中心失败')
-  } finally {
-    registryLoading.value = false
-  }
-}
-
-const handleRegistryTableChange = (pag: any) => {
-  registryPagination.current = pag.current
-  registryPagination.pageSize = pag.pageSize || 20
-  fetchRegistry()
-}
-
-const handleInstall = async (record: any) => {
-  installingSlug.value = record.slug
-  try {
-    await api.post('/admin/skills/registry/install', { source: record.source || '', slug: record.slug })
-    message.success('安装成功')
-    fetchSkills()
-  } catch {
-    message.error('安装失败')
-  } finally {
-    installingSlug.value = ''
-  }
-}
-
 watch(activeTab, (tab) => {
   if (tab === 'installed') fetchSkills()
   else if (tab === 'sources') fetchSources()
-  else if (tab === 'registry') fetchRegistry()
 })
 
 onMounted(fetchSkills)
