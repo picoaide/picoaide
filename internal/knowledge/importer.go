@@ -2,7 +2,6 @@ package knowledge
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -101,8 +100,6 @@ func (p *Pipeline) Start(ctx context.Context) {
 }
 
 func (p *Pipeline) Process(task *ImportTask) {
-	ctx := context.Background()
-
 	store.UpdateImportTaskStatus(task.ID, "parsing", 10)
 
 	result, err := Parse(task.FileName, task.Data)
@@ -114,25 +111,36 @@ func (p *Pipeline) Process(task *ImportTask) {
 		return
 	}
 
-	docs := []struct{ Title, Content string }{{result.Title, result.Content}}
-
-	if p.llm != nil && task.AutoClassify {
-		resp, chatErr := p.llm.Chat(ctx, []llm.Message{
-			{Role: "system", Content: `You are a document classifier. Given the following content, split it into logical sections with a title for each. Return a JSON array of objects with "title" and "content" keys. If the document is a single section, return an array with one object.`},
-			{Role: "user", Content: result.Content},
-		})
-		if chatErr == nil {
-			var sections []struct{ Title, Content string }
-			if json.Unmarshal([]byte(resp.Content), &sections) == nil && len(sections) > 0 {
-				docs = sections
-			}
-		}
-	}
-
 	store.UpdateImportTaskStatus(task.ID, "indexing", 50)
 
-	for _, doc := range docs {
-		store.CreateDocument(task.KbID, task.FolderID, doc.Title, doc.Content, "upload", result.FileType, task.Username)
+	if p.llm != nil && task.AutoClassify {
+		classifyResult, classifyErr := ClassifyAndExtract(p.llm, result.Content)
+		if classifyErr != nil {
+			task.Status = "error"
+			task.ErrorMsg = classifyErr.Error()
+			store.UpdateImportTaskStatus(task.ID, "error", 0)
+			store.UpdateImportTaskError(task.ID, classifyErr.Error())
+			return
+		}
+
+		for _, section := range classifyResult.Sections {
+			folderID := task.FolderID
+			if section.SuggestedPath != "" {
+				fid, err := EnsureFolders(task.KbID, section.SuggestedPath)
+				if err == nil {
+					folderID = fid
+				}
+			}
+			content := section.Content
+			if content == "" {
+				content = section.Title
+			}
+			store.CreateDocument(task.KbID, folderID, section.Title, content, "upload", result.FileType, task.Username)
+		}
+
+		task.ExtraKeywords = classifyResult.Keywords
+	} else {
+		store.CreateDocument(task.KbID, task.FolderID, result.Title, result.Content, "upload", result.FileType, task.Username)
 	}
 
 	p.debouncer.Trigger(task.KbID, func(kbID int64) {

@@ -2,9 +2,13 @@ package knowledge
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/picoaide/picoaide/internal/llm"
 	"github.com/picoaide/picoaide/internal/store"
 )
 
@@ -189,3 +193,227 @@ func TestPipeline_Start_ProcessesQueue(t *testing.T) {
 		t.Errorf("title = %q, want %q", docs[0].Title, "Started")
 	}
 }
+
+func mockLLMServer(t *testing.T, responseContent string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"choices": []map[string]any{
+				{
+					"message": map[string]string{
+						"role":    "assistant",
+						"content": responseContent,
+					},
+				},
+			},
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+}
+
+func TestClassifyAndExtract(t *testing.T) {
+	srv := mockLLMServer(t, `{"sections":[{"title":"API Auth","content":"Auth content","suggested_path":"/技术/API"}],"keywords":["OAuth2","JWT"]}`)
+	defer srv.Close()
+
+	client := llm.NewClient(llm.Config{BaseURL: srv.URL, APIKey: "test", Model: "test"})
+	result, err := ClassifyAndExtract(client, "test content")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sections) != 1 {
+		t.Errorf("expected 1 section, got %d", len(result.Sections))
+	}
+	if result.Sections[0].Title != "API Auth" {
+		t.Errorf("title = %q, want %q", result.Sections[0].Title, "API Auth")
+	}
+	if result.Sections[0].SuggestedPath != "/技术/API" {
+		t.Errorf("path = %q, want %q", result.Sections[0].SuggestedPath, "/技术/API")
+	}
+	if len(result.Keywords) != 2 {
+		t.Errorf("expected 2 keywords, got %d", len(result.Keywords))
+	}
+	if result.Keywords[0] != "OAuth2" {
+		t.Errorf("keyword[0] = %q, want %q", result.Keywords[0], "OAuth2")
+	}
+}
+
+func TestClassifyAndExtract_HandlesMarkdownCodeBlock(t *testing.T) {
+	srv := mockLLMServer(t, "```json\n{\"sections\":[{\"title\":\"Intro\",\"content\":\"Hello\",\"suggested_path\":\"/\"}],\"keywords\":[]}\n```")
+	defer srv.Close()
+
+	client := llm.NewClient(llm.Config{BaseURL: srv.URL, APIKey: "test", Model: "test"})
+	result, err := ClassifyAndExtract(client, "content")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sections) != 1 {
+		t.Errorf("expected 1 section, got %d", len(result.Sections))
+	}
+}
+
+func TestClassifyAndExtract_APIFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient(llm.Config{BaseURL: srv.URL, APIKey: "test", Model: "test"})
+	_, err := ClassifyAndExtract(client, "content")
+	if err == nil {
+		t.Error("expected error from API failure")
+	}
+}
+
+func TestEnsureFolders_CreatesHierarchy(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "folder-test", "", "alice")
+
+	folderID, err := EnsureFolders(kb.ID, "/技术/API")
+	if err != nil {
+		t.Fatalf("EnsureFolders: %v", err)
+	}
+	if folderID == 0 {
+		t.Fatal("expected non-zero folder ID")
+	}
+
+	tree, err := store.GetFolderTree(kb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range tree {
+		names = append(names, f.Name)
+	}
+	if !contains(names, "技术") || !contains(names, "API") {
+		t.Errorf("expected '技术' and 'API' in folders, got %v", names)
+	}
+}
+
+func TestEnsureFolders_Idempotent(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "idempotent-test", "", "alice")
+
+	fid1, err := EnsureFolders(kb.ID, "/技术/API")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fid2, err := EnsureFolders(kb.ID, "/技术/API")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fid1 != fid2 {
+		t.Errorf("expected same folder ID on second call, got %d vs %d", fid1, fid2)
+	}
+}
+
+func TestEnsureFolders_EmptyPathReturnsRoot(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "root-test", "", "alice")
+	rootID := getRootFolderID(t, kb.ID)
+
+	fid, err := EnsureFolders(kb.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fid != rootID {
+		t.Errorf("expected root ID %d, got %d", rootID, fid)
+	}
+}
+
+func TestPipeline_AutoClassify(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "classify-pipeline", "", "alice")
+	rootID := getRootFolderID(t, kb.ID)
+	store.CreateImportTask("classify-task", kb.ID, "alice")
+
+	srv := mockLLMServer(t, `{"sections":[{"title":"Section 1","content":"Section 1 content","suggested_path":"/技术/A"},{"title":"Section 2","content":"Section 2 content","suggested_path":"/技术/B"}],"keywords":["KW1","KW2"]}`)
+	defer srv.Close()
+
+	client := llm.NewClient(llm.Config{BaseURL: srv.URL, APIKey: "test", Model: "test"})
+	q := NewImportQueue(10)
+	p := NewPipeline(q, client, nil)
+
+	task := &ImportTask{
+		ID:           "classify-task",
+		KbID:         kb.ID,
+		FolderID:     rootID,
+		FileName:     "test.md",
+		Data:         []byte("# Doc\ncontent"),
+		Username:     "alice",
+		AutoClassify: true,
+	}
+	p.Process(task)
+
+	docs, err := store.GetDocumentsByKB(kb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("expected 2 documents, got %d", len(docs))
+	}
+	if docs[0].Title != "Section 1" {
+		t.Errorf("doc[0].Title = %q, want %q", docs[0].Title, "Section 1")
+	}
+	if docs[1].Title != "Section 2" {
+		t.Errorf("doc[1].Title = %q, want %q", docs[1].Title, "Section 2")
+	}
+	if len(task.ExtraKeywords) != 2 {
+		t.Errorf("expected 2 keywords, got %d", len(task.ExtraKeywords))
+	}
+}
+
+func TestPipeline_AutoClassify_WithError(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "classify-error", "", "alice")
+	rootID := getRootFolderID(t, kb.ID)
+	store.CreateImportTask("classify-err-task", kb.ID, "alice")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient(llm.Config{BaseURL: srv.URL, APIKey: "test", Model: "test"})
+	q := NewImportQueue(10)
+	p := NewPipeline(q, client, nil)
+
+	task := &ImportTask{
+		ID:           "classify-err-task",
+		KbID:         kb.ID,
+		FolderID:     rootID,
+		FileName:     "test.md",
+		Data:         []byte("# Doc\ncontent"),
+		Username:     "alice",
+		AutoClassify: true,
+	}
+	p.Process(task)
+
+	if task.Status != "error" {
+		t.Errorf("expected status 'error', got %q", task.Status)
+	}
+	if task.ErrorMsg == "" {
+		t.Error("expected non-empty error message")
+	}
+
+	docs, err := store.GetDocumentsByKB(kb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 0 {
+		t.Errorf("expected 0 documents on error, got %d", len(docs))
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+
