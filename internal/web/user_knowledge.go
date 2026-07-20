@@ -1,12 +1,16 @@
 package web
 
 import (
+	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -227,6 +231,92 @@ func (s *Server) handleUserKBImportUpload(c *gin.Context) {
 	}
 
 	writeJSON(c, 200, gin.H{"success": true, "task_id": taskID})
+}
+
+// handleUserKBImportWeb URL 导入
+func (s *Server) handleUserKBImportWeb(c *gin.Context) {
+	username := s.requireRegularUser(c)
+	if username == "" {
+		return
+	}
+
+	var req struct {
+		URL          string `json:"url" binding:"required"`
+		KbID         int64  `json:"kb_id"`
+		FolderID     int64  `json:"folder_id"`
+		AutoClassify bool   `json:"auto_classify"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, 400, "参数错误: "+err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", req.URL, nil)
+	if err != nil {
+		writeError(c, 400, "无效的 URL")
+		return
+	}
+	httpReq.Header.Set("User-Agent", "PicoAide-KB/1.0")
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		writeError(c, 400, "抓取页面失败: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeError(c, 500, "读取响应失败")
+		return
+	}
+
+	idStr := c.Param("id")
+	kbID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "无效的知识库 ID")
+		return
+	}
+
+	taskID := uuid.New().String()
+	if _, err := store.CreateImportTask(taskID, kbID, username); err != nil {
+		writeError(c, 500, "创建导入任务失败")
+		return
+	}
+
+	urlStr := req.URL
+	task := &knowledge.ImportTask{
+		ID:           taskID,
+		KbID:         kbID,
+		FolderID:     req.FolderID,
+		Username:     username,
+		FileName:     extractURLFilename(urlStr, "page.html"),
+		Data:         body,
+		URL:          urlStr,
+		AutoClassify: req.AutoClassify,
+	}
+	if err := knowledge.GlobalImportQueue.Enqueue(task); err != nil {
+		store.UpdateImportTaskError(taskID, "队列已满")
+		writeError(c, 429, "导入队列已满，请稍后重试")
+		return
+	}
+
+	writeJSON(c, 200, gin.H{"success": true, "data": gin.H{"task_id": taskID}})
+}
+
+func extractURLFilename(rawURL, fallback string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fallback
+	}
+	p := u.Path
+	if p == "" || p == "/" {
+		return "index.html"
+	}
+	return path.Base(p)
 }
 
 // handleUserKBImportProgress 查询导入进度

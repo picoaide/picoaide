@@ -77,18 +77,32 @@
     </div>
 
     <a-modal v-model:open="importModalOpen" title="导入文档" @ok="doImport" :confirm-loading="importing">
-      <a-form layout="vertical">
-        <a-form-item label="文件">
-          <a-upload-dragger v-model:file-list="importFiles" :before-upload="beforeUpload" :multiple="true">
-            <p class="ant-upload-drag-icon"><InboxOutlined /></p>
-            <p class="ant-upload-text">点击或拖拽文件到此区域</p>
-            <p class="ant-upload-hint">支持 PDF、DOCX、MD、TXT、HTML、ZIP</p>
-          </a-upload-dragger>
-        </a-form-item>
-        <a-form-item>
-          <a-checkbox v-model:checked="autoClassify">自动分类</a-checkbox>
-        </a-form-item>
-      </a-form>
+      <a-tabs v-model:activeKey="importTab">
+        <a-tab-pane key="file" tab="文件上传">
+          <a-form layout="vertical">
+            <a-form-item label="文件">
+              <a-upload-dragger v-model:file-list="importFiles" :before-upload="beforeUpload" :multiple="true">
+                <p class="ant-upload-drag-icon"><InboxOutlined /></p>
+                <p class="ant-upload-text">点击或拖拽文件到此区域</p>
+                <p class="ant-upload-hint">支持 PDF、DOCX、MD、TXT、HTML、ZIP</p>
+              </a-upload-dragger>
+            </a-form-item>
+            <a-form-item>
+              <a-checkbox v-model:checked="autoClassify">自动分类</a-checkbox>
+            </a-form-item>
+          </a-form>
+        </a-tab-pane>
+        <a-tab-pane key="url" tab="URL 导入">
+          <a-form layout="vertical">
+            <a-form-item label="网页地址">
+              <a-input v-model:value="importURL" placeholder="https://example.com/article" />
+            </a-form-item>
+            <a-form-item>
+              <a-checkbox v-model:checked="autoClassify">自动分类</a-checkbox>
+            </a-form-item>
+          </a-form>
+        </a-tab-pane>
+      </a-tabs>
     </a-modal>
   </div>
 </template>
@@ -159,6 +173,8 @@ const importModalOpen = ref(false)
 const importing = ref(false)
 const importFiles = ref<any[]>([])
 const autoClassify = ref(false)
+const importTab = ref('file')
+const importURL = ref('')
 
 const renderedContent = computed(() => {
   if (!currentDoc.value) return ''
@@ -342,6 +358,14 @@ const beforeUpload = (file: any) => {
 }
 
 const doImport = async () => {
+  if (importTab.value === 'file') {
+    await doFileImport()
+  } else {
+    await doURLImport()
+  }
+}
+
+const doFileImport = async () => {
   if (importFiles.value.length === 0) { message.warning('请选择文件'); return }
   importing.value = true
   for (const file of importFiles.value) {
@@ -370,6 +394,28 @@ const doImport = async () => {
   importModalOpen.value = false
   importing.value = false
   importFiles.value = []
+}
+
+const doURLImport = async () => {
+  if (!importURL.value.trim()) { message.warning('请输入 URL'); return }
+  importing.value = true
+  try {
+    const res = await api.post('/user/knowledge-bases/' + currentKB.value!.id + '/import/web', {
+      url: importURL.value,
+      auto_classify: autoClassify.value,
+    })
+    if (res.success) {
+      message.success('网页已加入导入队列')
+      if (res.data?.task_id) pollImportProgress(res.data.task_id)
+      importModalOpen.value = false
+      importURL.value = ''
+    } else {
+      message.error(res.error || '导入失败')
+    }
+  } catch {
+    message.error('网络错误')
+  }
+  importing.value = false
 }
 
 const pollImportProgress = (taskId: string) => {

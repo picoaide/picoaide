@@ -528,6 +528,7 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
   g.GET("/user/knowledge-bases/documents/:id", s.handleUserKBRead)
   g.GET("/user/knowledge-bases/search", s.handleUserKBSearch)
   g.POST("/user/knowledge-bases/:id/import/upload", s.handleUserKBImportUpload)
+  g.POST("/user/knowledge-bases/:id/import/web", s.handleUserKBImportWeb)
   g.GET("/user/knowledge-bases/imports/:task_id", s.handleUserKBImportProgress)
 
   // 普通用户 - daemon 任务与事件流
