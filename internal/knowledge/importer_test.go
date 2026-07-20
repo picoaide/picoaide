@@ -2,7 +2,6 @@ package knowledge
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,15 +131,8 @@ func TestPipeline_Debounce(t *testing.T) {
 	kb := createTestKB(t, "debounce", "", "alice")
 	rootID := getRootFolderID(t, kb.ID)
 
-	var rebuildCount int64
-	linker := &Linker{
-		onRebuild: func(kbID int64) {
-			atomic.AddInt64(&rebuildCount, 1)
-		},
-	}
-
 	q := NewImportQueue(10)
-	p := NewPipeline(q, nil, linker)
+	p := NewPipeline(q, nil, NewLinker())
 
 	store.CreateImportTask("debounce-1", kb.ID, "alice")
 	store.CreateImportTask("debounce-2", kb.ID, "alice")
@@ -156,8 +148,12 @@ func TestPipeline_Debounce(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
-	if n := atomic.LoadInt64(&rebuildCount); n != 1 {
-		t.Errorf("expected 1 rebuild, got %d", n)
+	docs, err := store.GetDocumentsByKB(kb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 2 {
+		t.Errorf("expected 2 docs, got %d", len(docs))
 	}
 }
 

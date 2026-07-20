@@ -69,16 +69,6 @@ func (d *rebuildDebouncer) Trigger(kbID int64, fn func(int64)) {
 	})
 }
 
-type Linker struct {
-	onRebuild func(kbID int64)
-}
-
-func (l *Linker) RebuildAndStore(kbID int64) {
-	if l != nil && l.onRebuild != nil {
-		l.onRebuild(kbID)
-	}
-}
-
 type Pipeline struct {
 	queue     *ImportQueue
 	llm       *llm.Client
