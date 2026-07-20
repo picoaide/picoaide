@@ -246,11 +246,12 @@ const fetchAuthMode = async () => {
 }
 
 const handleModeChange = async (e: any) => {
+  const mode = typeof e === 'string' ? e : e?.target?.value
+  if (!mode || mode === authMode.value) return
   try {
-    const mode = e.target?.value || e
-    if (typeof e === 'string') return
     const cfg = await api.get('/config')
-    cfg.auth_mode = mode
+    cfg.web = cfg.web || {}
+    cfg.web.auth_mode = mode
     await api.post('/config', { config: JSON.stringify(cfg) })
     message.success('认证模式已切换，请重新登录')
   } catch {
