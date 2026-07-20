@@ -672,3 +672,92 @@ func CreateAuditLog(username, action, detail, source string) error {
 	_, err := engine.Insert(&KBAuditLog{Username: username, Action: action, Detail: detail, Source: source})
 	return err
 }
+
+type KBSyncSource struct {
+	ID          int64  `xorm:"pk autoincr 'id'"`
+	KbID        int64  `xorm:"notnull 'kb_id'"`
+	URL         string `xorm:"notnull 'url'"`
+	Description string `xorm:"default '' 'description'"`
+	SyncEnabled int    `xorm:"default 0 'sync_enabled'"`
+	SyncCron    string `xorm:"default '' 'sync_cron'"`
+	LastSyncAt  string `xorm:"-"`
+	Checksum    string `xorm:"default '' 'checksum'"`
+	CreatedAt   string `xorm:"created 'created_at'"`
+	UpdatedAt   string `xorm:"updated 'updated_at'"`
+}
+
+func (KBSyncSource) TableName() string { return "kb_sync_sources" }
+
+func CreateSyncSource(kbID int64, url, desc string) (*KBSyncSource, error) {
+	if err := ensureDB(); err != nil {
+		return nil, err
+	}
+	src := &KBSyncSource{KbID: kbID, URL: url, Description: desc}
+	if _, err := engine.Insert(src); err != nil {
+		return nil, fmt.Errorf("create sync source: %w", err)
+	}
+	return src, nil
+}
+
+func ListSyncSources(kbID int64) ([]KBSyncSource, error) {
+	if err := ensureDB(); err != nil {
+		return nil, err
+	}
+	var sources []KBSyncSource
+	if err := engine.Where("kb_id = ?", kbID).OrderBy("url").Find(&sources); err != nil {
+		return nil, err
+	}
+	return sources, nil
+}
+
+func UpdateSyncSource(id int64, enabled int, cron string) error {
+	if err := ensureDB(); err != nil {
+		return err
+	}
+	_, err := engine.Where("id = ?", id).Cols("sync_enabled", "sync_cron").Update(&KBSyncSource{SyncEnabled: enabled, SyncCron: cron})
+	return err
+}
+
+func DeleteSyncSource(id int64) error {
+	if err := ensureDB(); err != nil {
+		return err
+	}
+	affected, err := engine.Where("id = ?", id).Delete(&KBSyncSource{})
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("sync source %d not found", id)
+	}
+	return nil
+}
+
+// ponytail: returns all enabled sources, refine to interval-matching if scale requires
+func GetDueSyncSources() ([]KBSyncSource, error) {
+	if err := ensureDB(); err != nil {
+		return nil, err
+	}
+	var sources []KBSyncSource
+	if err := engine.Where("sync_enabled = 1").Find(&sources); err != nil {
+		return nil, err
+	}
+	return sources, nil
+}
+
+func UpdateSyncSourceResult(id int64, checksum string) error {
+	if err := ensureDB(); err != nil {
+		return err
+	}
+	_, err := engine.Where("id = ?", id).Cols("checksum", "last_sync_at").Update(&KBSyncSource{Checksum: checksum})
+	// last_sync_at updated via raw SQL since xorm skips zero-value fields
+	_, _ = engine.Exec("UPDATE kb_sync_sources SET last_sync_at = datetime('now','localtime') WHERE id = ?", id)
+	return err
+}
+
+func UpdateDocumentsByURL(kbID int64, url, content, checksum string) error {
+	if err := ensureDB(); err != nil {
+		return err
+	}
+	_, err := engine.Exec(`UPDATE kb_documents SET content = ?, checksum = ?, updated_at = datetime('now','localtime'), status = 'ready' WHERE kb_id = ? AND url = ?`, content, checksum, kbID, url)
+	return err
+}

@@ -25,11 +25,12 @@ import (
   "github.com/picoaide/picoaide/internal/store"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/config"
-  "github.com/picoaide/picoaide/internal/daemon"
-  "github.com/picoaide/picoaide/internal/logger"
-  "github.com/picoaide/picoaide/internal/sandbox"
-  "github.com/picoaide/picoaide/internal/skill"
-  "github.com/picoaide/picoaide/internal/user"
+	"github.com/picoaide/picoaide/internal/daemon"
+	"github.com/picoaide/picoaide/internal/knowledge"
+	"github.com/picoaide/picoaide/internal/logger"
+	"github.com/picoaide/picoaide/internal/sandbox"
+	"github.com/picoaide/picoaide/internal/skill"
+	"github.com/picoaide/picoaide/internal/user"
 )
 
 // ============================================================
@@ -48,7 +49,8 @@ type Server struct {
   syncMu            sync.Mutex
   auditCleanerCtx   context.Context
   auditCleanerCancel context.CancelFunc
-  agentIntegration  *AgentIntegration
+	agentIntegration  *AgentIntegration
+	syncChecker       *knowledge.SyncChecker
   tlsSrv           *http.Server // TLS 服务器，用于优雅关闭
   extSrv           *http.Server // HTTP 服务器（:80），用于热加载时更新 handler
   daemonManager     *daemon.DaemonManager
@@ -766,11 +768,15 @@ func Serve() error {
     slog.Info("MCP 服务器已加载")
   }
 
-  if cfg.Web.DebugMode {
-    gin.SetMode(gin.DebugMode)
-  } else {
-    gin.SetMode(gin.ReleaseMode)
-  }
+	// 启动知识库同步检查
+	s.syncChecker = knowledge.NewSyncChecker()
+	go s.syncChecker.Start(context.Background())
+
+	if cfg.Web.DebugMode {
+		gin.SetMode(gin.DebugMode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
 
   internalHandler := s.buildInternalHandler()
   externalHandler := s.buildExternalHandler()
@@ -834,12 +840,17 @@ func (s *Server) gracefulShutdown(sockPath string) error {
     s.syncCancel()
   }
 
-  // 停止审计日志清理
-  if s.auditCleanerCancel != nil {
-    s.auditCleanerCancel()
-  }
+	// 停止审计日志清理
+	if s.auditCleanerCancel != nil {
+		s.auditCleanerCancel()
+	}
 
-  // 停止速率限制器 goroutine
+	// 停止知识库同步检查
+	if s.syncChecker != nil {
+		s.syncChecker.Stop()
+	}
+
+	// 停止速率限制器 goroutine
   if s.loginLimiter != nil {
     s.loginLimiter.Stop()
   }

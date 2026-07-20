@@ -457,8 +457,9 @@ MCP 工具定义:
 - 搜索(分页) / 读取 / 浏览 / 目录树
 
 ### Step 1f: MCP 工具注册
-- 在 `mcp_service.go` 注册 `kb_search` 工具
+- 在 `picoaide_tools.go` 的 `picoaideHandlers` map 中注册 `kb_search`
 - MCP handler: FTS5 搜索 + 权限检查 + 审计日志
+- 更新 `picoaide_tools_test.go` handler 计数
 
 ### Step 1g: LLM 分类 (可选)
 - 集成系统 LLM

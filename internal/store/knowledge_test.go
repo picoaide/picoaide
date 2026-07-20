@@ -579,6 +579,102 @@ func TestRebuildLinksAndTags(t *testing.T) {
 	}
 }
 
+func TestCreateSyncSource(t *testing.T) {
+	testInitDB(t)
+	kb := createTestKB(t, "sync-test", "", "admin")
+
+	src, err := CreateSyncSource(kb.ID, "https://example.com/doc", "test source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.ID == 0 {
+		t.Error("expected non-zero ID")
+	}
+	if src.URL != "https://example.com/doc" {
+		t.Errorf("url = %q", src.URL)
+	}
+
+	// List
+	list, err := ListSyncSources(kb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 source, got %d", len(list))
+	}
+
+	// Update
+	if err := UpdateSyncSource(src.ID, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	var updated KBSyncSource
+	engine.Where("id = ?", src.ID).Get(&updated)
+	if updated.SyncEnabled != 1 {
+		t.Errorf("SyncEnabled = %d, want 1", updated.SyncEnabled)
+	}
+
+	// Update result
+	if err := UpdateSyncSourceResult(src.ID, "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	var result KBSyncSource
+	engine.Where("id = ?", src.ID).Get(&result)
+	if result.Checksum != "abc123" {
+		t.Errorf("Checksum = %q, want 'abc123'", result.Checksum)
+	}
+	rows, _ := engine.Query("SELECT last_sync_at FROM kb_sync_sources WHERE id = ?", src.ID)
+	if len(rows) == 0 || string(rows[0]["last_sync_at"]) == "" {
+		t.Error("expected last_sync_at in DB")
+	}
+
+	// GetDue
+	due, err := GetDueSyncSources()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 {
+		t.Fatalf("expected 1 due source, got %d", len(due))
+	}
+
+	// Delete
+	if err := DeleteSyncSource(src.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteSyncSource(99999); err == nil {
+		t.Error("expected error for non-existent source")
+	}
+}
+
+func TestUpdateDocumentsByURL(t *testing.T) {
+	testInitDB(t)
+	kb := createTestKB(t, "update-docs-url", "", "admin")
+
+	var root KBFolder
+	engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
+
+	doc, err := CreateDocument(kb.ID, root.ID, "web doc", "original", "web", "md", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.Where("id = ?", doc.ID).Cols("url").Update(&KBDocument{URL: "https://example.com/doc"})
+
+	if err := UpdateDocumentsByURL(kb.ID, "https://example.com/doc", "updated content", "def456"); err != nil {
+		t.Fatal(err)
+	}
+
+	var updated KBDocument
+	engine.Where("id = ?", doc.ID).Get(&updated)
+	if updated.Content != "updated content" {
+		t.Errorf("content = %q, want 'updated content'", updated.Content)
+	}
+	if updated.Checksum != "def456" {
+		t.Errorf("checksum = %q, want 'def456'", updated.Checksum)
+	}
+	if updated.Status != "ready" {
+		t.Errorf("status = %q, want 'ready'", updated.Status)
+	}
+}
+
 func TestSearchKB(t *testing.T) {
 	testInitDB(t)
 	kb := createTestKB(t, "search-test", "", "alice")
