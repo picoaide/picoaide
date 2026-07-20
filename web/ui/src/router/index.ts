@@ -23,6 +23,7 @@ const router = createRouter({
         { path: 'models', name: 'admin-models', component: () => import('../views/admin/Models.vue') },
         { path: 'mcp-servers', name: 'admin-mcp-servers', component: () => import('../views/admin/MCPServers.vue') },
         { path: 'superadmins', name: 'admin-superadmins', component: () => import('../views/admin/Superadmins.vue') },
+        { path: 'wiki', name: 'admin-wiki', component: () => import('../views/admin/Wiki.vue') },
         { path: 'auth', name: 'admin-auth', component: () => import('../views/admin/Auth.vue') },
         { path: 'password', name: 'admin-password', component: () => import('../views/admin/Password.vue') },
         { path: 'tls', name: 'admin-tls', component: () => import('../views/admin/TLS.vue') },

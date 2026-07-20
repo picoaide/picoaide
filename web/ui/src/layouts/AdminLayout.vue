@@ -27,6 +27,10 @@
           <template #icon><FolderOutlined /></template>
           <span>团队空间</span>
         </a-menu-item>
+        <a-menu-item key="wiki">
+          <template #icon><BookOutlined /></template>
+          <span>知识库</span>
+        </a-menu-item>
         <a-menu-divider />
         <a-menu-item key="skills">
           <template #icon><ThunderboltOutlined /></template>
@@ -99,6 +103,7 @@ import {
   UserOutlined,
   TeamOutlined,
   FolderOutlined,
+  BookOutlined,
   ThunderboltOutlined,
   MessageOutlined,
   RobotOutlined,
