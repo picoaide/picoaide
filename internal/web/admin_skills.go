@@ -94,9 +94,25 @@ func (s *Server) handleAdminSkills(c *gin.Context) {
 
   pageSkills, total, totalPages, page, pageSize := paginateSlice(allSkills, pager)
 
+  // 注入 is_default 字段
+  items := make([]map[string]interface{}, len(pageSkills))
+  for i, sk := range pageSkills {
+    m := map[string]interface{}{
+      "name":        sk.Name,
+      "description": sk.Description,
+      "source":      sk.Source,
+      "file_count":  sk.FileCount,
+      "size":        sk.Size,
+      "size_str":    sk.SizeStr,
+      "mod_time":    sk.ModTime,
+      "is_default":  defaultSet[sk.Name],
+    }
+    items[i] = m
+  }
+
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success":     true,
-    "skills":      pageSkills,
+    "skills":      items,
     "total":       total,
     "page":        page,
     "page_size":   pageSize,
