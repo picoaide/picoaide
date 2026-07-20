@@ -5,24 +5,80 @@
     <a-card style="margin-bottom: 16px">
       <a-form layout="inline">
         <a-form-item label="认证模式">
-          <a-radio-group v-model:value="authMode" @change="handleModeChange">
-            <a-radio-button value="local">本地</a-radio-button>
-            <a-radio-button value="ldap">LDAP</a-radio-button>
-            <a-radio-button value="oidc">OIDC</a-radio-button>
+          <a-radio-group :value="authMode" @change="handleModeChange">
+            <a-radio-button v-for="p in providers" :key="p.name" :value="p.name">
+              {{ p.display_name || p.name }}
+            </a-radio-button>
           </a-radio-group>
         </a-form-item>
       </a-form>
     </a-card>
 
-    <a-tabs v-model:activeKey="activeTab" style="margin-top: 16px">
+    <a-tabs v-model:activeKey="activeTab">
+      <a-tab-pane key="config" tab="配置">
+        <a-spin :spinning="loading">
+          <template v-for="section in currentFields" :key="section.name">
+            <a-card :title="section.name" style="margin-bottom: 16px">
+              <a-row :gutter="24">
+                <a-col
+                  v-for="field in section.fields"
+                  :key="field.key"
+                  :span="field.type === 'select' ? 12 : 12"
+                >
+                  <a-form-item :label="field.label" style="margin-bottom: 16px">
+                    <a-input
+                      v-if="field.type === 'text'"
+                      v-model:value="configValues[field.key]"
+                      :placeholder="field.placeholder || ''"
+                    />
+                    <a-input-password
+                      v-if="field.type === 'password'"
+                      v-model:value="configValues[field.key]"
+                      :placeholder="field.placeholder || ''"
+                    />
+                    <a-select
+                      v-if="field.type === 'select'"
+                      v-model:value="configValues[field.key]"
+                      :placeholder="field.placeholder || ''"
+                      style="width: 100%"
+                    >
+                      <a-select-option
+                        v-for="opt in field.options"
+                        :key="opt.value"
+                        :value="opt.value"
+                      >
+                        {{ opt.label }}
+                      </a-select-option>
+                    </a-select>
+                  </a-form-item>
+                </a-col>
+              </a-row>
+            </a-card>
+          </template>
+
+          <template v-if="currentActions.length > 0">
+            <a-card title="操作" style="margin-bottom: 16px">
+              <a-space>
+                <a-button
+                  v-for="act in currentActions"
+                  :key="act.id"
+                  :loading="actionLoading[act.id]"
+                  @click="handleAction(act.id)"
+                >
+                  {{ act.label }}
+                </a-button>
+              </a-space>
+            </a-card>
+          </template>
+
+          <a-button type="primary" :loading="saving" @click="handleSave">保存配置</a-button>
+        </a-spin>
+      </a-tab-pane>
+
       <a-tab-pane key="whitelist" tab="白名单">
         <div style="margin-bottom: 12px">
           <a-space>
-            <a-input
-              v-model:value="whitelistInput"
-              placeholder="输入用户名"
-              style="width: 240px"
-            />
+            <a-input v-model:value="whitelistInput" placeholder="输入用户名" style="width: 240px" />
             <a-button type="primary" @click="handleAddWhitelist" :loading="wlLoading">添加</a-button>
           </a-space>
         </div>
@@ -30,10 +86,9 @@
           :columns="wlColumns"
           :data-source="whitelist"
           :loading="wlTableLoading"
-          :pagination="wlPagination"
-          @change="handleWlTableChange"
           row-key="username"
           size="small"
+          :pagination="false"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'action'">
@@ -44,206 +99,43 @@
           </template>
         </a-table>
       </a-tab-pane>
-
-      <a-tab-pane key="ldap" tab="LDAP 配置" v-if="authMode === 'ldap'">
-        <a-card>
-          <a-form layout="vertical">
-            <a-row :gutter="24">
-              <a-col :span="12">
-                <a-form-item label="LDAP 主机">
-                  <a-input v-model:value="ldapConfig.host" placeholder="ldap://host:389" />
-                </a-form-item>
-              </a-col>
-              <a-col :span="12">
-                <a-form-item label="绑定 DN">
-                  <a-input v-model:value="ldapConfig.bind_dn" placeholder="cn=admin,dc=example,dc=com" />
-                </a-form-item>
-              </a-col>
-            </a-row>
-            <a-row :gutter="24">
-              <a-col :span="12">
-                <a-form-item label="绑定密码">
-                  <a-input-password v-model:value="ldapConfig.bind_password" placeholder="请输入密码" />
-                </a-form-item>
-              </a-col>
-              <a-col :span="12">
-                <a-form-item label="Base DN">
-                  <a-input v-model:value="ldapConfig.base_dn" placeholder="dc=example,dc=com" />
-                </a-form-item>
-              </a-col>
-            </a-row>
-            <a-row :gutter="24">
-              <a-col :span="12">
-                <a-form-item label="用户过滤器">
-                  <a-input v-model:value="ldapConfig.filter" placeholder="(objectClass=person)" />
-                </a-form-item>
-              </a-col>
-              <a-col :span="12">
-                <a-form-item label="用户名属性">
-                  <a-input v-model:value="ldapConfig.username_attribute" placeholder="uid" />
-                </a-form-item>
-              </a-col>
-            </a-row>
-            <a-row :gutter="24">
-              <a-col :span="12">
-                <a-form-item label="组搜索模式">
-                  <a-select v-model:value="ldapConfig.group_search_mode" placeholder="选择模式">
-                    <a-select-option value="member_of">member_of</a-select-option>
-                    <a-select-option value="group_search">group_search</a-select-option>
-                  </a-select>
-                </a-form-item>
-              </a-col>
-              <a-col :span="12">
-                <a-form-item label="组 Base DN">
-                  <a-input v-model:value="ldapConfig.group_base_dn" placeholder="ou=groups,dc=example,dc=com" />
-                </a-form-item>
-              </a-col>
-            </a-row>
-            <a-row :gutter="24">
-              <a-col :span="12">
-                <a-form-item label="组过滤器">
-                  <a-input v-model:value="ldapConfig.group_filter" placeholder="(objectClass=groupOfNames)" />
-                </a-form-item>
-              </a-col>
-              <a-col :span="12">
-                <a-form-item label="组成员属性">
-                  <a-input v-model:value="ldapConfig.group_member_attribute" placeholder="member" />
-                </a-form-item>
-              </a-col>
-            </a-row>
-            <a-form-item>
-              <a-space>
-                <a-button type="primary" @click="handleSaveLdap" :loading="ldapSaving">保存配置</a-button>
-                <a-button @click="handleTestLdap" :loading="ldapTesting">测试连接</a-button>
-                <a-button @click="handleSyncUsers" :loading="syncingUsers">同步用户</a-button>
-                <a-button @click="handleSyncGroups" :loading="syncingGroups">同步组</a-button>
-              </a-space>
-            </a-form-item>
-          </a-form>
-        </a-card>
-      </a-tab-pane>
-
-      <a-tab-pane key="providers" tab="认证源">
-        <a-table
-          :columns="providerColumns"
-          :data-source="providers"
-          :loading="providersLoading"
-          :pagination="false"
-          row-key="name"
-          size="small"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'capabilities'">
-              <a-tag v-for="c in record.capabilities" :key="c" color="blue">{{ c }}</a-tag>
-            </template>
-          </template>
-        </a-table>
-      </a-tab-pane>
     </a-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { api } from '../../composables/api'
 
-const activeTab = ref('whitelist')
+const activeTab = ref('config')
 const authMode = ref('local')
+const providers = ref<any[]>([])
+const loading = ref(false)
+const saving = ref(false)
+const configValues = reactive<Record<string, any>>({})
+const actionLoading = reactive<Record<string, boolean>>({})
 
 const whitelist = ref<any[]>([])
 const whitelistInput = ref('')
 const wlLoading = ref(false)
 const wlTableLoading = ref(false)
-const wlPagination = reactive({ current: 1, pageSize: 20, total: 0, showSizeChanger: true, showTotal: (t: number) => `共 ${t} 条` })
 const wlColumns = [
   { title: '用户名', dataIndex: 'username', key: 'username' },
-  { title: '添加者', dataIndex: 'added_by', key: 'added_by' },
   { title: '操作', key: 'action', width: 100 },
 ]
 
-const ldapConfig = reactive({
-  host: '',
-  bind_dn: '',
-  bind_password: '',
-  base_dn: '',
-  filter: '',
-  username_attribute: '',
-  group_search_mode: '',
-  group_base_dn: '',
-  group_filter: '',
-  group_member_attribute: '',
-})
-const ldapSaving = ref(false)
-const ldapTesting = ref(false)
-const syncingUsers = ref(false)
-const syncingGroups = ref(false)
+const currentProvider = computed(() =>
+  providers.value.find(p => p.name === authMode.value)
+)
 
-const providers = ref<any[]>([])
-const providersLoading = ref(false)
-const providerColumns = [
-  { title: '名称', dataIndex: 'name', key: 'name' },
-  { title: '类型', dataIndex: 'type', key: 'type' },
-  { title: '能力', key: 'capabilities' },
-]
+const currentFields = computed(() =>
+  currentProvider.value?.fields || []
+)
 
-const fetchWhitelist = async () => {
-  wlTableLoading.value = true
-  try {
-    const data = await api.get('/admin/whitelist')
-    whitelist.value = (data.users || []).map((u: string) => ({ username: u, added_by: '' }))
-    wlPagination.total = whitelist.value.length
-  } catch {
-    message.error('获取白名单失败')
-  } finally {
-    wlTableLoading.value = false
-  }
-}
-
-const handleWlTableChange = (pag: any) => {
-  wlPagination.current = pag.current
-  wlPagination.pageSize = pag.pageSize
-}
-
-const handleAddWhitelist = async () => {
-  if (!whitelistInput.value.trim()) {
-    message.warning('请输入用户名')
-    return
-  }
-  wlLoading.value = true
-  try {
-    await api.post('/admin/whitelist', { add: whitelistInput.value.trim() })
-    message.success('添加成功')
-    whitelistInput.value = ''
-    fetchWhitelist()
-  } catch {
-    message.error('添加失败')
-  } finally {
-    wlLoading.value = false
-  }
-}
-
-const handleRemoveWhitelist = async (username: string) => {
-  try {
-    await api.post('/admin/whitelist', { remove: username })
-    message.success('移除成功')
-    fetchWhitelist()
-  } catch {
-    message.error('移除失败')
-  }
-}
-
-const fetchAuthMode = async () => {
-  try {
-    const data = await api.get('/login/mode')
-    authMode.value = data.auth_mode || 'local'
-    if (authMode.value === 'ldap') {
-      fetchLdapConfig()
-    }
-  } catch {
-    // ignore
-  }
-}
+const currentActions = computed(() =>
+  currentProvider.value?.actions || []
+)
 
 const handleModeChange = async (e: any) => {
   const mode = typeof e === 'string' ? e : e?.target?.value
@@ -253,91 +145,121 @@ const handleModeChange = async (e: any) => {
     cfg.web = cfg.web || {}
     cfg.web.auth_mode = mode
     await api.post('/config', { config: JSON.stringify(cfg) })
-    message.success('认证模式已切换，请重新登录')
+    message.success('认证模式已切换')
+    authMode.value = mode
   } catch {
-    message.error('切换失败，请通过系统配置修改')
+    message.error('切换失败')
   }
 }
 
-const fetchLdapConfig = async () => {
+const currentConfigKey = computed(() => {
+  if (authMode.value === 'local') return 'local'
+  if (authMode.value === 'ldap') return 'ldap'
+  if (authMode.value === 'oidc') return 'oidc'
+  return authMode.value
+})
+
+const fetchData = async () => {
+  loading.value = true
   try {
-    const data = await api.get('/config')
-    const ldap = data.ldap || data.config?.ldap || {}
-    Object.keys(ldapConfig).forEach(key => {
-      if (ldap[key] !== undefined) {
-        ;(ldapConfig as any)[key] = ldap[key]
-      }
-    })
+    const [modeData, provData, cfgData, wlData] = await Promise.all([
+      api.get('/login/mode'),
+      api.get('/admin/auth/providers'),
+      api.get('/config'),
+      api.get('/admin/whitelist'),
+    ])
+    authMode.value = modeData.auth_mode || 'local'
+    providers.value = provData.providers || []
+
+    const sectionCfg = cfgData[currentConfigKey.value] || {}
+    configValues['host'] = sectionCfg.host || ''
+    configValues['bind_dn'] = sectionCfg.bind_dn || ''
+    configValues['bind_password'] = ''
+    configValues['base_dn'] = sectionCfg.base_dn || ''
+    configValues['filter'] = sectionCfg.filter || ''
+    configValues['username_attribute'] = sectionCfg.username_attribute || ''
+    configValues['group_search_mode'] = sectionCfg.group_search_mode || ''
+    configValues['group_base_dn'] = sectionCfg.group_base_dn || ''
+    configValues['group_filter'] = sectionCfg.group_filter || ''
+    configValues['group_member_attribute'] = sectionCfg.group_member_attribute || ''
+    configValues['issuer_url'] = sectionCfg.issuer_url || ''
+    configValues['client_id'] = sectionCfg.client_id || ''
+    configValues['client_secret'] = ''
+    configValues['redirect_url'] = sectionCfg.redirect_url || ''
+    configValues['scopes'] = sectionCfg.scopes || ''
+    configValues['username_claim'] = sectionCfg.username_claim || ''
+    configValues['groups_claim'] = sectionCfg.groups_claim || ''
+    configValues['sync_interval'] = sectionCfg.sync_interval || ''
+
+    whitelist.value = (wlData.users || []).map((u: string) => ({ username: u }))
   } catch {
-    // ignore
+    message.error('加载配置失败')
+  } finally {
+    loading.value = false
   }
 }
 
-const handleSaveLdap = async () => {
-  ldapSaving.value = true
+const handleSave = async () => {
+  saving.value = true
   try {
     const cfg = await api.get('/config')
-    cfg.ldap = { ...ldapConfig }
+    const provider = currentConfigKey.value
+    cfg[provider] = { ...cfg[provider], ...configValues }
+    if (provider === 'ldap' || provider === 'oidc') {
+      delete cfg[provider].sync_interval
+      if (configValues.sync_interval) {
+        cfg[provider].sync_interval = configValues.sync_interval
+      }
+    }
     await api.post('/config', { config: JSON.stringify(cfg) })
     message.success('保存成功')
   } catch {
     message.error('保存失败')
   } finally {
-    ldapSaving.value = false
+    saving.value = false
   }
 }
 
-const handleTestLdap = async () => {
-  ldapTesting.value = true
+const handleAction = async (actionId: string) => {
+  actionLoading[actionId] = true
   try {
-    await api.post('/admin/auth/test-ldap')
-    message.success('连接成功')
+    const endpoint = {
+      'test-ldap': '/admin/auth/test-ldap',
+      'sync-users': '/admin/auth/sync-users',
+      'sync-groups': '/admin/auth/sync-groups',
+    }[actionId]
+    if (!endpoint) {
+      message.warning('未知操作')
+      return
+    }
+    await api.post(endpoint)
+    message.success('操作成功')
   } catch {
-    message.error('连接失败')
+    message.error('操作失败')
   } finally {
-    ldapTesting.value = false
+    actionLoading[actionId] = false
   }
 }
 
-const handleSyncUsers = async () => {
-  syncingUsers.value = true
+const handleAddWhitelist = async () => {
+  if (!whitelistInput.value.trim()) { message.warning('请输入用户名'); return }
+  wlLoading.value = true
   try {
-    await api.post('/admin/auth/sync-users')
-    message.success('同步成功')
-  } catch {
-    message.error('同步失败')
-  } finally {
-    syncingUsers.value = false
-  }
+    await api.post('/admin/whitelist', { add: whitelistInput.value.trim() })
+    message.success('添加成功')
+    whitelistInput.value = ''
+    fetchData()
+  } catch { message.error('添加失败') }
+  finally { wlLoading.value = false }
 }
 
-const handleSyncGroups = async () => {
-  syncingGroups.value = true
+const handleRemoveWhitelist = async (username: string) => {
   try {
-    await api.post('/admin/auth/sync-groups')
-    message.success('同步成功')
-  } catch {
-    message.error('同步失败')
-  } finally {
-    syncingGroups.value = false
-  }
+    await api.post('/admin/whitelist', { remove: username })
+    message.success('移除成功')
+    fetchData()
+  } catch { message.error('移除失败') }
 }
 
-const fetchProviders = async () => {
-  providersLoading.value = true
-  try {
-    const data = await api.get('/admin/auth/providers')
-    providers.value = data.providers || []
-  } catch {
-    message.error('获取认证源失败')
-  } finally {
-    providersLoading.value = false
-  }
-}
-
-onMounted(() => {
-  fetchAuthMode()
-  fetchWhitelist()
-  fetchProviders()
-})
+onMounted(fetchData)
 </script>
