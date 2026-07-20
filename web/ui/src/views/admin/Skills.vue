@@ -232,7 +232,7 @@ const fetchSources = async () => {
   sourcesLoading.value = true
   try {
     const data = await api.get('/admin/skills/sources')
-    sources.value = data.sources || []
+    sources.value = (data.sources || []).filter((s: any) => s.type === 'git')
   } catch {
     message.error('获取来源列表失败')
   } finally {

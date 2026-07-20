@@ -474,8 +474,6 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
     admin.POST("/skills/sources/remove", s.handleAdminSkillsSourcesRemove)
     admin.POST("/skills/sources/pull", s.handleAdminSkillsSourcesPull)
     admin.POST("/skills/sources/refresh", s.handleAdminSkillsSourcesRefresh)
-    admin.GET("/skills/registry/list", s.handleAdminSkillsRegistryList)
-    admin.POST("/skills/registry/install", s.handleAdminSkillsRegistryInstall)
     admin.GET("/skills/defaults", s.handleAdminSkillsDefaults)
     admin.POST("/skills/defaults/toggle", s.handleAdminSkillsDefaultsToggle)
     admin.GET("/shared-folders", s.handleAdminSharedFolders)
