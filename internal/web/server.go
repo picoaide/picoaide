@@ -500,6 +500,17 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
     admin.POST("/tls/save", s.handleAdminTLSSave)
     admin.POST("/tls/toggle", s.handleAdminTLSToggle)
     admin.POST("/tls/clear", s.handleAdminTLSClear)
+    // 超管 - 知识库管理
+    admin.GET("/knowledge-bases", s.handleAdminKBList)
+    admin.POST("/knowledge-bases", s.handleAdminKBCreate)
+    admin.PUT("/knowledge-bases/:id", s.handleAdminKBUpdate)
+    admin.DELETE("/knowledge-bases/:id", s.handleAdminKBDelete)
+    admin.GET("/knowledge-bases/:id/folders", s.handleAdminFolderTree)
+    admin.POST("/knowledge-bases/:id/folders", s.handleAdminFolderCreate)
+    admin.PUT("/knowledge-bases/folders/:id", s.handleAdminFolderUpdate)
+    admin.DELETE("/knowledge-bases/folders/:id", s.handleAdminFolderDelete)
+    admin.GET("/knowledge-bases/folders/:id/permissions", s.handleAdminFolderPermissions)
+    admin.PUT("/knowledge-bases/folders/:id/permissions", s.handleAdminFolderSetPermissions)
     // 超管 - daemon 管理
     s.registerAdminDaemonRoutes(admin)
   }
