@@ -154,8 +154,8 @@ const handleTest = async () => {
     } else {
       message.error(data.error || data.message || '连接失败')
     }
-  } catch {
-    message.error('请求失败')
+  } catch (e: any) {
+    message.error(e.message || '请求失败')
   } finally {
     testing.value = false
   }
