@@ -49,11 +49,6 @@ func TestBrowserToolDefsNotEmpty(t *testing.T) {
   }
 }
 
-func TestComputerToolDefsNotEmpty(t *testing.T) {
-  if len(computerToolDefs) == 0 {
-    t.Error("computerToolDefs should not be empty")
-  }
-}
 
 func TestToolsListAggregation(t *testing.T) {
   // Test that tools/list for "agent" service aggregates all sources

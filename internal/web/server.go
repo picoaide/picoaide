@@ -396,8 +396,6 @@ func (s *Server) registerInternalAPIRoutes(g *gin.RouterGroup) {
   g.POST("/mcp/cookies", s.handleMCPCookiesPost)
   // Browser Extension WebSocket
   g.GET("/browser/ws", s.handleBrowserWS)
-  // Computer 桌面代理 WebSocket
-  g.GET("/computer/ws", s.handleComputerWS)
 }
 
 // registerExternalAPIRoutes 注册全部外部 API 路由（继承内部路由 + 外部特有路由）

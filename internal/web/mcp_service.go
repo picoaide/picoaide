@@ -40,7 +40,6 @@ var (
 
 func init() {
   RegisterService("browser", browserSvc, browserToolDefs, "picoaide-browser")
-  RegisterService("computer", computerSvc, computerToolDefs, "picoaide-computer")
   RegisterPicoaideService("agent", picoaideToolDefs, "picoaide-agent")
   RegisterPicoaideService("email", emailToolDefs, "picoaide-email")
 }
@@ -257,12 +256,6 @@ func (s *Server) handleMCPSSEServicePost(c *gin.Context) {
           tools = append(tools, toolToMap(t))
         }
       }
-      // 桌面代理工具（如果已连接）
-      if conn, ok := computerSvc.GetConnection(username); ok && conn != nil {
-        for _, t := range computerToolDefs {
-          tools = append(tools, toolToMap(t))
-        }
-      }
     } else {
       for _, t := range info.Tools {
         tools = append(tools, toolToMap(t))
@@ -330,7 +323,6 @@ func (s *Server) handleMCPToolCall(c *gin.Context, id json.Number, params json.R
     }
     // 转发到桌面代理 Hub
     if strings.HasPrefix(p.Name, "computer_") {
-      s.callHub(c.Writer, id, p.Name, p.Arguments, username, computerSvc, "桌面代理")
       return
     }
     // 都没找到，返回错误

@@ -12,11 +12,6 @@ func (s *Server) handleBrowserWS(c *gin.Context) {
   s.handleAgentWS(c, "browser", browserSvc, nil, "Extension")
 }
 
-// handleComputerWS 处理桌面代理 WebSocket 连接
-func (s *Server) handleComputerWS(c *gin.Context) {
-  s.handleAgentWS(c, "computer", computerSvc, nil, "桌面代理")
-}
-
 // handleAgentWS 处理代理 WebSocket 连接
 func (s *Server) handleAgentWS(c *gin.Context, svcName string, hub *ServiceHub, extra interface{}, displayName string) {
   username := validateBearerOrQueryToken(c)

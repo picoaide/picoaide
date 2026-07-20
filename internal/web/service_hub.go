@@ -15,9 +15,6 @@ const commandTimeout = 30 * time.Second
 // browserSvc 浏览器服务的连接管理器
 var browserSvc = NewServiceHub("browser")
 
-// computerSvc 桌面控制服务的连接管理器
-var computerSvc = NewServiceHub("computer")
-
 // PendingCall 跟踪一个等待代理响应的工具调用
 type PendingCall struct {
   mu       sync.Mutex

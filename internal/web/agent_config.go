@@ -84,7 +84,6 @@ func (s *Server) handlePicoAgentConfig(c *gin.Context) {
   // 4. 构造响应
   mcpServers := map[string]mcpServer{
     "browser":  {Socket: "/run/picoaide.sock"},
-    "computer": {Socket: "/run/picoaide.sock"},
     "agent":    {Socket: "/run/picoaide.sock"},
     "email":    {Socket: "/run/picoaide.sock"},
   }
