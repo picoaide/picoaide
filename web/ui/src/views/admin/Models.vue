@@ -58,16 +58,6 @@
           <a-form-item>
             <a-button type="default" @click="handleTest" :loading="testing">测试连接</a-button>
           </a-form-item>
-
-          <a-result
-            v-if="testResult !== null"
-            :status="testResult ? 'success' : 'error'"
-            :title="testResult ? '连接成功' : '连接失败'"
-          >
-            <template #extra v-if="testError">
-              <a-alert type="error" :message="testError" show-icon />
-            </template>
-          </a-result>
         </a-form>
       </a-card>
     </a-spin>
@@ -75,15 +65,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { api } from '../../composables/api'
 
 const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
-const testResult = ref<boolean | null>(null)
-const testError = ref('')
 
 const form = reactive({
   provider: 'deepseek',
@@ -96,11 +84,6 @@ const form = reactive({
   temperature: 0.7,
   request_timeout: 600,
 })
-
-watch(form, () => {
-  testResult.value = null
-  testError.value = ''
-}, { deep: true })
 
 const fetchConfig = async () => {
   loading.value = true
@@ -159,8 +142,6 @@ const handleTest = async () => {
     return
   }
   testing.value = true
-  testResult.value = null
-  testError.value = ''
   try {
     const data = await api.post('/admin/model/test', {
       provider: form.provider,
@@ -168,11 +149,13 @@ const handleTest = async () => {
       base_url: form.base_url,
       api_key: form.api_key,
     })
-    testResult.value = !!data.success
-    if (!data.success) testError.value = data.error || data.message || '连接失败'
+    if (data.success) {
+      message.success('连接成功')
+    } else {
+      message.error(data.error || data.message || '连接失败')
+    }
   } catch {
-    testResult.value = false
-    testError.value = '请求失败'
+    message.error('请求失败')
   } finally {
     testing.value = false
   }
