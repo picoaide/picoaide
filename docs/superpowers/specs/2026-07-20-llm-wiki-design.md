@@ -21,18 +21,16 @@ picoaide (host)
 │   └── kb_audit_log            — KB 访问审计日志
 │
 │   ├── 导入管道 (异步 goroutine + channel):
-│   │   parse → [LLM 分类] → 写表 → debounce 合并 → 全量重建链接+标签
+│   │   parse → [LLM 分类+关键词提取] → 写表 → debounce 合并 → 全量重建链接+标签
 │   │
 │   ├── 管理/用户 API (Gin + 现有中间件)
-│   └── 内部 API (MCP Token Bearer 认证)
-│       GET /api/kb/search  — FTS5 搜索 (分页)
-│       GET /api/kb/read    — 读文档全文
-│       GET /api/kb/list    — 浏览文件夹
-│       GET /api/kb/tree    — 可访问的目录树
+│   └── MCP 工具注册 (mcp_service.go):
+│       kb_search(query, scope, doc_id?, folder_id?)
+│       └── handler 内做权限检查 + FTS5 搜索
 
 picoagent (sandbox)
-└── kb_search tool ──HTTP(MCP Token)──→ picoaide 内部 API
-```
+└── MCP tools/list → 发现 kb_search 工具
+    └── MCP tools/call → picoaide MCP handler → 查询 → 返回结果
 
 ## 数据模型
 
@@ -215,16 +213,18 @@ POST   /api/user/knowledge-bases/:id/import/doc            — 文档系统 {sou
 GET    /api/user/knowledge-bases/imports/:task_id           — 导入进度 (轮询)
 ```
 
-### 内部 API (MCP Token Bearer 认证)
+### MCP 工具 (供 picoagent)
+
+注册在 picoaide 的 MCP 服务 (`mcp_service.go`) 中，picoagent 通过 MCP tools/list 发现, 通过 tools/call 调用:
 
 ```
-GET /api/kb/search?q=&kb_id=&page=&size=    → {results: [{doc_id, title, snippet, tags, links}], total, page}
-GET /api/kb/read?doc_id=                    → {title, content, tags, links, backlinks}
-GET /api/kb/list?folder_id=                 → {folders: [...], docs: [...]}
-GET /api/kb/tree?kb_id=                     → [{folder_id, name, children: [...]}]
+kb_search(query, scope, doc_id?, folder_id?)
+  → scope=search:  FTS5 分页搜索, 返回标题+片段+标签+链接
+  → scope=read:    读取全文+标签+链接+反向链接
+  → scope=browse:  浏览文件夹内容
 ```
 
-**认证方式**: 所有内部 API 从 `Authorization: Bearer <token>` 提取 token → 解析出 username → 注入 context。`user=` 查询参数仅用于日志记录，不做认证依据。权限检查在 host 端实时执行，picoagent 不缓存任何权限状态。
+**认证方式**: MCP Token Bearer（由 MCP 中间件自动处理）。handler 从 token 解析出 username，所有权限检查基于此 username。不信任任何客户端传入的用户参数。
 
 ### 响应格式
 
@@ -331,18 +331,31 @@ System: 你是知识库链接分析器。从文档中提取最有链接价值的
 - 导入进度条显示状态(解析中/分类中/索引中), 错误信息展示
 - 轮询频率: 指数退避 1s → 2s → 4s → max 10s, 最多 5 分钟
 
-## Agent 集成 (kb_search)
+## Agent 集成 (MCP 工具)
 
-```go
-kb_search(query, scope, doc_id?, folder_id?)
-  → scope=search:  FTS5 分页搜索, 返回标题+片段+链接
-  → scope=read:    读取全文+链接+反向链接
-  → scope=browse:  浏览文件夹内容
+`kb_search` 注册为 picoaide 的 MCP 工具，picoagent 通过标准 MCP 协议调用:
+
+- picoagent 启动时通过 MCP tools/list 发现 `kb_search` 工具
+- LLM 调用时 picoagent 通过 MCP tools/call 发送请求
+- picoaide MCP handler 收到请求 → 解析 token 获取 username → 查询可访问文件夹 → 执行搜索/读取/浏览
+- 权限检查在 host 端实时执行，picoagent 不缓存任何权限状态
+
+MCP 工具定义:
+
 ```
-
-- 通过 picoagent HTTP 调用 picoaide 内部 API
-- `Authorization: Bearer <MCP Token>`
-- 权限: host 端实时查询用户可访问的 folder_id, 所有操作限制在该集合内
+名称: kb_search
+参数:
+  query: string           — 搜索关键词
+  scope: "search"         — search 模式下必填
+  doc_id: number?         — read 模式下必填
+  folder_id: number?      — browse 模式下可选
+  page: number?           — search 分页 (默认 1)
+  page_size: number?      — search 分页 (默认 10)
+返回:
+  scope=search  → {results: [{doc_id, title, folder_path, snippet, tags, links}], total, page}
+  scope=read     → {title, content, tags, links, backlinks}
+  scope=browse   → {folders: [{id, name}], docs: [{doc_id, title, tags}]}
+```
 
 ## 定时同步 (后续迭代)
 
@@ -366,7 +379,7 @@ kb_search(query, scope, doc_id?, folder_id?)
 ## 安全
 
 - 所有管理/用户端点复用 `requireRegularUser` / `requireSuperadmin` 中间件
-- 内部 API 使用 MCP Token Bearer 认证, 不信任 `?user=` 参数
+- MCP 工具认证: picoagent 调用时携带 MCP Token, handler 解析 username 做权限检查
 - CSRF: X-CSRF-Token header (所有端点, multipart 上传也用 header)
 - 文件上传: 32MB 上限, 仅 pdf/docx/md/txt/html/zip
 - XSS: 服务端 HTML sanitize + 前端 DOMPurify 双层防护
@@ -403,11 +416,10 @@ kb_search(query, scope, doc_id?, folder_id?)
 
 ### Step 1e: 用户端只读 API
 - 搜索(分页) / 读取 / 浏览 / 目录树
-- 内部 API (MCP Token 认证)
 
-### Step 1f: Agent kb_search 工具
-- picoagent 注册 kb_search 工具
-- 调用内部 API
+### Step 1f: MCP 工具注册
+- 在 `mcp_service.go` 注册 `kb_search` 工具
+- MCP handler: FTS5 搜索 + 权限检查 + 审计日志
 
 ### Step 1g: LLM 分类 (可选)
 - 集成系统 LLM
