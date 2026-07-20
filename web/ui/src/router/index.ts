@@ -36,6 +36,7 @@ const router = createRouter({
         { path: '', redirect: '/user/chat' },
         { path: 'chat', name: 'user-chat', component: () => import('../views/user/Chat.vue') },
         { path: 'skills', name: 'user-skills', component: () => import('../views/user/Skills.vue') },
+        { path: 'wiki', name: 'user-wiki', component: () => import('../views/user/Wiki.vue') },
         { path: 'files', name: 'user-files', component: () => import('../views/user/Files.vue') },
         { path: 'channels', name: 'user-channels', component: () => import('../views/user/Channels.vue') },
         { path: 'email', name: 'user-email', component: () => import('../views/user/Email.vue') },

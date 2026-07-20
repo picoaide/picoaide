@@ -10,6 +10,7 @@
         <a-tab-pane key="skills" tab="技能中心" />
         <a-tab-pane key="channels" tab="通讯渠道" />
         <a-tab-pane key="email" tab="邮箱" />
+        <a-tab-pane key="wiki" tab="知识库" />
         <a-tab-pane key="files" tab="文件管理" />
         <a-tab-pane key="teamspace" tab="团队空间" />
         <a-tab-pane key="authorization" tab="AI 授权" />
