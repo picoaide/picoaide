@@ -521,6 +521,15 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
   g.POST("/user/skills/install", s.handleUserSkillsInstall)
   g.POST("/user/skills/uninstall", s.handleUserSkillsUninstall)
 
+  // 普通用户 - 知识库 (LLM Wiki)
+  g.GET("/user/knowledge-bases", s.handleUserKBList)
+  g.GET("/user/knowledge-bases/:id", s.handleUserKBOverview)
+  g.GET("/user/knowledge-bases/:id/navigate", s.handleUserKBNavigate)
+  g.GET("/user/knowledge-bases/documents/:id", s.handleUserKBRead)
+  g.GET("/user/knowledge-bases/search", s.handleUserKBSearch)
+  g.POST("/user/knowledge-bases/:id/import/upload", s.handleUserKBImportUpload)
+  g.GET("/user/knowledge-bases/imports/:task_id", s.handleUserKBImportProgress)
+
   // 普通用户 - daemon 任务与事件流
   s.registerDaemonRoutes(g.Group("/user"))
 }

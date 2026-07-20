@@ -650,6 +650,21 @@ func UpdateImportTaskError(id string, errMsg string) error {
 	return err
 }
 
+func GetImportTask(id string) (*KBImportTask, error) {
+	if err := ensureDB(); err != nil {
+		return nil, err
+	}
+	var task KBImportTask
+	has, err := engine.Where("id = ?", id).Get(&task)
+	if err != nil {
+		return nil, err
+	}
+	if !has {
+		return nil, fmt.Errorf("import task %s not found", id)
+	}
+	return &task, nil
+}
+
 func CreateAuditLog(username, action, detail, source string) error {
 	if err := ensureDB(); err != nil {
 		return err

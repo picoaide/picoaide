@@ -27,6 +27,8 @@ type ImportTask struct {
 	ErrorMsg      string
 }
 
+var GlobalImportQueue = NewImportQueue(100)
+
 type ImportQueue struct {
 	ch chan *ImportTask
 }
