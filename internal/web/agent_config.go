@@ -97,7 +97,6 @@ func (s *Server) handlePicoAgentConfig(c *gin.Context) {
     UserID:    username,
     Workspace: "/workspace",
     Tools: map[string]toolConfig{
-      "kb_search":  {Enabled: true},
       "web_search": {Enabled: true},
     },
     MCPServers: mcpServers,

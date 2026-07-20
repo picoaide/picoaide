@@ -66,6 +66,23 @@ var picoaideToolDefs = []ToolDef{
       "required": []string{"id"},
     },
   },
+  {
+    Name:        "kb_search",
+    Description: "搜索或读取知识库中的文档。使用 scope=search 搜索关键词，scope=read 读取文档全文，scope=browse 浏览文件夹。",
+    InputSchema: map[string]interface{}{
+      "type": "object",
+      "properties": map[string]interface{}{
+        "scope":      map[string]interface{}{"type": "string", "enum": []interface{}{"search", "read", "browse"}, "description": "操作类型"},
+        "query":      map[string]interface{}{"type": "string", "description": "搜索关键词（search 模式必填）"},
+        "doc_id":     map[string]interface{}{"type": "number", "description": "文档 ID（read 模式必填）"},
+        "folder_id":  map[string]interface{}{"type": "number", "description": "文件夹 ID（browse 模式可选）"},
+        "max_length": map[string]interface{}{"type": "number", "description": "返回内容最大字符数（read 模式，默认 4000）"},
+        "page":       map[string]interface{}{"type": "number", "description": "页码（search 模式，默认 1）"},
+        "page_size":  map[string]interface{}{"type": "number", "description": "每页条数（search 模式，默认 10）"},
+      },
+      "required": []interface{}{"scope"},
+    },
+  },
 }
 
 // picoaideHandlers PicoAgent 平台工具的处理函数映射

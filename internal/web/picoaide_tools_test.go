@@ -12,8 +12,8 @@ import (
 // ============================================================
 
 func TestPicoaideToolDefs_Count(t *testing.T) {
-  if got := len(picoaideToolDefs); got != 6 {
-    t.Errorf("picoaideToolDefs len = %d, want 6", got)
+  if got := len(picoaideToolDefs); got != 7 {
+    t.Errorf("picoaideToolDefs len = %d, want 7", got)
   }
 }
 
@@ -25,6 +25,7 @@ func TestPicoaideToolDefs_Names(t *testing.T) {
     "picoaide_cron_create",
     "picoaide_cron_list",
     "picoaide_cron_delete",
+    "kb_search",
   }
   for i, name := range expected {
     if picoaideToolDefs[i].Name != name {
@@ -38,8 +39,8 @@ func TestPicoaideToolDefs_Names(t *testing.T) {
 // ============================================================
 
 func TestPicoaideHandlersMap_Count(t *testing.T) {
-  if got := len(picoaideHandlers); got != 6 {
-    t.Errorf("picoaideHandlers len = %d, want 6", got)
+  if got := len(picoaideHandlers); got != 7 {
+    t.Errorf("picoaideHandlers len = %d, want 7", got)
   }
 }
 
@@ -51,6 +52,7 @@ func TestPicoaideHandlersMap_Keys(t *testing.T) {
     "picoaide_cron_create",
     "picoaide_cron_list",
     "picoaide_cron_delete",
+    "kb_search",
   }
   for _, k := range expected {
     if _, ok := picoaideHandlers[k]; !ok {
@@ -104,7 +106,7 @@ func TestAgentServiceRegistered(t *testing.T) {
   if info.Version != "1.0.0" {
     t.Errorf("Version = %q, want 1.0.0", info.Version)
   }
-  if len(info.Tools) != 6 {
-    t.Errorf("Tools len = %d, want 6", len(info.Tools))
+  if len(info.Tools) != 7 {
+    t.Errorf("Tools len = %d, want 7", len(info.Tools))
   }
 }
