@@ -94,7 +94,7 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
   // 管理页面
   adminPaths := []string{
     "/admin", "/admin/dashboard", "/admin/users", "/admin/groups",
-    "/admin/skills", "/admin/settings", "/admin/superadmins", "/admin/channels",
+    "/admin/skills", "/admin/superadmins", "/admin/channels",
     "/admin/models", "/admin/auth", "/admin/teamspace", "/admin/password",
     "/admin/mcp-servers", "/admin/tls",
   }

@@ -26,7 +26,6 @@ const router = createRouter({
         { path: 'auth', name: 'admin-auth', component: () => import('../views/admin/Auth.vue') },
         { path: 'password', name: 'admin-password', component: () => import('../views/admin/Password.vue') },
         { path: 'tls', name: 'admin-tls', component: () => import('../views/admin/TLS.vue') },
-        { path: 'settings', name: 'admin-settings', component: () => import('../views/admin/Settings.vue') },
       ],
     },
     {

@@ -65,10 +65,6 @@
           <template #icon><SafetyOutlined /></template>
           <span>HTTPS 证书</span>
         </a-menu-item>
-        <a-menu-item key="settings">
-          <template #icon><SettingOutlined /></template>
-          <span>系统配置</span>
-        </a-menu-item>
       </a-menu>
     </a-layout-sider>
     <a-layout>
@@ -111,7 +107,6 @@ import {
   KeyOutlined,
   ApiOutlined,
   SafetyOutlined,
-  SettingOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
 } from '@ant-design/icons-vue'
