@@ -121,7 +121,12 @@ func (s *Server) handleUserKBRead(c *gin.Context) {
 		writeError(c, http.StatusNotFound, err.Error())
 		return
 	}
-	writeJSON(c, 200, gin.H{"success": true, "data": doc})
+	links, _ := store.GetDocumentLinks(doc.ID)
+	backlinks, _ := store.GetDocumentBacklinks(doc.ID)
+	tags, _ := store.GetDocumentTags(doc.ID)
+	writeJSON(c, 200, gin.H{"success": true, "data": gin.H{
+		"doc": doc, "links": links, "backlinks": backlinks, "tags": tags,
+	}})
 }
 
 // handleUserKBSearch FTS5 搜索
@@ -136,7 +141,7 @@ func (s *Server) handleUserKBSearch(c *gin.Context) {
 		return
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	pageSize, err := strconv.Atoi(c.DefaultQuery("page_size", c.DefaultQuery("size", "20")))
 	if page < 1 {
 		page = 1
 	}
@@ -149,12 +154,12 @@ func (s *Server) handleUserKBSearch(c *gin.Context) {
 		writeError(c, 500, "搜索失败")
 		return
 	}
-	writeJSON(c, 200, gin.H{"success": true, "data": results, "total": total})
+	writeJSON(c, 200, gin.H{"success": true, "data": gin.H{"results": results, "total": total}})
 }
 
 // handleUserKBImportUpload 文件上传导入
 func (s *Server) handleUserKBImportUpload(c *gin.Context) {
-	username := s.requireRegularUser(c)
+	username := s.requireSuperadmin(c)
 	if username == "" {
 		return
 	}
@@ -235,7 +240,7 @@ func (s *Server) handleUserKBImportUpload(c *gin.Context) {
 
 // handleUserKBImportWeb URL 导入
 func (s *Server) handleUserKBImportWeb(c *gin.Context) {
-	username := s.requireRegularUser(c)
+	username := s.requireSuperadmin(c)
 	if username == "" {
 		return
 	}
@@ -321,7 +326,8 @@ func extractURLFilename(rawURL, fallback string) string {
 
 // handleUserKBImportProgress 查询导入进度
 func (s *Server) handleUserKBImportProgress(c *gin.Context) {
-	if s.requireRegularUser(c) == "" {
+	username := s.requireSuperadmin(c)
+	if username == "" {
 		return
 	}
 	taskID := c.Param("task_id")

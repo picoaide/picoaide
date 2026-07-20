@@ -69,11 +69,11 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
   })
 
   // 用户页面
-  userPaths := []string{
-    "/user", "/user/chat", "/user/skills", "/user/files", "/user/settings",
-    "/user/channels", "/user/email", "/user/teamspace", "/user/authorization",
-    "/user/password", "/user/cron",
-  }
+	userPaths := []string{
+		"/user", "/user/chat", "/user/skills", "/user/files", "/user/settings",
+		"/user/channels", "/user/email", "/user/teamspace", "/user/authorization",
+		"/user/password", "/user/cron", "/user/wiki",
+	}
   for _, path := range userPaths {
     r.GET(path, func(c *gin.Context) {
       if !requireManageUser(c) {
@@ -92,12 +92,12 @@ func (s *Server) registerUIRoutes(r *gin.Engine) {
   })
 
   // 管理页面
-  adminPaths := []string{
-    "/admin", "/admin/dashboard", "/admin/users", "/admin/groups",
-    "/admin/skills", "/admin/superadmins", "/admin/channels",
-    "/admin/models", "/admin/auth", "/admin/teamspace", "/admin/password",
-    "/admin/mcp-servers", "/admin/tls",
-  }
+	adminPaths := []string{
+		"/admin", "/admin/dashboard", "/admin/users", "/admin/groups",
+		"/admin/skills", "/admin/superadmins", "/admin/channels",
+		"/admin/models", "/admin/auth", "/admin/teamspace", "/admin/password",
+		"/admin/mcp-servers", "/admin/tls", "/admin/wiki",
+	}
   for _, path := range adminPaths {
     r.GET(path, func(c *gin.Context) {
       if !requireAdminUser(c) {

@@ -5,12 +5,12 @@ import (
 )
 
 type KnowledgeBase struct {
-	ID          int64  `xorm:"pk autoincr 'id'"`
-	Name        string `xorm:"notnull 'name'"`
-	Description string `xorm:"default '' 'description'"`
-	CreatedBy   string `xorm:"notnull 'created_by'"`
-	CreatedAt   string `xorm:"created 'created_at'"`
-	UpdatedAt   string `xorm:"updated 'updated_at'"`
+	ID          int64  `xorm:"pk autoincr 'id'" json:"id"`
+	Name        string `xorm:"notnull 'name'" json:"name"`
+	Description string `xorm:"default '' 'description'" json:"description"`
+	CreatedBy   string `xorm:"notnull 'created_by'" json:"created_by"`
+	CreatedAt   string `xorm:"created 'created_at'" json:"created_at"`
+	UpdatedAt   string `xorm:"updated 'updated_at'" json:"updated_at"`
 }
 
 func (KnowledgeBase) TableName() string { return "knowledge_bases" }
@@ -44,22 +44,22 @@ type KBFolderGroup struct {
 func (KBFolderGroup) TableName() string { return "kb_folder_groups" }
 
 type KBDocument struct {
-	ID         int64  `xorm:"pk autoincr 'id'"`
-	KbID       int64  `xorm:"notnull 'kb_id'"`
-	FolderID   int64  `xorm:"notnull 'folder_id'"`
-	Title      string `xorm:"notnull 'title'"`
-	Content    string `xorm:"default '' 'content'"`
-	URL        string `xorm:"default '' 'url'"`
-	SourceID   string `xorm:"default '' 'source_id'"`
-	SourceType string `xorm:"notnull default 'manual' 'source_type'"`
-	FileType   string `xorm:"default 'md' 'file_type'"`
-	FileSize   int    `xorm:"default 0 'file_size'"`
-	Status     string `xorm:"notnull default 'pending' 'status'"`
-	ErrorMsg   string `xorm:"default '' 'error_msg'"`
-	Checksum   string `xorm:"default '' 'checksum'"`
-	CreatedBy  string `xorm:"notnull 'created_by'"`
-	CreatedAt  string `xorm:"created 'created_at'"`
-	UpdatedAt  string `xorm:"updated 'updated_at'"`
+	ID         int64  `xorm:"pk autoincr 'id'" json:"id"`
+	KbID       int64  `xorm:"notnull 'kb_id'" json:"kb_id"`
+	FolderID   int64  `xorm:"notnull 'folder_id'" json:"folder_id"`
+	Title      string `xorm:"notnull 'title'" json:"title"`
+	Content    string `xorm:"default '' 'content'" json:"content"`
+	URL        string `xorm:"default '' 'url'" json:"url"`
+	SourceID   string `xorm:"default '' 'source_id'" json:"source_id"`
+	SourceType string `xorm:"notnull default 'manual' 'source_type'" json:"source_type"`
+	FileType   string `xorm:"default 'md' 'file_type'" json:"file_type"`
+	FileSize   int    `xorm:"default 0 'file_size'" json:"file_size"`
+	Status     string `xorm:"notnull default 'pending' 'status'" json:"status"`
+	ErrorMsg   string `xorm:"default '' 'error_msg'" json:"error_msg"`
+	Checksum   string `xorm:"default '' 'checksum'" json:"checksum"`
+	CreatedBy  string `xorm:"notnull 'created_by'" json:"created_by"`
+	CreatedAt  string `xorm:"created 'created_at'" json:"created_at"`
+	UpdatedAt  string `xorm:"updated 'updated_at'" json:"updated_at"`
 }
 
 func (KBDocument) TableName() string { return "kb_documents" }
@@ -108,10 +108,10 @@ type KBAuditLog struct {
 func (KBAuditLog) TableName() string { return "kb_audit_log" }
 
 type SearchResult struct {
-	DocID   int64  `xorm:"id"`
-	Title   string `xorm:"title"`
-	KbID    int64  `xorm:"kb_id"`
-	Snippet string `xorm:"snippet"`
+	DocID   int64  `xorm:"id" json:"doc_id"`
+	Title   string `xorm:"title" json:"title"`
+	KbID    int64  `xorm:"kb_id" json:"kb_id"`
+	Snippet string `xorm:"snippet" json:"snippet"`
 }
 
 func CreateKnowledgeBase(name, desc, createdBy string) (*KnowledgeBase, error) {

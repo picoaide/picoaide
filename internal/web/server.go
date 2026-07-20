@@ -51,6 +51,9 @@ type Server struct {
   auditCleanerCancel context.CancelFunc
 	agentIntegration  *AgentIntegration
 	syncChecker       *knowledge.SyncChecker
+	kbPipeline        *knowledge.Pipeline
+	kbCtx             context.Context
+	kbCancel          context.CancelFunc
   tlsSrv           *http.Server // TLS 服务器，用于优雅关闭
   extSrv           *http.Server // HTTP 服务器（:80），用于热加载时更新 handler
   daemonManager     *daemon.DaemonManager
@@ -513,6 +516,9 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
     admin.DELETE("/knowledge-bases/folders/:id", s.handleAdminFolderDelete)
     admin.GET("/knowledge-bases/folders/:id/permissions", s.handleAdminFolderPermissions)
     admin.PUT("/knowledge-bases/folders/:id/permissions", s.handleAdminFolderSetPermissions)
+    admin.POST("/knowledge-bases/:id/import/upload", s.handleUserKBImportUpload)
+    admin.POST("/knowledge-bases/:id/import/web", s.handleUserKBImportWeb)
+    admin.GET("/knowledge-bases/imports/:task_id", s.handleUserKBImportProgress)
     // 超管 - daemon 管理
     s.registerAdminDaemonRoutes(admin)
   }
@@ -529,9 +535,10 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
   g.GET("/user/knowledge-bases/:id/navigate", s.handleUserKBNavigate)
   g.GET("/user/knowledge-bases/documents/:id", s.handleUserKBRead)
   g.GET("/user/knowledge-bases/search", s.handleUserKBSearch)
-  g.POST("/user/knowledge-bases/:id/import/upload", s.handleUserKBImportUpload)
-  g.POST("/user/knowledge-bases/:id/import/web", s.handleUserKBImportWeb)
-  g.GET("/user/knowledge-bases/imports/:task_id", s.handleUserKBImportProgress)
+// Move import routes to admin (users can't import)
+// g.POST("/user/knowledge-bases/:id/import/upload", s.handleUserKBImportUpload)
+// g.POST("/user/knowledge-bases/:id/import/web", s.handleUserKBImportWeb)
+// g.GET("/user/knowledge-bases/imports/:task_id", s.handleUserKBImportProgress)
 
   // 普通用户 - daemon 任务与事件流
   s.registerDaemonRoutes(g.Group("/user"))
@@ -772,6 +779,13 @@ func Serve() error {
 	s.syncChecker = knowledge.NewSyncChecker()
 	go s.syncChecker.Start(context.Background())
 
+	// 启动知识库导入管道
+	linker := knowledge.NewLinker()
+	s.kbPipeline = knowledge.NewPipeline(knowledge.GlobalImportQueue, nil, linker)
+	s.kbCtx, s.kbCancel = context.WithCancel(context.Background())
+	go s.kbPipeline.Start(s.kbCtx)
+	slog.Info("知识库导入管道已启动")
+
 	if cfg.Web.DebugMode {
 		gin.SetMode(gin.DebugMode)
 	} else {
@@ -848,6 +862,11 @@ func (s *Server) gracefulShutdown(sockPath string) error {
 	// 停止知识库同步检查
 	if s.syncChecker != nil {
 		s.syncChecker.Stop()
+	}
+
+	// 停止知识库导入管道
+	if s.kbCancel != nil {
+		s.kbCancel()
 	}
 
 	// 停止速率限制器 goroutine

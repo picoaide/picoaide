@@ -86,7 +86,7 @@ func NewPipeline(queue *ImportQueue, llmClient *llm.Client, linker *Linker) *Pip
 	}
 }
 
-func (p *Pipeline) setLinker(l *Linker) { p.linker = l }
+func (p *Pipeline) SetLinker(l *Linker) { p.linker = l }
 
 func (p *Pipeline) Start(ctx context.Context) {
 	for {
