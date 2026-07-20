@@ -3,18 +3,16 @@
     <a-page-header title="系统配置" sub-title="管理没有独立页面的全局配置项">
       <template #extra>
         <a-space>
-          <a-badge v-if="linkedSections.length > 0" count="!" :offset="[-8, 0]" size="small">
-            <a-dropdown>
-              <a-button>已有配置页面</a-button>
-              <template #overlay>
-                <a-menu>
-                  <a-menu-item v-for="s in linkedSections" :key="s.path">
-                    <a :href="s.path" target="_self">{{ s.label }}</a>
-                  </a-menu-item>
-                </a-menu>
-              </template>
-            </a-dropdown>
-          </a-badge>
+          <a-dropdown>
+            <a-button>已有配置页面</a-button>
+            <template #overlay>
+              <a-menu>
+                <a-menu-item v-for="s in linkedSections" :key="s.path">
+                  <a :href="s.path" target="_self">{{ s.label }}</a>
+                </a-menu-item>
+              </a-menu>
+            </template>
+          </a-dropdown>
           <a-button @click="handleApply" :loading="applyLoading">下发配置</a-button>
           <a-button type="primary" @click="handleSave" :loading="saveLoading">保存</a-button>
         </a-space>
@@ -24,27 +22,23 @@
     <a-spin :spinning="loading" style="margin-top: 16px">
       <a-collapse v-model:activeKey="activeKeys">
         <a-collapse-panel
-          v-for="(values, section) in filteredConfig"
+          v-for="(values, section) in displayConfig"
           :key="section"
           :header="sectionLabels[section] || section"
         >
           <a-form layout="vertical">
             <a-row :gutter="24">
-              <a-col
-                v-for="(val, key) in values"
-                :key="key"
-                :span="typeof val === 'object' && val !== null ? 24 : 12"
-              >
+              <a-col v-for="(item, key) in values" :key="key" :span="item.isObj ? 24 : 12">
                 <a-form-item :label="key">
                   <a-textarea
-                    v-if="typeof val === 'object' && val !== null"
-                    v-model:value="filteredConfig[section][key]"
+                    v-if="item.isObj"
+                    v-model:value="item.text"
                     :rows="4"
                     style="font-family: monospace; font-size: 13px"
                   />
                   <a-input
                     v-else
-                    v-model:value="filteredConfig[section][key]"
+                    v-model:value="item.text"
                     style="font-family: monospace"
                   />
                 </a-form-item>
@@ -71,22 +65,33 @@ const sectionLabels: Record<string, string> = {
   picoclaw: 'PicoClaw 网关',
   security: '安全设置',
   tools: '工具配置',
-  model: '模型',
+  general: '通用',
 }
 
 const linkedSections = [
-  { key: 'web', label: 'Web / 认证配置', path: '/admin/auth' },
-  { key: 'ldap', label: 'LDAP 配置', path: '/admin/auth' },
-  { key: 'oidc', label: 'OIDC 配置', path: '/admin/auth' },
+  { key: 'ldap', label: '认证配置', path: '/admin/auth' },
+  { key: 'oidc', label: '认证配置', path: '/admin/auth' },
+  { key: 'web', label: '认证配置', path: '/admin/auth' },
   { key: 'tls', label: 'HTTPS 证书', path: '/admin/tls' },
   { key: 'skills', label: '技能库', path: '/admin/skills' },
-  { key: 'skill', label: '技能库', path: '/admin/skills' },
   { key: 'channel', label: '通讯渠道', path: '/admin/channels' },
+  { key: 'model', label: '模型配置', path: '/admin/models' },
 ]
 
-const excludedKeys = new Set(['web', 'ldap', 'oidc', 'tls', 'skills', 'skill', 'channel'])
+const excludedKeys = new Set(['ldap', 'oidc', 'web', 'tls', 'skills', 'skill', 'channel', 'model'])
 
-const filteredConfig = reactive<Record<string, any>>({})
+interface DisplayItem {
+  text: string
+  isObj: boolean
+}
+
+const displayConfig = reactive<Record<string, Record<string, DisplayItem>>>({})
+
+const formatValue = (v: any): string => {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'object') return JSON.stringify(v, null, 2)
+  return String(v)
+}
 
 const fetchConfig = async () => {
   loading.value = true
@@ -95,15 +100,19 @@ const fetchConfig = async () => {
     activeKeys.value = []
     for (const [key, val] of Object.entries(data)) {
       if (excludedKeys.has(key)) continue
-      if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
-        filteredConfig[key] = { ...val as any }
-        activeKeys.value.push(key)
+      const section = typeof val === 'object' && val !== null && !Array.isArray(val) ? key : 'general'
+      if (!displayConfig[section]) {
+        displayConfig[section] = {}
+        activeKeys.value.push(section)
+      }
+      if (section === 'general') {
+        displayConfig['general'][key] = { text: formatValue(val), isObj: typeof val === 'object' && val !== null }
       } else {
-        if (!filteredConfig['general']) filteredConfig['general'] = {}
-        filteredConfig['general'][key] = val
+        for (const [k, v] of Object.entries(val as Record<string, any>)) {
+          displayConfig[section][k] = { text: formatValue(v), isObj: typeof v === 'object' && v !== null }
+        }
       }
     }
-    if (filteredConfig['general']) activeKeys.value.unshift('general')
   } catch {
     message.error('获取配置失败')
   } finally {
@@ -111,13 +120,26 @@ const fetchConfig = async () => {
   }
 }
 
+const parseValue = (item: DisplayItem): any => {
+  if (!item.text.trim()) return ''
+  if (item.isObj) {
+    try { return JSON.parse(item.text) } catch { return item.text }
+  }
+  return item.text
+}
+
 const collectConfig = () => {
   const cfg: Record<string, any> = {}
-  for (const [section, values] of Object.entries(filteredConfig)) {
+  for (const [section, items] of Object.entries(displayConfig)) {
     if (section === 'general') {
-      Object.assign(cfg, values)
+      for (const [key, item] of Object.entries(items)) {
+        cfg[key] = parseValue(item)
+      }
     } else {
-      cfg[section] = { ...values }
+      cfg[section] = {}
+      for (const [key, item] of Object.entries(items)) {
+        cfg[section][key] = parseValue(item)
+      }
     }
   }
   return cfg
