@@ -193,12 +193,6 @@ func (s *Server) handleAdminSkillsSourcesRemove(c *gin.Context) {
     return
   }
 
-  // 不允许删除 skillhub.cn
-  if name == "skillhub.cn" {
-    writeError(c, http.StatusBadRequest, "内置源 skillhub.cn 不可删除")
-    return
-  }
-
   // 解绑所有来自该源的技能
   skills, _ := skill.ListSourceSkills(name)
   for _, sk := range skills {

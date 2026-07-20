@@ -36,21 +36,7 @@ func DefaultGlobalConfig() *GlobalConfig {
       },
     },
     Skills: SkillsConfig{
-      Sources: []SkillsSourceWrapper{
-        {
-          Type: "registry",
-          Name: "skillhub.cn",
-          Reg: &RegistrySource{
-            Name:                "skillhub.cn",
-            DisplayName:         "SkillHub 中文技能市场",
-            IndexURL:            "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills.json",
-            SearchURL:           "https://lightmake.site/api/v1/search",
-            PrimaryDownloadURL:  "https://lightmake.site/api/v1/download?slug={slug}",
-            DownloadURLTemplate: "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/{slug}.zip",
-            Enabled:             true,
-          },
-        },
-      },
+      Sources: []SkillsSourceWrapper{},
     },
   }
 }
