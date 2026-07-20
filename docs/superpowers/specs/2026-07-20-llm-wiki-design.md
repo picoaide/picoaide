@@ -20,13 +20,16 @@ picoaide (host)
 │   ├── kb_import_tasks         — 导入任务队列
 │   └── kb_audit_log            — KB 访问审计日志
 │
-│   ├── 导入管道 (异步 goroutine + channel):
-│   │   parse → [LLM 分类+关键词提取] → 写表 → debounce 合并 → 全量重建链接+标签
+│   ├── LLM Client (通用, 支持 OpenAI/Ollama 等)
+│   │   └── 用于导入管道的 LLM 分类 + 关键词提取
+│   │
+│   ├── 导入管道 (异步 goroutine + channel, 200 队列):
+│   │   接收 → 存临时文件 → 解析文本 → [LLM 分类+关键词提取] → 写表 → debounce 合并 → 重建链接+标签 → 清理临时文件
 │   │
 │   ├── 管理/用户 API (Gin + 现有中间件)
 │   └── MCP 工具注册 (mcp_service.go):
-│       kb_search(query, scope, doc_id?, folder_id?)
-│       └── handler 内做权限检查 + FTS5 搜索
+│       kb_search(query, max_length?, scope, doc_id?, folder_id?)
+│       └── handler 内做权限检查 + FTS5 搜索 (所有有权限的 KB)
 
 picoagent (sandbox)
 └── MCP tools/list → 发现 kb_search 工具
@@ -240,19 +243,51 @@ kb_search(query, scope, doc_id?, folder_id?)
 
 ### 异步执行
 
-- 新建 `internal/knowledge/import_queue.go`: goroutine + channel (`chan *ImportTask, buffer 100`)
+- 新建 `internal/knowledge/import_queue.go`: goroutine + channel (`chan *ImportTask, buffer 200`)
 - 导入 API 立即返回 `task_id`，前端轮询 `/imports/:task_id`
 - 状态流转: `pending → parsing → [classifying] → indexing → ready/error`
 - LLM 超时(15s)或无效JSON → `status=error`，保留原始未分类内容
 - LLM 不可用(无配置) → 跳过分类步骤，直接写表
+- 队列满时非阻塞写入, 返回 HTTP 429
+- handler 将上传文件持久化到磁盘临时目录 → goroutine 消费完再清理
 
 ### 解析
 
-- **PDF**: pdfcpu (纯 Go, 只提取文本层, 不处理扫描件)
+- **PDF**: pdfcpu (纯 Go, 只提取文本层)
 - **DOCX**: 标准库 zip/xml 提取段落文本
+- **图片内嵌文字**: 在 PDF/DOCX 基础提取后, 如果文本为空白或极少 → 调用 OCR 回退
+- **OCR**: 检测系统是否有 `tesseract` 命令, 有则调用提取文字; 无则跳过, 输出提示
+  - PDF: 提取每页为图片 → tesseract 逐页 OCR
+  - DOCX: 解压 ZIP 提取 media/ 下图片 → tesseract OCR
+  - PDF 扫描件: 先尝试 pdfcpu 提取文本层, 如无文字则整页转图片 → tesseract
 - **HTML**: go-readability 提取正文 → 转纯文本
 - **MD/TXT**: 直接读
-- **ZIP**: 解压后递归处理内部文件
+- **ZIP**: 解压后递归处理内部文件, 限制深度 2 层, 验证路径防 `../` 遍历
+- **安全**: 所有上传文件校验 MIME 类型白名单; 解压路径验证防 ZIP slip
+
+### LLM Client (picoaide 通用)
+
+picoaide 新增 `internal/llm/client.go`: 通用 LLM HTTP 客户端, 兼容 OpenAI API 格式。
+
+```go
+type LLMConfig struct {
+  Provider string // openai | ollama | custom
+  BaseURL  string // https://api.openai.com/v1
+  APIKey   string
+  Model    string // gpt-4o-mini | qwen2.5 | ...
+  Timeout  time.Duration
+}
+
+type LLMClient struct { ... }
+
+func NewClient(cfg LLMConfig) *LLMClient
+func (c *LLMClient) Chat(ctx context.Context, msgs []Message, opts ...Option) (*ChatResult, error)
+```
+
+- 配置从现有 `settings` 表读取, 复用 `GET /api/config` / `POST /api/config`
+- 首次调用 LLM 分类时自动初始化, 全局单例
+- 支持 OpenAI / Ollama / 任何 OpenAI-compatible API
+- 超时 60s (带 context 传播)
 
 ### LLM 分类 (可选)
 
@@ -336,6 +371,7 @@ System: 你是知识库链接分析器。从文档中提取最有链接价值的
 `kb_search` 注册为 picoaide 的 MCP 工具，picoagent 通过标准 MCP 协议调用:
 
 - picoagent 启动时通过 MCP tools/list 发现 `kb_search` 工具
+- 从 `agent_config.go` 的 `Tools` 列表中移除 `kb_search`（避免与 MCP 工具重复声明）
 - LLM 调用时 picoagent 通过 MCP tools/call 发送请求
 - picoaide MCP handler 收到请求 → 解析 token 获取 username → 查询可访问文件夹 → 执行搜索/读取/浏览
 - 权限检查在 host 端实时执行，picoagent 不缓存任何权限状态
@@ -345,17 +381,20 @@ MCP 工具定义:
 ```
 名称: kb_search
 参数:
-  query: string           — 搜索关键词
-  scope: "search"         — search 模式下必填
+  query: string           — 搜索关键词 (search 模式必填)
+  max_length: number?     — 返回内容最大字符数 (read 模式, 默认 4000, 超长截断)
+  scope: "search"         — search / read / browse
   doc_id: number?         — read 模式下必填
-  folder_id: number?      — browse 模式下可选
+  folder_id: number?      — browse 模式下可选, 不传则从根开始
   page: number?           — search 分页 (默认 1)
   page_size: number?      — search 分页 (默认 10)
 返回:
-  scope=search  → {results: [{doc_id, title, folder_path, snippet, tags, links}], total, page}
-  scope=read     → {title, content, tags, links, backlinks}
+  scope=search  → {results: [{doc_id, title, kb_id, folder_path, snippet, tags, links}], total, page}
+  scope=read     → {title, content(截断), truncated, tags, links, backlinks}
   scope=browse   → {folders: [{id, name}], docs: [{doc_id, title, tags}]}
 ```
+
+> kb_search 自动搜索当前用户有权限的所有知识库。不暴露 kb_id 概念给 LLM。
 
 ## 定时同步 (后续迭代)
 
