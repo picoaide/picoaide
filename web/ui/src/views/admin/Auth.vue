@@ -141,10 +141,7 @@ const handleModeChange = async (e: any) => {
   const mode = typeof e === 'string' ? e : e?.target?.value
   if (!mode || mode === authMode.value) return
   try {
-    const cfg = await api.get('/config')
-    cfg.web = cfg.web || {}
-    cfg.web.auth_mode = mode
-    await api.post('/config', { config: JSON.stringify(cfg) })
+    await api.post('/config', { config: JSON.stringify({ web: { auth_mode: mode } }) })
     message.success('认证模式已切换')
     authMode.value = mode
   } catch {
@@ -202,16 +199,8 @@ const fetchData = async () => {
 const handleSave = async () => {
   saving.value = true
   try {
-    const cfg = await api.get('/config')
     const provider = currentConfigKey.value
-    cfg[provider] = { ...cfg[provider], ...configValues }
-    if (provider === 'ldap' || provider === 'oidc') {
-      delete cfg[provider].sync_interval
-      if (configValues.sync_interval) {
-        cfg[provider].sync_interval = configValues.sync_interval
-      }
-    }
-    await api.post('/config', { config: JSON.stringify(cfg) })
+    await api.post('/config', { config: JSON.stringify({ [provider]: { ...configValues } }) })
     message.success('保存成功')
   } catch {
     message.error('保存失败')

@@ -655,6 +655,14 @@ func (s *Server) handleConfigSave(c *gin.Context) {
     return
   }
 
+  // json.RawMessage 对字符串值会保留外层引号，需要去引号
+  if len(jsonStr) > 0 && jsonStr[0] == '"' {
+    var s string
+    if err := json.Unmarshal(req.Config, &s); err == nil {
+      jsonStr = s
+    }
+  }
+
   var raw map[string]interface{}
   if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
     writeError(c, http.StatusBadRequest, fmt.Sprintf("JSON 格式错误: %v", err))
