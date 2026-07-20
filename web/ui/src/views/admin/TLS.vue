@@ -66,11 +66,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, watch, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { api } from '../../composables/api'
 
-const statusLoading = ref(false)
+const statusLoading = ref(true)
 const status = reactive({
   enabled: false,
   has_cert: false,
@@ -103,6 +103,8 @@ const saveLoading = ref(false)
 const clearLoading = ref(false)
 const toggleLoading = ref(false)
 const verifyResult = ref<any>(null)
+
+watch([certPem, keyPem], () => { verifyResult.value = null })
 
 const handleVerify = async () => {
   if (!certPem.value || !keyPem.value) {
@@ -165,6 +167,9 @@ const handleClear = () => {
       try {
         await api.post('/admin/tls/clear')
         message.success('证书已清除')
+        certPem.value = ''
+        keyPem.value = ''
+        verifyResult.value = null
         fetchStatus()
       } catch {
         message.error('清除失败')

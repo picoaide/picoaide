@@ -78,7 +78,7 @@
       <a-tab-pane key="whitelist" tab="白名单">
         <div style="margin-bottom: 12px">
           <a-space>
-            <a-input v-model:value="whitelistInput" placeholder="输入用户名" style="width: 240px" />
+            <a-input v-model:value="whitelistInput" placeholder="输入用户名（字母数字、点、下划线、连字符）" style="width: 320px" />
             <a-button type="primary" @click="handleAddWhitelist" :loading="wlLoading">添加</a-button>
           </a-space>
         </div>
@@ -105,8 +105,10 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import { api } from '../../composables/api'
+
+const USERNAME_RE = /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/
 
 const activeTab = ref('config')
 const authMode = ref('local')
@@ -137,27 +139,32 @@ const currentActions = computed(() =>
   currentProvider.value?.actions || []
 )
 
+const currentConfigKey = computed(() =>
+  authMode.value
+)
+
 const handleModeChange = async (e: any) => {
   const mode = typeof e === 'string' ? e : e?.target?.value
   if (!mode || mode === authMode.value) return
-  try {
-    await api.post('/config', { config: JSON.stringify({ web: { auth_mode: mode } }) })
-    message.success('认证模式已切换')
-    authMode.value = mode
-  } catch {
-    message.error('切换失败')
-  }
+  Modal.confirm({
+    title: '切换认证模式',
+    content: '切换认证模式可能会影响现有用户登录或触发用户数据清理。确定要继续吗？',
+    onOk: async () => {
+      try {
+        await api.post('/config', { config: JSON.stringify({ web: { auth_mode: mode } }) })
+        message.success('认证模式已切换')
+        authMode.value = mode
+        fetchData()
+      } catch {
+        message.error('切换失败')
+      }
+    },
+  })
 }
-
-const currentConfigKey = computed(() => {
-  if (authMode.value === 'local') return 'local'
-  if (authMode.value === 'ldap') return 'ldap'
-  if (authMode.value === 'oidc') return 'oidc'
-  return authMode.value
-})
 
 const fetchData = async () => {
   loading.value = true
+  wlTableLoading.value = true
   try {
     const [modeData, provData, cfgData, wlData] = await Promise.all([
       api.get('/login/mode'),
@@ -168,31 +175,31 @@ const fetchData = async () => {
     authMode.value = modeData.auth_mode || 'local'
     providers.value = provData.providers || []
 
+    Object.keys(configValues).forEach(k => delete configValues[k])
+
+    const provider = providers.value.find(p => p.name === authMode.value)
     const sectionCfg = cfgData[currentConfigKey.value] || {}
-    configValues['host'] = sectionCfg.host || ''
-    configValues['bind_dn'] = sectionCfg.bind_dn || ''
-    configValues['bind_password'] = ''
-    configValues['base_dn'] = sectionCfg.base_dn || ''
-    configValues['filter'] = sectionCfg.filter || ''
-    configValues['username_attribute'] = sectionCfg.username_attribute || ''
-    configValues['group_search_mode'] = sectionCfg.group_search_mode || ''
-    configValues['group_base_dn'] = sectionCfg.group_base_dn || ''
-    configValues['group_filter'] = sectionCfg.group_filter || ''
-    configValues['group_member_attribute'] = sectionCfg.group_member_attribute || ''
-    configValues['issuer_url'] = sectionCfg.issuer_url || ''
-    configValues['client_id'] = sectionCfg.client_id || ''
-    configValues['client_secret'] = ''
-    configValues['redirect_url'] = sectionCfg.redirect_url || ''
-    configValues['scopes'] = sectionCfg.scopes || ''
-    configValues['username_claim'] = sectionCfg.username_claim || ''
-    configValues['groups_claim'] = sectionCfg.groups_claim || ''
-    configValues['sync_interval'] = sectionCfg.sync_interval || ''
+    const prefix = currentConfigKey.value + '.'
+    if (provider) {
+      for (const section of (provider.fields || [])) {
+        for (const field of section.fields) {
+          const leafKey = field.key.startsWith(prefix) ? field.key.slice(prefix.length) : field.key
+          const val = sectionCfg[leafKey]
+          if (val !== undefined && val !== null && val !== '') {
+            configValues[field.key] = val
+          } else if (field.type !== 'password') {
+            configValues[field.key] = ''
+          }
+        }
+      }
+    }
 
     whitelist.value = (wlData.users || []).map((u: string) => ({ username: u }))
   } catch {
     message.error('加载配置失败')
   } finally {
     loading.value = false
+    wlTableLoading.value = false
   }
 }
 
@@ -200,7 +207,20 @@ const handleSave = async () => {
   saving.value = true
   try {
     const provider = currentConfigKey.value
-    await api.post('/config', { config: JSON.stringify({ [provider]: { ...configValues } }) })
+    const prefix = provider + '.'
+    const payload: Record<string, any> = {}
+    for (const section of currentFields.value) {
+      for (const field of section.fields) {
+        if (field.type === 'password') {
+          const val = configValues[field.key]
+          if (!val) continue
+        }
+        if (configValues[field.key] === undefined) continue
+        const leafKey = field.key.startsWith(prefix) ? field.key.slice(prefix.length) : field.key
+        payload[leafKey] = configValues[field.key]
+      }
+    }
+    await api.post('/config', { config: JSON.stringify({ [provider]: payload }) })
     message.success('保存成功')
   } catch {
     message.error('保存失败')
@@ -212,16 +232,28 @@ const handleSave = async () => {
 const handleAction = async (actionId: string) => {
   actionLoading[actionId] = true
   try {
-    const endpoint = {
+    const endpoint: Record<string, string> = {
       'test-ldap': '/admin/auth/test-ldap',
       'sync-users': '/admin/auth/sync-users',
       'sync-groups': '/admin/auth/sync-groups',
-    }[actionId]
-    if (!endpoint) {
+    }
+    const ep = endpoint[actionId]
+    if (!ep) {
       message.warning('未知操作')
       return
     }
-    await api.post(endpoint)
+    let body: any
+    if (actionId === 'test-ldap') {
+      const prefix = 'ldap.'
+      body = {}
+      for (const section of currentFields.value) {
+        for (const field of section.fields) {
+          const leafKey = field.key.startsWith(prefix) ? field.key.slice(prefix.length) : field.key
+          body[leafKey] = configValues[field.key] ?? ''
+        }
+      }
+    }
+    await api.post(ep, body)
     message.success('操作成功')
   } catch {
     message.error('操作失败')
@@ -231,10 +263,12 @@ const handleAction = async (actionId: string) => {
 }
 
 const handleAddWhitelist = async () => {
-  if (!whitelistInput.value.trim()) { message.warning('请输入用户名'); return }
+  const name = whitelistInput.value.trim()
+  if (!name) { message.warning('请输入用户名'); return }
+  if (!USERNAME_RE.test(name)) { message.warning('用户名仅支持字母数字、点、下划线、连字符，且不能以特殊字符开头或结尾'); return }
   wlLoading.value = true
   try {
-    await api.post('/admin/whitelist', { add: whitelistInput.value.trim() })
+    await api.post('/admin/whitelist', { add: name })
     message.success('添加成功')
     whitelistInput.value = ''
     fetchData()

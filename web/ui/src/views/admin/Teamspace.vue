@@ -35,7 +35,7 @@
 
     <a-empty v-if="folders.length === 0 && !loading" description="暂无共享文件夹" style="margin-top: 48px" />
 
-    <a-modal v-model:open="showCreate" title="创建共享文件夹" @ok="handleCreate" :confirmLoading="creating">
+    <a-modal v-model:open="showCreate" title="创建共享文件夹" @ok="handleCreate" @cancel="form.name = ''; form.description = ''; form.is_public = false" :confirmLoading="creating">
       <a-form layout="vertical">
         <a-form-item label="名称" required>
           <a-input v-model:value="form.name" placeholder="文件夹名称" />
@@ -49,7 +49,7 @@
       </a-form>
     </a-modal>
 
-    <a-modal v-model:open="showEdit" title="编辑共享文件夹" @ok="submitEdit" :confirmLoading="creating">
+    <a-modal v-model:open="showEdit" title="编辑共享文件夹" @ok="submitEdit" @cancel="editForm.name = ''; editForm.description = ''; editForm.is_public = false" :confirmLoading="creating">
       <a-form layout="vertical">
         <a-form-item label="名称" required>
           <a-input v-model:value="editForm.name" />
@@ -59,6 +59,14 @@
         </a-form-item>
         <a-form-item label="公开">
           <a-switch v-model:checked="editForm.is_public" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <a-modal v-model:open="showTestModal" title="测试挂载" @ok="doTest" :confirmLoading="testLoading">
+      <a-form layout="vertical">
+        <a-form-item label="用户名（留空则测试所有用户）">
+          <a-input v-model:value="testUsername" placeholder="输入用户名" />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -77,7 +85,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import { EllipsisOutlined } from '@ant-design/icons-vue'
 import { api } from '../../composables/api'
 
@@ -88,6 +96,10 @@ const allGroups = ref<any[]>([])
 const showCreate = ref(false)
 const showEdit = ref(false)
 const showGroups = ref(false)
+const showTestModal = ref(false)
+const testLoading = ref(false)
+const testUsername = ref('')
+const testFolder = ref<any>(null)
 const currentFolder = ref<any>(null)
 const selectedGroupIds = ref<string[]>([])
 
@@ -131,6 +143,7 @@ const handleEdit = (folder: any) => {
 }
 
 const submitEdit = async () => {
+  if (!editForm.name) { message.warning('请输入名称'); return }
   creating.value = true
   try {
     const data = await api.post('/admin/shared-folders/update', { id: currentFolder.value.id, name: editForm.name, description: editForm.description, is_public: editForm.is_public })
@@ -158,12 +171,21 @@ const submitGroups = async () => {
   finally { creating.value = false }
 }
 
-const handleTest = async (folder: any) => {
+const handleTest = (folder: any) => {
+  testFolder.value = folder
+  testUsername.value = ''
+  showTestModal.value = true
+}
+
+const doTest = async () => {
+  testLoading.value = true
   try {
-    const data = await api.post('/admin/shared-folders/test', { folder_id: folder.id, username: '' })
+    const data = await api.post('/admin/shared-folders/test', { folder_id: testFolder.value.id, username: testUsername.value || undefined })
     if (data.mounted) message.success('挂载正常')
     else message.warning(data.message || '挂载异常')
+    showTestModal.value = false
   } catch { message.error('测试失败') }
+  finally { testLoading.value = false }
 }
 
 const handleMount = async (folder: any) => {
@@ -174,12 +196,18 @@ const handleMount = async (folder: any) => {
   } catch { message.error('挂载失败') }
 }
 
-const handleDelete = async (folder: any) => {
-  try {
-    const data = await api.post('/admin/shared-folders/delete', { id: folder.id })
-    if (data.success) { message.success('删除成功'); fetchFolders() }
-    else message.error(data.error || '删除失败')
-  } catch { message.error('删除失败') }
+const handleDelete = (folder: any) => {
+  Modal.confirm({
+    title: '确定删除此共享文件夹？',
+    content: `操作将删除"${folder.name}"，是否继续？`,
+    onOk: async () => {
+      try {
+        const data = await api.post('/admin/shared-folders/delete', { id: folder.id })
+        if (data.success) { message.success('删除成功'); fetchFolders() }
+        else message.error(data.error || '删除失败')
+      } catch { message.error('删除失败') }
+    },
+  })
 }
 
 onMounted(() => { fetchFolders(); fetchGroups() })

@@ -265,7 +265,6 @@ const openMembers = async (record: any) => {
   memberPagination.current = 1
   memberSearch.value = ''
   await fetchMembers()
-  fetchGroupSkills()
   fetchAllSkills()
 }
 
@@ -280,6 +279,7 @@ const fetchMembers = async () => {
     const data = await api.get('/admin/groups/members', { name: currentGroup.value, page: String(memberPagination.current), page_size: String(memberPagination.pageSize), search: memberSearch.value })
     members.value = (data.members || []).map((u: string) => ({ username: u }))
     memberPagination.total = data.total || 0
+    boundSkills.value = data.skills || []
   } catch {
     message.error('获取成员列表失败')
   } finally {
@@ -301,7 +301,7 @@ const handleAddMembers = async () => {
   }
   addMembersLoading.value = true
   try {
-    await api.post('/admin/groups/members/add', { group_name: currentGroup.value, usernames: names.join('\n') })
+    await api.post('/admin/groups/members/add', { group_name: currentGroup.value, usernames: names })
     message.success('添加成功')
     showAddMembers.value = false
     addMemberUsernames.value = ''
@@ -320,18 +320,6 @@ const handleRemoveMember = async (username: string) => {
     fetchMembers()
   } catch {
     message.error('移除失败')
-  }
-}
-
-const fetchGroupSkills = async () => {
-  skillsLoading.value = true
-  try {
-    const data = await api.get('/admin/groups/members', { name: currentGroup.value })
-    boundSkills.value = data.skills || []
-  } catch {
-    // ignore
-  } finally {
-    skillsLoading.value = false
   }
 }
 
@@ -354,7 +342,7 @@ const handleBindSkill = async () => {
     await api.post('/admin/groups/skills/bind', { group_name: currentGroup.value, skill_name: selectedSkill.value })
     message.success('绑定成功')
     selectedSkill.value = ''
-    fetchGroupSkills()
+    fetchMembers()
   } catch {
     message.error('绑定失败')
   }
@@ -364,7 +352,7 @@ const handleUnbindSkill = async (skillName: string) => {
   try {
     await api.post('/admin/groups/skills/unbind', { group_name: currentGroup.value, skill_name: skillName })
     message.success('解绑成功')
-    fetchGroupSkills()
+    fetchMembers()
   } catch {
     message.error('解绑失败')
   }
@@ -372,7 +360,7 @@ const handleUnbindSkill = async (skillName: string) => {
 
 watch(memberTab, (val) => {
   if (val === 'skills') {
-    fetchGroupSkills()
+    fetchMembers()
     fetchAllSkills()
   }
 })

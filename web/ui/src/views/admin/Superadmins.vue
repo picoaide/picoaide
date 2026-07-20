@@ -55,7 +55,6 @@
     <a-modal
       v-model:open="showReset"
       title="重置密码"
-      :footer="null"
     >
       <template v-if="resetPassword">
         <a-alert type="success" message="密码重置成功" />
@@ -65,6 +64,9 @@
             <span style="font-family: monospace">{{ resetPassword }}</span>
           </a-descriptions-item>
         </a-descriptions>
+      </template>
+      <template #footer>
+        <a-button @click="showReset = false">关闭</a-button>
       </template>
     </a-modal>
   </div>
@@ -85,6 +87,7 @@ const showReset = ref(false)
 const resetPassword = ref('')
 const resetUsername = ref('')
 const createForm = ref({ username: '' })
+let closeTimer: ReturnType<typeof setTimeout> | null = null
 
 const columns = [
   { title: '用户名', dataIndex: 'username', key: 'username' },
@@ -117,6 +120,11 @@ const handleCreate = async () => {
     createdPassword.value = data.password || ''
     createForm.value.username = ''
     fetchAdmins()
+    if (closeTimer) clearTimeout(closeTimer)
+    closeTimer = setTimeout(() => {
+      showCreate.value = false
+      createdPassword.value = ''
+    }, 5000)
   } catch {
     message.error('创建失败')
   } finally {

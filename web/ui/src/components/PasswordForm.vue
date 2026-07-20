@@ -44,6 +44,10 @@ const handleSubmit = async () => {
       old_password: form.old_password,
       new_password: form.new_password,
     })
+    if (data.error) {
+      message.error(data.error)
+      return
+    }
     if (data.success !== undefined && !data.success) {
       message.error(data.error || '修改失败')
       return

@@ -75,7 +75,8 @@
           :columns="registryColumns"
           :data-source="registryItems"
           :loading="registryLoading"
-          :pagination="false"
+          :pagination="registryPagination"
+          @change="handleRegistryTableChange"
           row-key="slug"
         >
           <template #bodyCell="{ column, record }">
@@ -141,6 +142,7 @@ import { usePagination } from '../../composables/usePagination'
 
 const activeTab = ref('installed')
 const { pagination: skillsPagination } = usePagination()
+const { pagination: registryPagination } = usePagination()
 
 const search = ref('')
 const skills = ref<any[]>([])
@@ -169,6 +171,7 @@ const fetchSkills = async () => {
 
 const handleSkillsTableChange = (pag: any) => {
   skillsPagination.current = pag.current
+  skillsPagination.pageSize = pag.pageSize || 20
   fetchSkills()
 }
 
@@ -341,15 +344,29 @@ const registryColumns = [
 const fetchRegistry = async () => {
   registryLoading.value = true
   try {
-    const params: Record<string, string> = {}
+    if (sources.value.length === 0) {
+      try {
+        const data = await api.get('/admin/skills/sources')
+        sources.value = data.sources || []
+      } catch {}
+    }
+    const src = sources.value.length > 0 ? sources.value[0].name : 'skillhub.cn'
+    const params: Record<string, string> = { source: src, page: String(registryPagination.current), page_size: String(registryPagination.pageSize) }
     if (registryQuery.value) params.q = registryQuery.value
     const data = await api.get('/admin/skills/registry/list', params)
     registryItems.value = data.skills || []
+    registryPagination.total = data.total || 0
   } catch {
     message.error('获取注册中心失败')
   } finally {
     registryLoading.value = false
   }
+}
+
+const handleRegistryTableChange = (pag: any) => {
+  registryPagination.current = pag.current
+  registryPagination.pageSize = pag.pageSize || 20
+  fetchRegistry()
 }
 
 const handleInstall = async (record: any) => {

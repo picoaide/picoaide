@@ -28,6 +28,8 @@
 
 <script setup lang="ts">
 import { reactive, onMounted } from 'vue'
+import { message } from 'ant-design-vue'
+import { api } from '../../composables/api'
 
 const stats = reactive({
   users: 0,
@@ -38,22 +40,18 @@ const stats = reactive({
 
 onMounted(async () => {
   try {
-    const [usersRes, groupsRes, skillsRes] = await Promise.all([
-      fetch('/api/admin/users'),
-      fetch('/api/admin/groups'),
-      fetch('/api/admin/skills'),
-    ])
     const [usersData, groupsData, skillsData] = await Promise.all([
-      usersRes.json(),
-      groupsRes.json(),
-      skillsRes.json(),
+      api.get('/admin/users'),
+      api.get('/admin/groups'),
+      api.get('/admin/skills'),
     ])
     stats.users = usersData.total || 0
     stats.groups = groupsData.total || 0
     stats.skills = skillsData.total || 0
+    // ponytail: no /api/admin/containers endpoint exists
     stats.containers = 0
   } catch {
-    // ignore
+    message.error('获取概况失败')
   }
 })
 </script>

@@ -58,25 +58,24 @@
           <a-form-item>
             <a-button type="default" @click="handleTest" :loading="testing">测试连接</a-button>
           </a-form-item>
+
+          <a-result
+            v-if="testResult !== null"
+            :status="testResult ? 'success' : 'error'"
+            :title="testResult ? '连接成功' : '连接失败'"
+          >
+            <template #extra v-if="testError">
+              <a-alert type="error" :message="testError" show-icon />
+            </template>
+          </a-result>
         </a-form>
       </a-card>
-
-      <a-result
-        v-if="testResult !== null"
-        :status="testResult ? 'success' : 'error'"
-        :title="testResult ? '连接成功' : '连接失败'"
-        style="margin-top: 16px"
-      >
-        <template #extra v-if="testError">
-          <a-alert type="error" :message="testError" show-icon />
-        </template>
-      </a-result>
     </a-spin>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import { api } from '../../composables/api'
 
@@ -97,6 +96,11 @@ const form = reactive({
   temperature: 0.7,
   request_timeout: 600,
 })
+
+watch(form, () => {
+  testResult.value = null
+  testError.value = ''
+}, { deep: true })
 
 const fetchConfig = async () => {
   loading.value = true
@@ -120,6 +124,10 @@ const fetchConfig = async () => {
 }
 
 const handleSave = async () => {
+  if (!form.model_id || !form.api_key) {
+    message.warning('请填写模型 ID 和 API Key')
+    return
+  }
   saving.value = true
   try {
     await api.post('/config', {

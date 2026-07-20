@@ -7,8 +7,8 @@
             <a-button>已有配置页面</a-button>
             <template #overlay>
               <a-menu>
-                <a-menu-item v-for="s in linkedSections" :key="s.path">
-                  <a :href="s.path" target="_self">{{ s.label }}</a>
+                <a-menu-item v-for="s in linkedSections" :key="s.path" @click="router.push(s.path)">
+                  {{ s.label }}
                 </a-menu-item>
               </a-menu>
             </template>
@@ -54,7 +54,10 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
+import { useRouter } from 'vue-router'
 import { api } from '../../composables/api'
+
+const router = useRouter()
 
 const loading = ref(false)
 const saveLoading = ref(false)
@@ -69,16 +72,14 @@ const sectionLabels: Record<string, string> = {
 }
 
 const linkedSections = [
-  { key: 'ldap', label: '认证配置', path: '/admin/auth' },
-  { key: 'oidc', label: '认证配置', path: '/admin/auth' },
-  { key: 'web', label: '认证配置', path: '/admin/auth' },
+  { key: 'auth', label: '认证配置 (LDAP / OIDC)', path: '/admin/auth' },
   { key: 'model', label: '模型配置', path: '/admin/models' },
   { key: 'tls', label: 'HTTPS 证书', path: '/admin/tls' },
   { key: 'skills', label: '技能库', path: '/admin/skills' },
   { key: 'channel', label: '通讯渠道', path: '/admin/channels' },
 ]
 
-const excludedKeys = new Set(['ldap', 'oidc', 'web', 'model', 'tls', 'skills', 'skill', 'channel'])
+const excludedKeys = new Set(['ldap', 'oidc', 'web', 'model', 'tls', 'skills', 'channel'])
 
 interface DisplayItem {
   text: string
@@ -123,7 +124,7 @@ const fetchConfig = async () => {
 const parseValue = (item: DisplayItem): any => {
   if (!item.text.trim()) return ''
   if (item.isObj) {
-    try { return JSON.parse(item.text) } catch { return item.text }
+    try { return JSON.parse(item.text) } catch { message.warning('JSON 格式无效，将按字符串保存'); return item.text }
   }
   return item.text
 }

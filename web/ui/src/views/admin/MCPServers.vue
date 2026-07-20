@@ -122,13 +122,28 @@
         size="small"
       />
     </a-modal>
+
+    <a-modal
+      v-model:open="deleteModalVisible"
+      title="确认删除"
+      @ok="confirmDelete"
+      :confirm-loading="deleteLoading"
+      ok-text="确认"
+      cancel-text="取消"
+    >
+      <p>确定要删除服务「{{ deleteRecord?.name }}」吗？</p>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { message, Modal } from 'ant-design-vue'
+import { message } from 'ant-design-vue'
 import { api } from '../../composables/api'
+
+const parseErr = (e: any, fallback: string) => {
+  try { const r = JSON.parse(e.message); return r.error || r.message || fallback } catch { return fallback }
+}
 
 const servers = ref<any[]>([])
 const loading = ref(false)
@@ -148,8 +163,8 @@ const fetchServers = async () => {
   try {
     const data = await api.get('/admin/mcp/servers')
     servers.value = data.servers || []
-  } catch {
-    message.error('获取服务列表失败')
+  } catch (e: any) {
+    message.error(parseErr(e, '获取服务列表失败'))
   } finally {
     loading.value = false
   }
@@ -161,8 +176,8 @@ const handleReload = async () => {
     await api.post('/admin/mcp/servers/reload')
     message.success('重新加载成功')
     fetchServers()
-  } catch {
-    message.error('重新加载失败')
+  } catch (e: any) {
+    message.error(parseErr(e, '重新加载失败'))
   } finally {
     reloading.value = false
   }
@@ -196,8 +211,8 @@ const openEdit = (record: any) => {
     command: record.command || '',
     args: Array.isArray(record.args) ? JSON.stringify(record.args) : (record.args || ''),
     url: record.url || '',
-    env: typeof record.env === 'object' ? JSON.stringify(record.env) : (record.env || ''),
-    headers: typeof record.headers === 'object' ? JSON.stringify(record.headers) : (record.headers || ''),
+    env: record.env != null && typeof record.env === 'object' ? JSON.stringify(record.env) : (record.env || ''),
+    headers: record.headers != null && typeof record.headers === 'object' ? JSON.stringify(record.headers) : (record.headers || ''),
     enabled: !!record.enabled,
   })
   showForm.value = true
@@ -207,6 +222,23 @@ const handleSave = async () => {
   if (!form.name) {
     message.warning('请填写名称')
     return
+  }
+  if (form.transport === 'stdio' && !form.command) {
+    message.warning('stdio 传输方式必须填写命令')
+    return
+  }
+  if (form.transport !== 'stdio' && !form.url) {
+    message.warning('HTTP/SSE 传输方式必须填写 URL')
+    return
+  }
+  if (form.args) {
+    try { JSON.parse(form.args) } catch { message.warning('参数格式错误，请输入合法 JSON 数组'); return }
+  }
+  if (form.env) {
+    try { JSON.parse(form.env) } catch { message.warning('环境变量格式错误，请输入合法 JSON 对象'); return }
+  }
+  if (form.headers) {
+    try { JSON.parse(form.headers) } catch { message.warning('请求头格式错误，请输入合法 JSON 对象'); return }
   }
   saveLoading.value = true
   try {
@@ -222,29 +254,36 @@ const handleSave = async () => {
     message.success(editingId.value ? '更新成功' : '创建成功')
     showForm.value = false
     fetchServers()
-  } catch {
-    message.error('操作失败')
+  } catch (e: any) {
+    message.error(parseErr(e, '操作失败'))
   } finally {
     saveLoading.value = false
   }
 }
 
+const deleteRecord = ref<any>(null)
+const deleteLoading = ref(false)
+const deleteModalVisible = ref(false)
+
 const handleDelete = (record: any) => {
-  Modal.confirm({
-    title: '确认删除',
-    content: `确定要删除服务「${record.name}」吗？`,
-    okText: '确认',
-    cancelText: '取消',
-    onOk: async () => {
-      try {
-        await api.post(`/admin/mcp/servers/delete/${record.id}`)
-        message.success('删除成功')
-        fetchServers()
-      } catch {
-        message.error('删除失败')
-      }
-    },
-  })
+  deleteRecord.value = record
+  deleteModalVisible.value = true
+}
+
+const confirmDelete = async () => {
+  if (!deleteRecord.value) return
+  deleteLoading.value = true
+  try {
+    await api.post(`/admin/mcp/servers/delete/${deleteRecord.value.id}`)
+    message.success('删除成功')
+    deleteRecord.value = null
+    deleteModalVisible.value = false
+    fetchServers()
+  } catch (e: any) {
+    message.error(parseErr(e, '删除失败'))
+  } finally {
+    deleteLoading.value = false
+  }
 }
 
 const showGrants = ref(false)
@@ -271,8 +310,8 @@ const fetchGrants = async () => {
   try {
     const data = await api.get('/admin/mcp/servers/grants', { server_id: String(grantServerId.value) })
     grants.value = data.grants || []
-  } catch {
-    message.error('获取授权列表失败')
+  } catch (e: any) {
+    message.error(parseErr(e, '获取授权列表失败'))
   } finally {
     grantsLoading.value = false
   }
@@ -294,8 +333,8 @@ const handleAddGrant = async () => {
     showAddGrant.value = false
     grantForm.grant_value = ''
     fetchGrants()
-  } catch {
-    message.error('添加失败')
+  } catch (e: any) {
+    message.error(parseErr(e, '添加失败'))
   } finally {
     addGrantLoading.value = false
   }
@@ -306,8 +345,8 @@ const handleRemoveGrant = async (id: number) => {
     await api.post(`/admin/mcp/servers/grants/remove/${id}`)
     message.success('移除成功')
     fetchGrants()
-  } catch {
-    message.error('移除失败')
+  } catch (e: any) {
+    message.error(parseErr(e, '移除失败'))
   }
 }
 
@@ -326,8 +365,8 @@ const openTools = async (record: any) => {
   try {
     const data = await api.get('/admin/mcp/servers/tools', { name: record.name })
     tools.value = data.tools || []
-  } catch {
-    message.error('获取工具列表失败')
+  } catch (e: any) {
+    message.error(parseErr(e, '获取工具列表失败'))
   } finally {
     toolsLoading.value = false
   }

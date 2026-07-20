@@ -159,6 +159,7 @@ const handleCreate = async () => {
     createdPassword.value = data.password || ''
     createForm.value.username = ''
     fetchUsers()
+    setTimeout(() => { showCreate.value = false }, 5000)
   } catch {
     message.error('创建失败')
   } finally {
@@ -176,8 +177,9 @@ const handleBatchCreate = async () => {
   batchResult.value = ''
   try {
     const data = await api.post('/admin/users/batch-create', { usernames: names })
-    batchResult.value = data.result || JSON.stringify(data, null, 2)
+    batchResult.value = data.results || JSON.stringify(data, null, 2)
     fetchUsers()
+    setTimeout(() => { showBatchCreate.value = false }, 5000)
   } catch {
     message.error('批量创建失败')
   } finally {
