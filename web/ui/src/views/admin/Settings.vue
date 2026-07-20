@@ -72,12 +72,13 @@ const linkedSections = [
   { key: 'ldap', label: '认证配置', path: '/admin/auth' },
   { key: 'oidc', label: '认证配置', path: '/admin/auth' },
   { key: 'web', label: '认证配置', path: '/admin/auth' },
+  { key: 'model', label: '模型配置', path: '/admin/models' },
   { key: 'tls', label: 'HTTPS 证书', path: '/admin/tls' },
   { key: 'skills', label: '技能库', path: '/admin/skills' },
   { key: 'channel', label: '通讯渠道', path: '/admin/channels' },
 ]
 
-const excludedKeys = new Set(['ldap', 'oidc', 'web', 'tls', 'skills', 'skill', 'channel'])
+const excludedKeys = new Set(['ldap', 'oidc', 'web', 'model', 'tls', 'skills', 'skill', 'channel'])
 
 interface DisplayItem {
   text: string
