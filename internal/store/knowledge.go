@@ -623,6 +623,33 @@ func GetDocumentTags(docID int64) ([]KBTag, error) {
 	return tags, nil
 }
 
+func CreateImportTask(id string, kbID int64, username string) (*KBImportTask, error) {
+	if err := ensureDB(); err != nil {
+		return nil, err
+	}
+	task := &KBImportTask{ID: id, KbID: kbID, Username: username}
+	if _, err := engine.Insert(task); err != nil {
+		return nil, fmt.Errorf("create import task: %w", err)
+	}
+	return task, nil
+}
+
+func UpdateImportTaskStatus(id string, status string, progress int) error {
+	if err := ensureDB(); err != nil {
+		return err
+	}
+	_, err := engine.Where("id = ?", id).Cols("status", "progress").Update(&KBImportTask{Status: status, Progress: progress})
+	return err
+}
+
+func UpdateImportTaskError(id string, errMsg string) error {
+	if err := ensureDB(); err != nil {
+		return err
+	}
+	_, err := engine.Where("id = ?", id).Cols("status", "error_msg").Update(&KBImportTask{Status: "error", ErrorMsg: errMsg})
+	return err
+}
+
 func CreateAuditLog(username, action, detail, source string) error {
 	if err := ensureDB(); err != nil {
 		return err
