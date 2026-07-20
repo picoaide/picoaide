@@ -2,6 +2,18 @@
   <div>
     <a-page-header title="认证配置" sub-title="管理认证源和白名单" />
 
+    <a-card style="margin-bottom: 16px">
+      <a-form layout="inline">
+        <a-form-item label="认证模式">
+          <a-radio-group v-model:value="authMode" @change="handleModeChange">
+            <a-radio-button value="local">本地</a-radio-button>
+            <a-radio-button value="ldap">LDAP</a-radio-button>
+            <a-radio-button value="oidc">OIDC</a-radio-button>
+          </a-radio-group>
+        </a-form-item>
+      </a-form>
+    </a-card>
+
     <a-tabs v-model:activeKey="activeTab" style="margin-top: 16px">
       <a-tab-pane key="whitelist" tab="白名单">
         <div style="margin-bottom: 12px">
@@ -224,12 +236,25 @@ const handleRemoveWhitelist = async (username: string) => {
 const fetchAuthMode = async () => {
   try {
     const data = await api.get('/login/mode')
-    authMode.value = data.mode || 'local'
+    authMode.value = data.auth_mode || 'local'
     if (authMode.value === 'ldap') {
       fetchLdapConfig()
     }
   } catch {
     // ignore
+  }
+}
+
+const handleModeChange = async (e: any) => {
+  try {
+    const mode = e.target?.value || e
+    if (typeof e === 'string') return
+    const cfg = await api.get('/config')
+    cfg.auth_mode = mode
+    await api.post('/config', { config: JSON.stringify(cfg) })
+    message.success('认证模式已切换，请重新登录')
+  } catch {
+    message.error('切换失败，请通过系统配置修改')
   }
 }
 
@@ -250,8 +275,9 @@ const fetchLdapConfig = async () => {
 const handleSaveLdap = async () => {
   ldapSaving.value = true
   try {
-    const config = { ldap: { ...ldapConfig } }
-    await api.post('/config', { config: JSON.stringify(config) })
+    const cfg = await api.get('/config')
+    cfg.ldap = { ...ldapConfig }
+    await api.post('/config', { config: JSON.stringify(cfg) })
     message.success('保存成功')
   } catch {
     message.error('保存失败')
