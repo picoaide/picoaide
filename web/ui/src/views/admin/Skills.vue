@@ -54,7 +54,7 @@
             </template>
             <template v-if="column.key === 'action'">
               <a-space>
-                <a-button type="link" size="small" :loading="pullingName === record.name" @click="handlePull(record.name)">拉取</a-button>
+                <a-button v-if="record.type === 'git'" type="link" size="small" :loading="pullingName === record.name" @click="handlePull(record.name)">拉取</a-button>
                 <a-button type="link" size="small" danger @click="handleRemoveSource(record.name)">移除</a-button>
               </a-space>
             </template>

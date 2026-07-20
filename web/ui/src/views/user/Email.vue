@@ -76,9 +76,9 @@ const loadEmail = async () => {
 }
 
 const buildParams = () => {
-  const params: Record<string, string> = {}
+  const params: Record<string, any> = {}
   for (const [k, v] of Object.entries(form.value)) {
-    params[k] = String(v)
+    params[k] = v
   }
   return params
 }

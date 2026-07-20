@@ -206,6 +206,10 @@ func (s *Server) handleAdminModelTest(c *gin.Context) {
     }
   }
 
+  // 用户自定义 baseURL 可能已包含 /v1 前缀，避免双写
+  if strings.HasSuffix(baseURL, "/v1") {
+    apiPath = strings.TrimPrefix(apiPath, "/v1")
+  }
   urlStr := baseURL + apiPath
   if baseURL == "" {
     switch provider {

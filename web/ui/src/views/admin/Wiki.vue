@@ -6,7 +6,7 @@
       <template #extra>
         <a-button type="primary" @click="showCreateKB">新建知识库</a-button>
       </template>
-      <a-table :data-source="kbs" :columns="kbColumns" row-key="id" :loading="loading" @row-click="selectKB">
+      <a-table :data-source="kbs" :columns="kbColumns" row-key="id" :loading="loading" :custom-row="kbRowClick">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'actions'">
             <a-space>
@@ -177,6 +177,10 @@ const selectKB = async (kb: any) => {
   selectedFolder.value = null
   loadFolderTree()
 }
+
+const kbRowClick = (record: any) => ({
+  onClick: () => selectKB(record),
+})
 
 const loadFolderTree = async () => {
   if (!selectedKB.value) return
