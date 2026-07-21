@@ -31,6 +31,7 @@ func ADKRun(ctx context.Context, cfg *AgentConfig, p Provider, toolsH *ToolRegis
   adapter := NewADKProviderAdapter(p, cfg.Model.Provider)
   adapter.SetDisableTools(cfg.Model.DisableToolCall)
   adapter.SetRequestTimeout(cfg.RequestTimeout)
+  adapter.SetStreamCallback(cb)
 
   var toolsets []tool.Toolset
   if ts := toolsH.AsADKToolset(); ts != nil {
@@ -91,6 +92,7 @@ func ADKRun(ctx context.Context, cfg *AgentConfig, p Provider, toolsH *ToolRegis
 }
 
 // adkEventToStreamEvent 将 ADK session.Event 转换为 picoagent 的 StreamEvent。
+// 文本已通过 streamGenerate 中的 streamCb 实时推送，此处不再重复发射。
 func adkEventToStreamEvent(ev *session.Event, cb func(StreamEvent)) {
   if ev == nil || ev.Content == nil {
     return
@@ -99,7 +101,7 @@ func adkEventToStreamEvent(ev *session.Event, cb func(StreamEvent)) {
   for _, part := range ev.Content.Parts {
     switch {
     case part.Text != "":
-      cb(TextDelta(part.Text))
+      // 文本已由 streamGenerate 通过 streamCb 实时下发，跳过避免重复
 
     case part.FunctionCall != nil:
       tc := part.FunctionCall

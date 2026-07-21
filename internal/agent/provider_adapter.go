@@ -19,6 +19,7 @@ type ADKProviderAdapter struct {
   name           string
   disableTools   bool
   requestTimeout int
+  streamCb       func(StreamEvent) // 逐 token 回调，实现真正流式
 }
 
 func NewADKProviderAdapter(provider Provider, name string) *ADKProviderAdapter {
@@ -27,6 +28,7 @@ func NewADKProviderAdapter(provider Provider, name string) *ADKProviderAdapter {
 
 func (a *ADKProviderAdapter) SetDisableTools(v bool) { a.disableTools = v }
 func (a *ADKProviderAdapter) SetRequestTimeout(s int) { a.requestTimeout = s }
+func (a *ADKProviderAdapter) SetStreamCallback(cb func(StreamEvent)) { a.streamCb = cb }
 
 func (a *ADKProviderAdapter) Name() string { return a.name }
 
@@ -57,6 +59,9 @@ func (a *ADKProviderAdapter) syncGenerate(ctx context.Context, chatReq *ChatRequ
     case "text_delta":
       var text string
       if json.Unmarshal(event.Data, &text) == nil {
+        if a.streamCb != nil {
+          a.streamCb(TextDelta(text))
+        }
         textParts = append(textParts, text)
       }
     case "tool_call_start":
@@ -100,6 +105,9 @@ func (a *ADKProviderAdapter) streamGenerate(ctx context.Context, chatReq *ChatRe
       case "text_delta":
         var text string
         if json.Unmarshal(event.Data, &text) == nil {
+          if a.streamCb != nil {
+            a.streamCb(TextDelta(text))
+          }
           textParts = append(textParts, text)
           resp := buildLLMResponse(text, nil, true)
           ch <- item{resp: resp}
