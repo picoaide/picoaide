@@ -151,12 +151,14 @@ const handleSkillsTableChange = (pag: any) => {
 
 const showDeploy = ref(false)
 const deploySkillName = ref('')
-const deployTargetType = ref<'user' | 'group'>('user')
+const deploySkillSource = ref('')
+const deployTargetType = ref('user')
 const deployTargetValue = ref('')
 const deployLoading = ref(false)
 
 const openDeploy = (record: any) => {
   deploySkillName.value = record.name
+  deploySkillSource.value = record.source
   deployTargetType.value = 'user'
   deployTargetValue.value = ''
   showDeploy.value = true
@@ -169,7 +171,7 @@ const handleDeploy = async () => {
   }
   deployLoading.value = true
   try {
-    const params: Record<string, string> = { skill_name: deploySkillName.value }
+    const params: Record<string, string> = { skill_name: deploySkillName.value, source: deploySkillSource.value }
     if (deployTargetType.value === 'user') {
       params.username = deployTargetValue.value
     } else {
