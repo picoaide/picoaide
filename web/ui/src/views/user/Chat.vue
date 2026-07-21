@@ -255,6 +255,7 @@ const connectSSE = (runId: string) => {
         evtSource.close()
         isStreaming.value = false
         abortController = null
+        scrollToBottom()
       } else if (data.type === 'error') {
         assistantMsg.content += `\n\n错误: ${data.data || '未知错误'}`
         evtSource.close()
@@ -268,9 +269,11 @@ const connectSSE = (runId: string) => {
     evtSource.close()
     isStreaming.value = false
     abortController = null
-    if (!assistantMsg.content) {
-      assistantMsg.content = '连接中断，请重试'
-    }
+    if (!currentChat.value) { return }
+    const msgs = currentChat.value.messages
+    const last = msgs[msgs.length - 1]
+    if (!last || last.role !== 'assistant' || last.content) { return }
+    last.content = '连接中断，请重试'
   }
 }
 
