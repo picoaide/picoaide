@@ -27,6 +27,17 @@
                 size="small"
               />
             </template>
+            <template v-if="column.key === 'deployed_users'">
+              <template v-if="record.deployed_users && record.deployed_users.length > 0">
+                <a-popover :title="'已部署用户 (' + record.deployed_users.length + ')'">
+                  <template #content>
+                    <div v-for="u in record.deployed_users" :key="u">{{ u }}</div>
+                  </template>
+                  <a-tag color="blue">{{ record.deployed_users.length }}</a-tag>
+                </a-popover>
+              </template>
+              <span v-else style="color: #999">-</span>
+            </template>
             <template v-if="column.key === 'action'">
               <a-space>
                 <a-button type="link" size="small" @click="openDeploy(record)">部署</a-button>
@@ -127,6 +138,7 @@ const skillColumns = [
   { title: '描述', dataIndex: 'description', key: 'description' },
   { title: '来源', dataIndex: 'source', key: 'source' },
   { title: '默认', key: 'is_default', width: 80 },
+  { title: '已部署用户', key: 'deployed_users', width: 180 },
   { title: '操作', key: 'action', width: 150 },
 ]
 

@@ -83,14 +83,18 @@ const loadSkills = async () => {
   }
 }
 
+const extractError = (e: any) => {
+  try { return JSON.parse(e.message).error || e.message } catch { return e.message || '网络错误' }
+}
+
 const installSkill = async (skill: Skill) => {
   skill._loading = true
   try {
     await api.post('/user/skills/install', { skill_name: skill.name })
     message.success('安装成功')
     skill.installed = true
-  } catch {
-    message.error('网络错误')
+  } catch (e: any) {
+    message.error(extractError(e))
   } finally {
     skill._loading = false
   }
@@ -102,8 +106,8 @@ const uninstallSkill = async (skill: Skill) => {
     await api.post('/user/skills/uninstall', { skill_name: skill.name })
     message.success('卸载成功')
     skill.installed = false
-  } catch {
-    message.error('网络错误')
+  } catch (e: any) {
+    message.error(extractError(e))
   } finally {
     skill._loading = false
   }

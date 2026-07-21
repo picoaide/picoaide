@@ -97,15 +97,17 @@ func (s *Server) handleAdminSkills(c *gin.Context) {
   // 注入 is_default 字段
   items := make([]map[string]interface{}, len(pageSkills))
   for i, sk := range pageSkills {
+    users, _ := store.GetUsersForSkill(sk.Name)
     m := map[string]interface{}{
-      "name":        sk.Name,
-      "description": sk.Description,
-      "source":      sk.Source,
-      "file_count":  sk.FileCount,
-      "size":        sk.Size,
-      "size_str":    sk.SizeStr,
-      "mod_time":    sk.ModTime,
-      "is_default":  defaultSet[sk.Name],
+      "name":           sk.Name,
+      "description":    sk.Description,
+      "source":         sk.Source,
+      "file_count":     sk.FileCount,
+      "size":           sk.Size,
+      "size_str":       sk.SizeStr,
+      "mod_time":       sk.ModTime,
+      "is_default":     defaultSet[sk.Name],
+      "deployed_users": users,
     }
     items[i] = m
   }
