@@ -256,7 +256,7 @@ const connectSSE = (runId: string) => {
         isStreaming.value = false
         abortController = null
       } else if (data.type === 'error') {
-        assistantMsg.content += `\n\n错误: ${data.message || '未知错误'}`
+        assistantMsg.content += `\n\n错误: ${data.data || '未知错误'}`
         evtSource.close()
         isStreaming.value = false
         abortController = null

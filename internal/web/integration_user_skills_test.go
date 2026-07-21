@@ -234,3 +234,35 @@ func TestUserSkills_InstallStatus(t *testing.T) {
     }
   }
 }
+
+// TestChatSSEError_FieldName 验证 SSE 错误事件使用 data 字段（不是 message）
+func TestChatSSEError_FieldName(t *testing.T) {
+  evt := streamEvent{Type: "error", Data: mustMarshal("测试错误消息")}
+  raw, err := json.Marshal(evt)
+  if err != nil {
+    t.Fatalf("JSON 序列化失败: %v", err)
+  }
+
+  var parsed map[string]interface{}
+  if err := json.Unmarshal(raw, &parsed); err != nil {
+    t.Fatalf("JSON 反序列化失败: %v", err)
+  }
+
+  if parsed["type"] != "error" {
+    t.Errorf("type = %v, 期望 error", parsed["type"])
+  }
+  if _, ok := parsed["message"]; ok {
+    t.Error("SSE 事件中不应存在 message 字段，前端应读取 data 字段")
+  }
+  if parsed["data"] == nil {
+    t.Error("data 字段不应为空")
+  }
+  if parsed["data"] != nil {
+    msg, ok := parsed["data"].(string)
+    if !ok {
+      t.Errorf("data 字段类型 = %T, 期望 string", parsed["data"])
+    } else if msg != "测试错误消息" {
+      t.Errorf("data = %q, 期望 %q", msg, "测试错误消息")
+    }
+  }
+}
