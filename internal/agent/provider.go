@@ -34,14 +34,15 @@ type Provider interface {
 }
 
 type ChatRequest struct {
-  Model        string
-  System       string
-  Messages     []LLMMessage
-  Tools        []ToolDef
-  MaxTokens    int
-  Temperature  float64
-  UserID       string
-  DisableTools bool // 为 true 时不向 LLM 发送工具定义
+  Model          string
+  System         string
+  Messages       []LLMMessage
+  Tools          []ToolDef
+  MaxTokens      int
+  Temperature    float64
+  UserID         string
+  DisableTools   bool // 为 true 时不向 LLM 发送工具定义
+  RequestTimeout int  // 每次 LLM 调用的超时秒数，0 表示不设超时
 }
 
 // ============================================================
@@ -427,7 +428,15 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb fu
     "estimated_input_tokens", inputTokens,
   )
 
-  return retryStream(ctx, "openai", func(innerCtx context.Context) error {
+  // 应用每轮 LLM 调用的超时
+  llmCtx := ctx
+  if req.RequestTimeout > 0 {
+    var cancel context.CancelFunc
+    llmCtx, cancel = context.WithTimeout(ctx, time.Duration(req.RequestTimeout)*time.Second)
+    defer cancel()
+  }
+
+  return retryStream(llmCtx, "openai", func(innerCtx context.Context) error {
     select {
     case <-innerCtx.Done():
       return innerCtx.Err()

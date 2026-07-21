@@ -15,9 +15,10 @@ import (
 // ADKProviderAdapter wraps a picoagent Provider as ADK model.LLM.
 // This is the bridge between our existing LLM providers and ADK's agent framework.
 type ADKProviderAdapter struct {
-  inner        Provider
-  name         string
-  disableTools bool
+  inner          Provider
+  name           string
+  disableTools   bool
+  requestTimeout int
 }
 
 func NewADKProviderAdapter(provider Provider, name string) *ADKProviderAdapter {
@@ -25,6 +26,7 @@ func NewADKProviderAdapter(provider Provider, name string) *ADKProviderAdapter {
 }
 
 func (a *ADKProviderAdapter) SetDisableTools(v bool) { a.disableTools = v }
+func (a *ADKProviderAdapter) SetRequestTimeout(s int) { a.requestTimeout = s }
 
 func (a *ADKProviderAdapter) Name() string { return a.name }
 
@@ -160,13 +162,14 @@ func (a *ADKProviderAdapter) buildChatReqFromLLM(req *model.LLMRequest) *ChatReq
   toolDefs := convertGenaiTools(req.Config)
 
   return &ChatRequest{
-    Model:       req.Model,
-    System:      system,
-    Messages:    messages,
-    Tools:        toolDefs,
-    MaxTokens:    maxTokens,
-    Temperature:  temp,
-    DisableTools: a.disableTools,
+    Model:          req.Model,
+    System:         system,
+    Messages:       messages,
+    Tools:          toolDefs,
+    MaxTokens:      maxTokens,
+    Temperature:    temp,
+    DisableTools:   a.disableTools,
+    RequestTimeout: a.requestTimeout,
   }
 }
 

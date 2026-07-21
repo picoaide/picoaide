@@ -78,6 +78,7 @@ func buildNested(flat map[string]string) map[string]interface{} {
     "web.debug_mode":         true,
     "ldap.whitelist_enabled": true,
     "oidc.whitelist_enabled": true,
+    "model.disable_tool_call": true,
   }
 
   result := make(map[string]interface{})

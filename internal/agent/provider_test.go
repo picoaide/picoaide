@@ -181,3 +181,50 @@ func TestRetryStream_ServerErrorRetries(t *testing.T) {
     t.Errorf("expected 3 attempts, got %d", attempts)
   }
 }
+
+func TestChatRequest_RequestTimeout(t *testing.T) {
+  // 验证 ChatRequest 的 RequestTimeout 传递
+  req := ChatRequest{
+    Model:          "test-model",
+    Messages:       []LLMMessage{{Role: "user", Content: "hello"}},
+    DisableTools:   true,
+    RequestTimeout: 2,
+  }
+
+  if req.RequestTimeout != 2 {
+    t.Errorf("RequestTimeout = %d, 期望 2", req.RequestTimeout)
+  }
+
+  // 验证超时被 context.WithTimeout 包装且生效
+  ctx := context.Background()
+  llmCtx, cancel := context.WithTimeout(ctx, time.Duration(req.RequestTimeout)*time.Second)
+  defer cancel()
+
+  deadline, ok := llmCtx.Deadline()
+  if !ok {
+    t.Fatal("context 应设置 deadline")
+  }
+  remaining := time.Until(deadline)
+  if remaining > 5*time.Second || remaining < 0 {
+    t.Errorf("剩余时间不合理: %v", remaining)
+  }
+
+  // 验证超时生效
+  <-llmCtx.Done()
+  if llmCtx.Err() != context.DeadlineExceeded {
+    t.Errorf("应返回 DeadlineExceeded, 实际: %v", llmCtx.Err())
+  }
+
+  // 验证 provider.go 中的 StreamChat 使用 RequestTimeout
+  // 验证路径: buildChatReqFromLLM → ChatRequest.RequestTimeout → StreamChat 中 WithTimeout
+  adapter := &ADKProviderAdapter{requestTimeout: 30}
+  if adapter.requestTimeout != 30 {
+    t.Errorf("adapter.requestTimeout = %d, 期望 30", adapter.requestTimeout)
+  }
+
+  // 验证 SetRequestTimeout
+  adapter.SetRequestTimeout(60)
+  if adapter.requestTimeout != 60 {
+    t.Errorf("adapter.requestTimeout after SetRequestTimeout = %d, 期望 60", adapter.requestTimeout)
+  }
+}

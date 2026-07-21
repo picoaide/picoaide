@@ -204,3 +204,20 @@ func TestRemoveFixedConfigFields(t *testing.T) {
     t.Fatalf("listen should be preserved, got %v", web["listen"])
   }
 }
+
+func TestBuildNested_DisableToolCall(t *testing.T) {
+  flat := map[string]string{
+    "model.disable_tool_call": "true",
+  }
+
+  result := buildNested(flat)
+
+  model := result["model"].(map[string]interface{})
+  val, ok := model["disable_tool_call"].(bool)
+  if !ok {
+    t.Fatalf("model.disable_tool_call 应为 bool, 实际 %T = %v", model["disable_tool_call"], model["disable_tool_call"])
+  }
+  if val != true {
+    t.Errorf("model.disable_tool_call 应为 true, 实际 %v", val)
+  }
+}

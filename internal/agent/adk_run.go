@@ -30,6 +30,7 @@ func ADKRun(ctx context.Context, cfg *AgentConfig, p Provider, toolsH *ToolRegis
 
   adapter := NewADKProviderAdapter(p, cfg.Model.Provider)
   adapter.SetDisableTools(cfg.Model.DisableToolCall)
+  adapter.SetRequestTimeout(cfg.RequestTimeout)
 
   var toolsets []tool.Toolset
   if ts := toolsH.AsADKToolset(); ts != nil {
