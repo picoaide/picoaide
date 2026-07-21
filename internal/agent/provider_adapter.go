@@ -201,6 +201,18 @@ func convertGenaiContents(contents []*genai.Content) []LLMMessage {
 
 // genaiContentToMsg converts a single genai.Content to an LLMMessage.
 func genaiContentToMsg(c *genai.Content) LLMMessage {
+  // tool responses have role "user" in genai, handle via FunctionResponse first
+  for _, p := range c.Parts {
+    if p.FunctionResponse != nil {
+      respJSON, _ := json.Marshal(p.FunctionResponse.Response)
+      return LLMMessage{
+        Role:       "tool",
+        ToolCallID: p.FunctionResponse.ID,
+        Content:    string(respJSON),
+      }
+    }
+  }
+
   switch c.Role {
   case "user":
     return LLMMessage{
@@ -235,18 +247,6 @@ func genaiContentToMsg(c *genai.Content) LLMMessage {
     msg.ReasoningContent = strings.Join(reasoningParts, "")
     return msg
   default:
-    // tool responses have role "user" in genai, but we handle them via FunctionResponse parts
-    for _, p := range c.Parts {
-      if p.FunctionResponse != nil {
-        respJSON, _ := json.Marshal(p.FunctionResponse.Response)
-        return LLMMessage{
-          Role:       "tool",
-          ToolCallID: p.FunctionResponse.ID,
-          Content:    string(respJSON),
-        }
-      }
-    }
-    // fallback to user
     return LLMMessage{
       Role:    "user",
       Content: extractTextContent(c),
@@ -262,9 +262,11 @@ func convertGenaiTools(config *genai.GenerateContentConfig) []ToolDef {
   var defs []ToolDef
   for _, t := range config.Tools {
     for _, fd := range t.FunctionDeclarations {
-      schema := map[string]interface{}{}
+      var schema map[string]interface{}
       if fd.Parameters != nil {
         schema = genaiSchemaToMap(fd.Parameters)
+      } else {
+        schema = map[string]interface{}{"type": "object"}
       }
       defs = append(defs, ToolDef{
         Name:        fd.Name,
