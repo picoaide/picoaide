@@ -72,8 +72,8 @@ const loadSkills = async () => {
     skills.value = (data.skills || data || []).map((s: any) => ({
       name: s.name || '',
       description: s.description || '',
-      installed: !!s.installed,
-      source: s.source || '',
+      installed: s.install_status === 'installed' || s.install_status === 'group',
+      source: s.install_status || '',
       _loading: false,
     }))
   } catch {
