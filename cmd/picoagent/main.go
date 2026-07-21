@@ -246,6 +246,7 @@ msgLoop:
     err = agent.ADKRun(adkCtx, cfg, provider, tools, mcpToolsets, adkSessionSvc, sysPrompt, inputMsg, func(event agent.StreamEvent) {
       data, _ := json.Marshal(event)
       fmt.Println(string(data))
+      os.Stdout.Sync()
     })
     adkCancel()
 
