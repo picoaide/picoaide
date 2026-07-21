@@ -248,10 +248,10 @@ const connectSSE = (runId: string) => {
   evtSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
-      if (data.type === 'delta' || data.type === 'content') {
-        assistantMsg.content += data.content || data.delta || ''
+      if (data.type === 'delta' || data.type === 'content' || data.type === 'text_delta') {
+        assistantMsg.content += data.content || data.delta || data.data || ''
         scrollToBottom()
-      } else if (data.type === 'done' || data.type === 'end') {
+      } else if (data.type === 'done' || data.type === 'end' || data.type === 'finish') {
         evtSource.close()
         isStreaming.value = false
         abortController = null
