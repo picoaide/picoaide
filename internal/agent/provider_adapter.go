@@ -15,13 +15,16 @@ import (
 // ADKProviderAdapter wraps a picoagent Provider as ADK model.LLM.
 // This is the bridge between our existing LLM providers and ADK's agent framework.
 type ADKProviderAdapter struct {
-  inner Provider
-  name  string
+  inner        Provider
+  name         string
+  disableTools bool
 }
 
 func NewADKProviderAdapter(provider Provider, name string) *ADKProviderAdapter {
   return &ADKProviderAdapter{inner: provider, name: name}
 }
+
+func (a *ADKProviderAdapter) SetDisableTools(v bool) { a.disableTools = v }
 
 func (a *ADKProviderAdapter) Name() string { return a.name }
 
@@ -29,7 +32,7 @@ func (a *ADKProviderAdapter) GenerateContent(ctx context.Context, req *model.LLM
   return func(yield func(*model.LLMResponse, error) bool) {
     slog.Debug("adapter.generate_content", "model", req.Model, "stream", stream, "contents", len(req.Contents))
 
-    chatReq := buildChatReqFromLLM(req)
+    chatReq := a.buildChatReqFromLLM(req)
     if chatReq == nil {
       yield(nil, fmt.Errorf("构建 LLM 请求失败"))
       return
@@ -136,7 +139,7 @@ func (a *ADKProviderAdapter) streamGenerate(ctx context.Context, chatReq *ChatRe
 }
 
 // buildChatReqFromLLM converts ADK's model.LLMRequest to our ChatRequest.
-func buildChatReqFromLLM(req *model.LLMRequest) *ChatRequest {
+func (a *ADKProviderAdapter) buildChatReqFromLLM(req *model.LLMRequest) *ChatRequest {
   system := ""
   temp := 0.7
   maxTokens := 0
@@ -160,9 +163,10 @@ func buildChatReqFromLLM(req *model.LLMRequest) *ChatRequest {
     Model:       req.Model,
     System:      system,
     Messages:    messages,
-    Tools:       toolDefs,
-    MaxTokens:   maxTokens,
-    Temperature: temp,
+    Tools:        toolDefs,
+    MaxTokens:    maxTokens,
+    Temperature:  temp,
+    DisableTools: a.disableTools,
   }
 }
 

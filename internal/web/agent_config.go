@@ -40,6 +40,7 @@ type agentModelConfig struct {
   Temperature    float64 `json:"temperature,omitempty"`
   ContextWindow  int     `json:"context_window,omitempty"`
   RequestTimeout int     `json:"request_timeout,omitempty"`
+  DisableToolCall bool   `json:"disable_tool_call,omitempty"`
 }
 
 type toolConfig struct {
@@ -122,14 +123,15 @@ func (s *Server) handlePicoAgentConfig(c *gin.Context) {
   if provider == "" { provider = "openai" }
   requestTimeout := parseUint("model.request_timeout", 600)
   resp.Model = agentModelConfig{
-    Provider:       provider,
-    ModelID:        kv["model.model_id"],
-    BaseURL:        kv["model.base_url"],
-    MaxTokens:      parseUint("model.max_tokens", 0),
-    MaxIter:        parseUint("model.max_iter", 20),
-    Temperature:    parseFloat("model.temperature", 0.7),
-    ContextWindow:  parseUint("model.context_window", 200000),
-    RequestTimeout: requestTimeout,
+    Provider:        provider,
+    ModelID:         kv["model.model_id"],
+    BaseURL:         kv["model.base_url"],
+    MaxTokens:       parseUint("model.max_tokens", 0),
+    MaxIter:         parseUint("model.max_iter", 20),
+    Temperature:     parseFloat("model.temperature", 0.7),
+    ContextWindow:   parseUint("model.context_window", 200000),
+    RequestTimeout:  requestTimeout,
+    DisableToolCall: kv["model.disable_tool_call"] == "true",
   }
   resp.RequestTimeout = requestTimeout
   if resp.Model.ModelID == "" {

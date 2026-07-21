@@ -29,6 +29,7 @@ func ADKRun(ctx context.Context, cfg *AgentConfig, p Provider, toolsH *ToolRegis
   slog.Debug("adk_run.start")
 
   adapter := NewADKProviderAdapter(p, cfg.Model.Provider)
+  adapter.SetDisableTools(cfg.Model.DisableToolCall)
 
   var toolsets []tool.Toolset
   if ts := toolsH.AsADKToolset(); ts != nil {

@@ -54,6 +54,11 @@
                 <a-input-number v-model:value="form.request_timeout" :min="10" style="width: 100%" />
               </a-form-item>
             </a-col>
+            <a-col :span="8">
+              <a-form-item label="禁用工具调用">
+                <a-switch v-model:checked="form.disable_tool_call" />
+              </a-form-item>
+            </a-col>
           </a-row>
           <a-form-item>
             <a-button type="default" @click="handleTest" :loading="testing">测试连接</a-button>
@@ -83,6 +88,7 @@ const form = reactive({
   max_iter: 500,
   temperature: 0.7,
   request_timeout: 600,
+  disable_tool_call: false,
 })
 
 const fetchConfig = async () => {
@@ -99,6 +105,7 @@ const fetchConfig = async () => {
     form.max_iter = m.max_iter ?? 500
     form.temperature = m.temperature ?? 0.7
     form.request_timeout = m.request_timeout ?? 600
+    form.disable_tool_call = m.disable_tool_call ?? false
   } catch {
     message.error('获取配置失败')
   } finally {
@@ -125,6 +132,7 @@ const handleSave = async () => {
           max_iter: form.max_iter,
           temperature: form.temperature,
           request_timeout: form.request_timeout,
+          disable_tool_call: form.disable_tool_call,
         },
       }),
     })

@@ -34,13 +34,14 @@ type Provider interface {
 }
 
 type ChatRequest struct {
-  Model       string
-  System      string
-  Messages    []LLMMessage
-  Tools       []ToolDef
-  MaxTokens   int
-  Temperature float64
-  UserID      string
+  Model        string
+  System       string
+  Messages     []LLMMessage
+  Tools        []ToolDef
+  MaxTokens    int
+  Temperature  float64
+  UserID       string
+  DisableTools bool // 为 true 时不向 LLM 发送工具定义
 }
 
 // ============================================================
@@ -398,7 +399,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb fu
     params.MaxTokens = openai.Opt(int64(req.MaxTokens))
   }
 
-  if len(req.Tools) > 0 {
+  if len(req.Tools) > 0 && !req.DisableTools {
     tools := make([]openai.ChatCompletionToolUnionParam, 0, len(req.Tools))
     for _, t := range req.Tools {
       tools = append(tools, openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
