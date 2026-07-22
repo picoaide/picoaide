@@ -104,7 +104,7 @@ func (s *Server) handleAdminMCPServersList(c *gin.Context) {
     })
   }
 
-  writeJSON(c, http.StatusOK, gin.H{"success": true, "data": data})
+  writeJSON(c, http.StatusOK, gin.H{"success": true, "servers": data})
 }
 
 // handleAdminMCPServerCreate 创建 MCP 服务器
@@ -253,7 +253,7 @@ func (s *Server) handleAdminMCPServerGrantsList(c *gin.Context) {
     })
   }
 
-  writeJSON(c, http.StatusOK, gin.H{"success": true, "data": data})
+  writeJSON(c, http.StatusOK, gin.H{"success": true, "grants": data})
 }
 
 // handleAdminMCPServerGrantAdd 添加 MCP 服务器授权
@@ -343,7 +343,7 @@ func (s *Server) handleAdminMCPServerTools(c *gin.Context) {
     tools = []ToolDef{}
   }
 
-  writeJSON(c, http.StatusOK, gin.H{"success": true, "data": tools})
+  writeJSON(c, http.StatusOK, gin.H{"success": true, "tools": tools})
 }
 
 // handleAdminMCPServersReload 重新加载所有 MCP 服务器

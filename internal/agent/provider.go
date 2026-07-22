@@ -532,7 +532,40 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb fu
   })
 }
 
+// convertToolMessagesToText 将 tool_calls/tool 消息转为纯文本，
+// 兼容不支持原生 tool_calls 格式的 API 上游。
+func convertToolMessagesToText(msgs []LLMMessage) []LLMMessage {
+  var result []LLMMessage
+  for _, m := range msgs {
+    switch m.Role {
+    case "assistant":
+      if len(m.ToolCalls) > 0 {
+        parts := make([]string, 0, len(m.ToolCalls))
+        for _, tc := range m.ToolCalls {
+          parts = append(parts, fmt.Sprintf("调用工具: %s，参数: %s", tc.Function.Name, tc.Function.Arguments))
+        }
+        content := m.Content
+        if content != "" {
+          content += "\n"
+        }
+        content += strings.Join(parts, "\n")
+        result = append(result, LLMMessage{Role: "assistant", Content: content})
+      } else {
+        result = append(result, m)
+      }
+    case "tool":
+      result = append(result, LLMMessage{Role: "user", Content: fmt.Sprintf("工具 %s 返回结果: %s", m.ToolCallID, m.Content)})
+    default:
+      result = append(result, m)
+    }
+  }
+  return result
+}
+
 func buildOpenAIMessagesV2(system string, messages []LLMMessage, providerType string) []openai.ChatCompletionMessageParamUnion {
+  // 将 tool_calls/tool 消息转为纯文本，兼容不支持原生 tool_calls 的 API 上游
+  messages = convertToolMessagesToText(messages)
+
   var msgs []openai.ChatCompletionMessageParamUnion
   if system != "" {
     msgs = append(msgs, openai.SystemMessage(system))

@@ -315,6 +315,15 @@ func (s *Server) handleMCPToolCall(c *gin.Context, id json.Number, params json.R
         writeMCPResult(c.Writer, id, formatMCPResult(result))
         return
       }
+      // 代理存在但调用失败：记录日志，返回有意义的错误
+      slog.Error("MCP proxy call failed", "service", serviceName, "tool", p.Name, "error", err)
+      writeMCPResult(c.Writer, id, map[string]interface{}{
+        "content": []map[string]interface{}{
+          {"type": "text", "text": fmt.Sprintf("MCP 代理调用失败: %v", err)},
+        },
+        "isError": true,
+      })
+      return
     }
     // 转发到浏览器 Hub
     if strings.HasPrefix(p.Name, "browser_") {

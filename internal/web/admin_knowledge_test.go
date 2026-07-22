@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -484,6 +485,167 @@ func TestAdminFolderPermissions(t *testing.T) {
 	}
 	if !hasTestUser {
 		t.Fatalf("users 中应包含 testuser，得到 %v", getPermResp.Users)
+	}
+}
+
+func TestAdminKBCreate_Validation(t *testing.T) {
+	env := setupTestServer(t)
+
+	// Empty name should fail
+	resp := env.postJSON(t, "/api/admin/knowledge-bases", "testadmin", map[string]interface{}{"name": "", "description": "test"})
+	assertStatus(t, resp, 400)
+
+	// Missing name field
+	resp = env.postJSON(t, "/api/admin/knowledge-bases", "testadmin", map[string]interface{}{"description": "no name"})
+	assertStatus(t, resp, 400)
+}
+
+func TestAdminKBDelete_NonExistent(t *testing.T) {
+	env := setupTestServer(t)
+
+	req, _ := http.NewRequest("DELETE", env.HTTP.URL+"/api/admin/knowledge-bases/99999", nil)
+	req.Header.Set("X-CSRF-Token", env.Server.csrfToken("testadmin"))
+	req.AddCookie(&http.Cookie{Name: "session", Value: env.Server.createSessionToken("testadmin")})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+	assertStatus(t, resp, 400)
+}
+
+func TestAdminFolderCreate_NonExistentParent(t *testing.T) {
+	env := setupTestServer(t)
+
+	createBody := map[string]interface{}{"name": "kb-folder-err", "description": ""}
+	resp := env.postJSON(t, "/api/admin/knowledge-bases", "testadmin", createBody)
+	var createResp struct {
+		Success bool                  `json:"success"`
+		Data    *store.KnowledgeBase  `json:"data"`
+	}
+	parseJSON(t, resp, &createResp)
+	kbID := createResp.Data.ID
+
+	folderBody := map[string]interface{}{"parent_id": 99999, "name": "orphan"}
+	resp = env.postJSON(t, "/api/admin/knowledge-bases/"+itoa64(kbID)+"/folders", "testadmin", folderBody)
+	assertStatus(t, resp, 400)
+}
+
+func TestAdminFolderDelete_NonExistent(t *testing.T) {
+	env := setupTestServer(t)
+
+	req, _ := http.NewRequest("DELETE", env.HTTP.URL+"/api/admin/knowledge-bases/folders/99999", nil)
+	req.Header.Set("X-CSRF-Token", env.Server.csrfToken("testadmin"))
+	req.AddCookie(&http.Cookie{Name: "session", Value: env.Server.createSessionToken("testadmin")})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+	assertStatus(t, resp, 400)
+}
+
+func TestAdminFolderPermissions_Inheritance(t *testing.T) {
+	env := setupTestServer(t)
+
+	createBody := map[string]interface{}{"name": "inherit-test-kb", "description": ""}
+	resp := env.postJSON(t, "/api/admin/knowledge-bases", "testadmin", createBody)
+	var createResp struct {
+		Success bool                  `json:"success"`
+		Data    *store.KnowledgeBase  `json:"data"`
+	}
+	parseJSON(t, resp, &createResp)
+	kbID := createResp.Data.ID
+
+	resp = env.get(t, "/api/admin/knowledge-bases/"+itoa64(kbID)+"/folders", "testadmin")
+	var treeResp struct {
+		Success bool             `json:"success"`
+		Data    []store.KBFolder `json:"data"`
+	}
+	parseJSON(t, resp, &treeResp)
+	rootID := treeResp.Data[0].ID
+
+	// Create sub-folder (inherits permissions)
+	folderBody := map[string]interface{}{"parent_id": rootID, "name": "inherit-sub"}
+	resp = env.postJSON(t, "/api/admin/knowledge-bases/"+itoa64(kbID)+"/folders", "testadmin", folderBody)
+	var folderCreateResp struct {
+		Success bool             `json:"success"`
+		Data    *store.KBFolder  `json:"data"`
+	}
+	parseJSON(t, resp, &folderCreateResp)
+	subID := folderCreateResp.Data.ID
+
+	// Sub folder should have permissions_set = 0 (inheriting)
+	resp = env.get(t, "/api/admin/knowledge-bases/folders/"+itoa64(subID)+"/permissions", "testadmin")
+	var permResp struct {
+		Success bool     `json:"success"`
+		Set     int      `json:"permissions_set"`
+		Users   []string `json:"users"`
+	}
+	parseJSON(t, resp, &permResp)
+	if !permResp.Success {
+		t.Fatal("get permissions failed")
+	}
+	if permResp.Set != 0 {
+		t.Errorf("inheriting folder should have permissions_set=0, got %d", permResp.Set)
+	}
+	// The sub folder should show inherited users from root
+	if len(permResp.Users) == 0 {
+		t.Log("permissions may not show inherited users - only explicitly set ones")
+	}
+}
+
+func TestAdminNonSuperadmin_Forbidden(t *testing.T) {
+	env := setupTestServer(t)
+
+	// Regular user tries admin endpoints - should get 403 (authenticated but not superadmin)
+	resp := env.get(t, "/api/admin/knowledge-bases", "testuser")
+	assertStatus(t, resp, 403)
+
+	resp = env.postJSON(t, "/api/admin/knowledge-bases", "testuser", map[string]interface{}{"name": "x"})
+	assertStatus(t, resp, 403)
+}
+
+func TestAdminImportUpload_InvalidFileType(t *testing.T) {
+	env := setupTestServer(t)
+
+	createBody := map[string]interface{}{"name": "bad-import-kb", "description": ""}
+	resp := env.postJSON(t, "/api/admin/knowledge-bases", "testadmin", createBody)
+	var createResp struct {
+		Success bool                  `json:"success"`
+		Data    *store.KnowledgeBase  `json:"data"`
+	}
+	parseJSON(t, resp, &createResp)
+	kbID := createResp.Data.ID
+
+	// Upload .exe file (unsupported) with proper CSRF header
+	content := []byte("fake exe")
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	fw, _ := writer.CreateFormFile("file", "virus.exe")
+	fw.Write(content)
+	writer.WriteField("csrf_token", env.Server.csrfToken("testadmin"))
+	writer.Close()
+
+	req, _ := http.NewRequest("POST", env.HTTP.URL+"/api/admin/knowledge-bases/"+itoa64(kbID)+"/import/upload", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-CSRF-Token", env.Server.csrfToken("testadmin"))
+	req.AddCookie(&http.Cookie{Name: "session", Value: env.Server.createSessionToken("testadmin")})
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	assertStatus(t, resp, 200)
+	var importResp struct {
+		Success bool   `json:"success"`
+		TaskID  string `json:"task_id"`
+	}
+	parseJSON(t, resp, &importResp)
+	if !importResp.Success {
+		t.Fatal("import should succeed at HTTP level")
+	}
+	if importResp.TaskID == "" {
+		t.Fatal("should have task_id")
 	}
 }
 

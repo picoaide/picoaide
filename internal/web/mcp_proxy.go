@@ -262,10 +262,11 @@ func (m *MCPProxyManager) CallTool(ctx context.Context, toolName string, args ma
 
 // mcpStdioHandshake 启动子进程，通过 stdio 完成 MCP 握手并获取工具列表。
 // 成功后将子进程引用存入 proxy 供后续 call() 使用。
+// 子进程使用独立生命周期，不被 HTTP 请求上下文取消杀死。
 func mcpStdioHandshake(ctx context.Context, proxy *MCPProxy) ([]ToolDef, error) {
   ctx, cancel := context.WithCancel(ctx)
 
-  cmd := exec.CommandContext(ctx, proxy.Command, proxy.Args...)
+  cmd := exec.Command(proxy.Command, proxy.Args...)
 
   // 设置环境变量
   if len(proxy.Env) > 0 {

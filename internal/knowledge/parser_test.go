@@ -177,6 +177,113 @@ func TestParseZIP_DepthLimit(t *testing.T) {
 	}
 }
 
+func TestParse_EmptyFile(t *testing.T) {
+	r, err := Parse("empty.md", []byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Title != "" {
+		t.Errorf("expected empty title, got %q", r.Title)
+	}
+	if r.Content != "" {
+		t.Errorf("expected empty content, got %q", r.Content)
+	}
+}
+
+func TestParseHTML_NoReadableContent(t *testing.T) {
+	html := `<!DOCTYPE html><html><head><title>No Article</title></head><body><div>just some text without article tag</div></body></html>`
+	r, err := Parse("page.html", []byte(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Title == "" {
+		t.Error("expected title to be extracted")
+	}
+	if r.Content == "" {
+		t.Error("expected some content to be parsed")
+	}
+}
+
+func TestParseZIP_EmptyZip(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	zw.Close()
+
+	r, err := Parse("empty.zip", buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.FileType != "zip" {
+		t.Errorf("filetype = %q, want zip", r.FileType)
+	}
+	if len(r.Pages) != 0 {
+		t.Errorf("expected 0 pages for empty zip, got %d", len(r.Pages))
+	}
+}
+
+func TestParse_ExtensionCase(t *testing.T) {
+	data := []byte("# Hello\nworld")
+	r, err := Parse("README.MD", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Title != "Hello" {
+		t.Errorf("title = %q, want 'Hello'", r.Title)
+	}
+	if r.FileType != "md" {
+		t.Errorf("filetype = %q, want md", r.FileType)
+	}
+
+	r, err = Parse("NOTES.TXT", []byte("first line"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.FileType != "txt" {
+		t.Errorf("filetype = %q, want txt", r.FileType)
+	}
+}
+
+func TestParseDOCX_EmptyDocument(t *testing.T) {
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+
+	ct, _ := w.Create("[Content_Types].xml")
+	ct.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`))
+
+	rels, _ := w.Create("_rels/.rels")
+	rels.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`))
+
+	wrels, _ := w.Create("word/_rels/document.xml.rels")
+	wrels.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>`))
+
+	doc, _ := w.Create("word/document.xml")
+	doc.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+  </w:body>
+</w:document>`))
+
+	w.Close()
+
+	r, err := Parse("empty.docx", buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.FileType != "docx" {
+		t.Errorf("filetype = %q, want docx", r.FileType)
+	}
+}
+
 func createTestPDF(t *testing.T) []byte {
 	t.Helper()
 	// Minimal valid PDF

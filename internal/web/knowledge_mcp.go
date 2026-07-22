@@ -96,8 +96,21 @@ func handleKBSearch(s *Server, c *gin.Context, id json.Number, args map[string]i
 
   case "browse":
     var folderID int64
-    if fid, ok := args["folder_id"].(float64); ok {
+    if fid, ok := args["folder_id"].(float64); ok && fid > 0 {
       folderID = int64(fid)
+    }
+    if folderID == 0 {
+      ids, err := store.GetAccessibleFolderIDs(username)
+      if err == nil && len(ids) > 0 {
+        folderID = ids[0]
+      }
+      if folderID == 0 {
+        writeMCPResult(c.Writer, id, map[string]interface{}{
+          "content": []map[string]interface{}{{"type": "text", "text": "没有可访问的文件夹"}},
+          "isError": true,
+        })
+        return
+      }
     }
     folders, docs, err := store.BrowseFolder(username, folderID)
     if err != nil {

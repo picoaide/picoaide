@@ -149,3 +149,81 @@ func TestRebuildDebouncer_TriggersOnce(t *testing.T) {
 	}
 	mu.Unlock()
 }
+
+func TestExtractWikiLinks_EmptyContent(t *testing.T) {
+	links := ExtractWikiLinks("")
+	if len(links) != 0 {
+		t.Errorf("expected 0 links, got %d", len(links))
+	}
+
+	links = ExtractWikiLinks("plain text without brackets")
+	if len(links) != 0 {
+		t.Errorf("expected 0 links, got %d", len(links))
+	}
+}
+
+func TestExtractTags_EmptyContent(t *testing.T) {
+	tags := ExtractTags("")
+	if len(tags) != 0 {
+		t.Errorf("expected 0 tags, got %d", len(tags))
+	}
+
+	tags = ExtractTags("no hash tags here")
+	if len(tags) != 0 {
+		t.Errorf("expected 0 tags, got %d", len(tags))
+	}
+}
+
+func TestLinker_Rebuild_EmptyKB(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "empty-linker", "", "admin")
+
+	linker := NewLinker()
+	links, tags, err := linker.Rebuild(kb.ID)
+	if err != nil {
+		t.Fatalf("Rebuild on empty KB: %v", err)
+	}
+	if len(links) != 0 {
+		t.Errorf("expected 0 links, got %d", len(links))
+	}
+	if len(tags) != 0 {
+		t.Errorf("expected 0 tags, got %d", len(tags))
+	}
+}
+
+func TestLinker_RebuildAndStore_ReplaceLinks(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "replace-links", "", "admin")
+	rootID := getRootFolderID(t, kb.ID)
+
+	d1, _ := store.CreateDocument(kb.ID, rootID, "Doc X", "参考 [[Doc Y]]", "manual", "md", "admin")
+	store.CreateDocument(kb.ID, rootID, "Doc Y", "content without links", "manual", "md", "admin")
+
+	linker := NewLinker()
+	if err := linker.RebuildAndStore(kb.ID); err != nil {
+		t.Fatalf("first RebuildAndStore: %v", err)
+	}
+
+	links, _ := store.GetDocumentLinks(d1.ID)
+	if len(links) != 1 || links[0].Keyword != "Doc Y" {
+		t.Errorf("expected 1 link to Doc Y, got %+v", links)
+	}
+
+	// Update d1 content to remove links using raw SQL
+	e, err := store.GetEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Where("id = ?", d1.ID).Cols("content").Update(&store.KBDocument{Content: "no links here"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := linker.RebuildAndStore(kb.ID); err != nil {
+		t.Fatalf("second RebuildAndStore: %v", err)
+	}
+
+	links, _ = store.GetDocumentLinks(d1.ID)
+	if len(links) != 0 {
+		t.Errorf("expected 0 links after content update, got %d", len(links))
+	}
+}

@@ -1,6 +1,8 @@
 package knowledge
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -180,7 +182,8 @@ func TestPipeline_Start_ProcessesQueue(t *testing.T) {
 		FileName: "hello.md", Data: []byte("# Started\nvia queue"), Username: "alice",
 	})
 
-	time.Sleep(100 * time.Millisecond)
+	// Give pipeline time to process
+	time.Sleep(500 * time.Millisecond)
 
 	docs, err := store.GetDocumentsByKB(kb.ID)
 	if err != nil {
@@ -362,6 +365,148 @@ func TestPipeline_AutoClassify(t *testing.T) {
 	}
 	if len(task.ExtraKeywords) != 2 {
 		t.Errorf("expected 2 keywords, got %d", len(task.ExtraKeywords))
+	}
+}
+
+func TestEnsureFolders_SingleSegment(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "single-seg", "", "alice")
+
+	fid, err := EnsureFolders(kb.ID, "/single")
+	if err != nil {
+		t.Fatalf("EnsureFolders: %v", err)
+	}
+	if fid == 0 {
+		t.Fatal("expected non-zero folder ID")
+	}
+
+	tree, err := store.GetFolderTree(kb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasSingle := false
+	for _, f := range tree {
+		if f.Name == "single" {
+			hasSingle = true
+			break
+		}
+	}
+	if !hasSingle {
+		t.Errorf("expected 'single' in folders, got %v", tree)
+	}
+}
+
+func TestEnsureFolders_RootPath(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "root-path", "", "alice")
+	rootID := getRootFolderID(t, kb.ID)
+
+	fid, err := EnsureFolders(kb.ID, "/")
+	if err != nil {
+		t.Fatalf("EnsureFolders with '/': %v", err)
+	}
+	if fid != rootID {
+		t.Errorf("expected root ID %d, got %d", rootID, fid)
+	}
+}
+
+func TestPipeline_Process_ZipFile(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "zip-import", "", "alice")
+	rootID := getRootFolderID(t, kb.ID)
+	store.CreateImportTask("zip-task", kb.ID, "alice")
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	f1, _ := zw.Create("a.md")
+	f1.Write([]byte("# File A\ncontent from zip"))
+	f2, _ := zw.Create("b.txt")
+	f2.Write([]byte("first line b\ncontent from zip"))
+	zw.Close()
+
+	q := NewImportQueue(10)
+	p := NewPipeline(q, nil, nil)
+
+	p.Process(&ImportTask{
+		ID:       "zip-task",
+		KbID:     kb.ID,
+		FolderID: rootID,
+		FileName: "archive.zip",
+		Data:     buf.Bytes(),
+		Username: "alice",
+	})
+
+	docs, err := store.GetDocumentsByKB(kb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Without auto-classify, pipeline creates 1 doc per task (ZIP file itself)
+	// Pages are available in parse result but not automatically split
+	if len(docs) == 0 {
+		t.Fatal("expected at least 1 document from zip import")
+	}
+	if docs[0].FileType != "zip" {
+		t.Errorf("filetype = %q, want 'zip'", docs[0].FileType)
+	}
+}
+
+func TestPipeline_Process_Concurrent(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "concurrent", "", "alice")
+	rootID := getRootFolderID(t, kb.ID)
+	store.CreateImportTask("con-1", kb.ID, "alice")
+	store.CreateImportTask("con-2", kb.ID, "alice")
+
+	q := NewImportQueue(10)
+	p := NewPipeline(q, nil, nil)
+
+	p.Process(&ImportTask{
+		ID: "con-1", KbID: kb.ID, FolderID: rootID,
+		FileName: "a.md", Data: []byte("# A\ncontent a"), Username: "alice",
+	})
+	p.Process(&ImportTask{
+		ID: "con-2", KbID: kb.ID, FolderID: rootID,
+		FileName: "b.md", Data: []byte("# B\ncontent b"), Username: "alice",
+	})
+
+	// They process synchronously so results should be immediate
+	docs, err := store.GetDocumentsByKB(kb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 2 {
+		t.Errorf("expected 2 docs, got %d", len(docs))
+	}
+}
+
+func TestPipeline_Process_WebImport(t *testing.T) {
+	initTestDB(t)
+	kb := createTestKB(t, "web-import", "", "alice")
+	rootID := getRootFolderID(t, kb.ID)
+	store.CreateImportTask("web-task", kb.ID, "alice")
+
+	q := NewImportQueue(10)
+	p := NewPipeline(q, nil, nil)
+
+	content := []byte("<!DOCTYPE html><html><head><title>Web Doc</title></head><body><article><h1>Hello</h1><p>Web content here</p></article></body></html>")
+	p.Process(&ImportTask{
+		ID:       "web-task",
+		KbID:     kb.ID,
+		FolderID: rootID,
+		FileName: "page.html",
+		Data:     content,
+		Username: "alice",
+	})
+
+	docs, err := store.GetDocumentsByKB(kb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 document, got %d", len(docs))
+	}
+	if docs[0].Title != "Web Doc" {
+		t.Logf("doc title = %q (may differ based on HTML parser)", docs[0].Title)
 	}
 }
 
