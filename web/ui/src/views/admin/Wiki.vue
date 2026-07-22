@@ -12,7 +12,7 @@
             <a-space>
               <a-button type="link" @click="editKB(record)">编辑</a-button>
               <a-popconfirm title="确定删除此知识库？所有文档将被删除" @confirm="deleteKB(record.id)">
-                <a-button type="link" danger>删除</a-button>
+                <a-button type="link" danger @click="kbModalOpen = false">删除</a-button>
               </a-popconfirm>
             </a-space>
           </template>
@@ -132,6 +132,7 @@ const showCreateKB = () => {
 }
 
 const editKB = (kb: any) => {
+  selectKB(kb)
   editingKB.value = kb
   kbForm.value = { name: kb.name, description: kb.description }
   kbModalTitle.value = '编辑知识库'
@@ -191,7 +192,7 @@ const loadFolderTree = async () => {
   treeLoading.value = false
 }
 
-const buildTree = (folders: any[], parentId?: number | null): any[] => {
+const buildTree = (folders: any[], parentId: number | null = null): any[] => {
   return folders
     .filter((f: any) => f.parent_id === parentId)
     .map((f: any) => ({

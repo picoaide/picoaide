@@ -16,13 +16,13 @@ type KnowledgeBase struct {
 func (KnowledgeBase) TableName() string { return "knowledge_bases" }
 
 type KBFolder struct {
-	ID             int64  `xorm:"pk autoincr 'id'"`
-	KbID           int64  `xorm:"notnull 'kb_id'"`
-	ParentID       *int64 `xorm:"'parent_id'"`
-	Name           string `xorm:"notnull 'name'"`
-	PermissionsSet int    `xorm:"default 0 'permissions_set'"`
-	CreatedAt      string `xorm:"created 'created_at'"`
-	UpdatedAt      string `xorm:"updated 'updated_at'"`
+	ID             int64  `xorm:"pk autoincr 'id'" json:"id"`
+	KbID           int64  `xorm:"notnull 'kb_id'" json:"kb_id"`
+	ParentID       *int64 `xorm:"'parent_id'" json:"parent_id"`
+	Name           string `xorm:"notnull 'name'" json:"name"`
+	PermissionsSet int    `xorm:"default 0 'permissions_set'" json:"permissions_set"`
+	CreatedAt      string `xorm:"created 'created_at'" json:"created_at"`
+	UpdatedAt      string `xorm:"updated 'updated_at'" json:"updated_at"`
 }
 
 func (KBFolder) TableName() string { return "kb_folders" }
