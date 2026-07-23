@@ -4,7 +4,10 @@
 
     <a-card title="知识库列表" style="margin-bottom: 16px">
       <template #extra>
-        <a-button type="primary" @click="showCreateKB">新建知识库</a-button>
+        <a-space>
+          <a-button :disabled="!selectedKB" type="primary" @click="showImport">导入文档</a-button>
+          <a-button type="primary" @click="showCreateKB">新建知识库</a-button>
+        </a-space>
       </template>
       <a-table :data-source="kbs" :columns="kbColumns" row-key="id" :loading="loading" :custom-row="kbRowClick">
         <template #bodyCell="{ column, record }">
@@ -92,12 +95,57 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <a-modal v-model:open="importModalOpen" title="导入文档" width="560px" :footer="null" :destroy-on-close="true">
+      <a-tabs v-model:activeKey="importTab">
+        <a-tab-pane key="upload" tab="文件上传">
+          <a-upload-dragger
+            :before-upload="handleFileSelect"
+            :show-upload-list="false"
+            :disabled="importing"
+            accept=".md,.txt,.html,.pdf,.docx,.zip"
+          >
+            <p class="ant-upload-drag-icon">
+              <file-outlined />
+            </p>
+            <p class="ant-upload-text">点击或拖拽文件到此区域</p>
+            <p class="ant-upload-hint">支持 .md .txt .html .pdf .docx .zip 格式</p>
+          </a-upload-dragger>
+          <div v-if="selectedFile" style="margin-top: 12px">
+            <a-alert :message="'已选择: ' + selectedFile.name" type="info" show-icon style="margin-bottom: 12px" />
+            <a-checkbox v-model:checked="autoClassify">自动分类（使用 LLM 拆分文档）</a-checkbox>
+            <div style="margin-top: 12px">
+              <a-button type="primary" :loading="importing" @click="startFileUpload">开始导入</a-button>
+              <a-button style="margin-left: 8px" @click="selectedFile = null">重新选择</a-button>
+            </div>
+          </div>
+        </a-tab-pane>
+        <a-tab-pane key="url" tab="URL 导入">
+          <a-form layout="vertical">
+            <a-form-item label="网页 URL">
+              <a-input v-model:value="importURL" placeholder="https://example.com/article" />
+            </a-form-item>
+            <a-form-item>
+              <a-button type="primary" :loading="importing" @click="startURLImport">开始导入</a-button>
+            </a-form-item>
+          </a-form>
+        </a-tab-pane>
+      </a-tabs>
+
+      <a-divider v-if="importTaskId" />
+      <div v-if="importTaskId">
+        <h4>导入进度</h4>
+        <a-progress :percent="importProgress" :status="importStatus" />
+        <p v-if="importError" style="color: red">{{ importError }}</p>
+      </div>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { message } from 'ant-design-vue'
+import { FileOutlined } from '@ant-design/icons-vue'
 import { api } from '../../composables/api'
 
 const kbs = ref<any[]>([])
@@ -316,6 +364,110 @@ const deleteFolder = async () => {
   }
 }
 
+const importModalOpen = ref(false)
+const importTab = ref('upload')
+const selectedFile = ref<File | null>(null)
+const importURL = ref('')
+const autoClassify = ref(false)
+const importing = ref(false)
+const importTaskId = ref('')
+const importProgress = ref(0)
+const importStatus = ref<'active' | 'success' | 'exception'>('active')
+const importError = ref('')
+let progressTimer: ReturnType<typeof setInterval> | null = null
+
+const showImport = () => {
+  selectedFile.value = null
+  importURL.value = ''
+  autoClassify.value = false
+  importTaskId.value = ''
+  importProgress.value = 0
+  importStatus.value = 'active'
+  importError.value = ''
+  importModalOpen.value = true
+}
+
+const handleFileSelect = (file: File) => {
+  selectedFile.value = file
+  return false
+}
+
+const startFileUpload = async () => {
+  if (!selectedFile.value || !selectedKB.value) return
+  importing.value = true
+  importTaskId.value = ''
+  importProgress.value = 0
+  importStatus.value = 'active'
+  importError.value = ''
+  try {
+    const formData = new FormData()
+    formData.append('file', selectedFile.value)
+    if (autoClassify.value) formData.append('auto_classify', 'true')
+    const res = await api.postForm('/admin/knowledge-bases/' + selectedKB.value.id + '/import/upload', formData)
+    importTaskId.value = res.task_id
+    importProgress.value = 10
+    pollProgress(res.task_id)
+  } catch (e: any) {
+    message.error(e.message || '上传失败')
+    importing.value = false
+  }
+}
+
+const startURLImport = async () => {
+  if (!importURL.value.trim() || !selectedKB.value) return
+  importing.value = true
+  importTaskId.value = ''
+  importProgress.value = 0
+  importStatus.value = 'active'
+  importError.value = ''
+  try {
+    const res = await api.post('/admin/knowledge-bases/' + selectedKB.value.id + '/import/web', {
+      url: importURL.value.trim(),
+    })
+    importTaskId.value = res.task_id
+    importProgress.value = 10
+    pollProgress(res.task_id)
+  } catch (e: any) {
+    message.error(e.message || '导入失败')
+    importing.value = false
+  }
+}
+
+const pollProgress = (taskId: string) => {
+  progressTimer = setInterval(async () => {
+    try {
+      const res = await api.get('/admin/knowledge-bases/imports/' + taskId)
+      const task = res.data
+      if (task.status === 'ready') {
+        importProgress.value = 100
+        importStatus.value = 'success'
+        importing.value = false
+        clearTimer()
+        message.success('导入完成')
+        importModalOpen.value = false
+      } else if (task.status === 'error') {
+        importProgress.value = 100
+        importStatus.value = 'exception'
+        importError.value = task.error_msg || '导入失败'
+        importing.value = false
+        clearTimer()
+      } else {
+        importProgress.value = task.progress || 50
+      }
+    } catch {
+      clearTimer()
+      importing.value = false
+    }
+  }, 1500)
+}
+
+const clearTimer = () => {
+  if (progressTimer) {
+    clearInterval(progressTimer)
+    progressTimer = null
+  }
+}
+
 onMounted(async () => {
   await loadKBs()
   try {
@@ -326,5 +478,7 @@ onMounted(async () => {
     const groupsRes = await api.get('/admin/groups')
     allGroups.value = groupsRes.groups || []
   } catch {}
+
+onUnmounted(clearTimer)
 })
 </script>
