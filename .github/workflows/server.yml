@@ -35,6 +35,9 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o internal/rootfs/bundle/picoagent ./cmd/picoagent/
           bash scripts/download-tools.sh "$(pwd)/internal/rootfs/bundle"
 
+      - name: Prepare embed UI
+        run: mkdir -p internal/web/dist
+
       - name: Format check
         run: bash format.sh --check
       - name: golangci-lint
