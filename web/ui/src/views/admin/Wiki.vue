@@ -454,6 +454,7 @@ const startFileUpload = async () => {
   try {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
+    if (selectedFolder.value) formData.append('folder_id', String(selectedFolder.value.id))
     if (autoClassify.value) formData.append('auto_classify', 'true')
     const res = await api.postForm('/admin/knowledge-bases/' + selectedKB.value.id + '/import/upload', formData)
     importTaskId.value = res.task_id
