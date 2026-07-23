@@ -1,8 +1,8 @@
 package agent
 
 import (
-	"context"
-	"encoding/json"
+  "context"
+  "encoding/json"
 )
 
 // ============================================================
@@ -10,31 +10,31 @@ import (
 // ============================================================
 
 type mockProvider struct {
-	responseText  string
-	shouldError   bool
-	failAfterText []string
-	toolCalls     []ToolCallData
+  responseText  string
+  shouldError   bool
+  failAfterText []string
+  toolCalls     []ToolCallData
 }
 
 func (m *mockProvider) StreamChat(_ context.Context, _ *ChatRequest, cb func(event StreamEvent)) error {
-	if m.shouldError {
-		return errMock
-	}
-	if m.responseText != "" {
-		cb(TextDelta(m.responseText))
-	}
-	if len(m.failAfterText) > 0 {
-		for _, t := range m.failAfterText {
-			cb(TextDelta(t))
-		}
-		return errMock
-	}
-	for _, tc := range m.toolCalls {
-		data, _ := json.Marshal(tc)
-		cb(StreamEvent{Type: "tool_call_start", Data: data})
-	}
-	cb(FinishEvent(m.responseText, map[string]int{}))
-	return nil
+  if m.shouldError {
+    return errMock
+  }
+  if m.responseText != "" {
+    cb(TextDelta(m.responseText))
+  }
+  if len(m.failAfterText) > 0 {
+    for _, t := range m.failAfterText {
+      cb(TextDelta(t))
+    }
+    return errMock
+  }
+  for _, tc := range m.toolCalls {
+    data, _ := json.Marshal(tc)
+    cb(StreamEvent{Type: "tool_call_start", Data: data})
+  }
+  cb(FinishEvent(m.responseText, map[string]int{}))
+  return nil
 }
 
 var errMock = &mockError{}
@@ -50,8 +50,8 @@ func (e *mockError) Error() string { return "mock provider error" }
 type blockingProvider struct{}
 
 func (p *blockingProvider) StreamChat(ctx context.Context, _ *ChatRequest, _ func(event StreamEvent)) error {
-	<-ctx.Done()
-	return ctx.Err()
+  <-ctx.Done()
+  return ctx.Err()
 }
 
 // ============================================================
@@ -59,10 +59,10 @@ func (p *blockingProvider) StreamChat(ctx context.Context, _ *ChatRequest, _ fun
 // ============================================================
 
 func testConfig() *AgentConfig {
-	return &AgentConfig{
-		Model: ModelConfig{
-			Provider: "test",
-			ModelID:  "test-model",
-		},
-	}
+  return &AgentConfig{
+    Model: ModelConfig{
+      Provider: "test",
+      ModelID:  "test-model",
+    },
+  }
 }

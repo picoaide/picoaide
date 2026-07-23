@@ -140,13 +140,13 @@ func main() {
   }
   mcpCancel()
 
-	// 6. 注册 MCP 代理调用工具
-	slog.Debug("picoagent.registering_mcp_tools")
-	tools.Register(&agent.QueryServerTool{Manager: mcpManager})
+  // 6. 注册 MCP 代理调用工具
+  slog.Debug("picoagent.registering_mcp_tools")
+  tools.Register(&agent.QueryServerTool{Manager: mcpManager})
 
-	// 6a. 创建 ADK session 服务
-	adkSessionSvc := session.InMemoryService()
-	slog.Debug("picoagent.adk_session_ready")
+  // 6a. 创建 ADK session 服务
+  adkSessionSvc := session.InMemoryService()
+  slog.Debug("picoagent.adk_session_ready")
 
   // 7. 计算 session key（跨渠道，定时任务使用独立渠道避免混淆聊天历史）
   scope := agent.SessionScope{

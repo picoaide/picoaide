@@ -199,9 +199,9 @@ func ErrorEvent(err string) StreamEvent {
 // ============================================================
 
 type ToolDef struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"inputSchema"`
+  Name        string                 `json:"name"`
+  Description string                 `json:"description"`
+  InputSchema map[string]interface{} `json:"inputSchema"`
 }
 
 // ============================================================
@@ -209,9 +209,9 @@ type ToolDef struct {
 // ============================================================
 
 type ToolCallData struct {
-	ID    string          `json:"id"`
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
+  ID    string          `json:"id"`
+  Name  string          `json:"name"`
+  Input json.RawMessage `json:"input"`
 }
 
 // ============================================================
@@ -219,28 +219,28 @@ type ToolCallData struct {
 // ============================================================
 
 func mustJSON(v interface{}) json.RawMessage {
-	data, _ := json.Marshal(v)
-	return data
+  data, _ := json.Marshal(v)
+  return data
 }
 
 // estimateTokens 粗略估算 token 数（英文 4 字符/token，中文 1.5 字符/token）
 func estimateTokens(sysPrompt string, msgs []LLMMessage) int {
-	total := estimateStringTokens(sysPrompt)
-	for _, m := range msgs {
-		total += estimateStringTokens(m.Content)
-	}
-	return total
+  total := estimateStringTokens(sysPrompt)
+  for _, m := range msgs {
+    total += estimateStringTokens(m.Content)
+  }
+  return total
 }
 
 func estimateStringTokens(s string) int {
-	var chineseCount int
-	for _, r := range s {
-		if r > '\u007f' {
-			chineseCount++
-		}
-	}
-	asciiCount := len(s) - chineseCount
-	return asciiCount/4 + chineseCount*2/3 + 1
+  var chineseCount int
+  for _, r := range s {
+    if r > '\u007f' {
+      chineseCount++
+    }
+  }
+  asciiCount := len(s) - chineseCount
+  return asciiCount/4 + chineseCount*2/3 + 1
 }
 
 

@@ -833,38 +833,38 @@ func cleanOldBackups(backupDir string, maxAge time.Duration) error {
 // ============================================================
 
 type LLMSummarizer struct {
-	provider  Provider
-	model     string
-	maxTokens int // 管理员配置的 max_tokens，用于 prompt 指导 AI 控制输出长度
+  provider  Provider
+  model     string
+  maxTokens int // 管理员配置的 max_tokens，用于 prompt 指导 AI 控制输出长度
 }
 
 func NewLLMSummarizer(provider Provider, model string, maxTokens int) *LLMSummarizer {
-	return &LLMSummarizer{provider: provider, model: model, maxTokens: maxTokens}
+  return &LLMSummarizer{provider: provider, model: model, maxTokens: maxTokens}
 }
 
 func (l *LLMSummarizer) Summarize(ctx context.Context, prompt string) (string, error) {
-	apiMaxTokens := 100000
-	guideline := ""
-	if l.maxTokens > 0 {
-		guideline = fmt.Sprintf("，控制在 %d tokens 以内", l.maxTokens)
-	}
-	var summary string
-	err := l.provider.StreamChat(ctx, &ChatRequest{
-		Model:       l.model,
-		System:      fmt.Sprintf("你是一个高效的摘要助手。请用中文简洁地总结%s。", guideline),
-		Messages:    []LLMMessage{{Role: "user", Content: prompt}},
-		MaxTokens:   apiMaxTokens,
-		Temperature: 0.3,
-	}, func(event StreamEvent) {
-		if event.Type == "text_delta" {
-			var text string
-			if json.Unmarshal(event.Data, &text) == nil {
-				summary += text
-			}
-		}
-	})
-	if err != nil {
-		return "", err
-	}
-	return summary, nil
+  apiMaxTokens := 100000
+  guideline := ""
+  if l.maxTokens > 0 {
+    guideline = fmt.Sprintf("，控制在 %d tokens 以内", l.maxTokens)
+  }
+  var summary string
+  err := l.provider.StreamChat(ctx, &ChatRequest{
+    Model:       l.model,
+    System:      fmt.Sprintf("你是一个高效的摘要助手。请用中文简洁地总结%s。", guideline),
+    Messages:    []LLMMessage{{Role: "user", Content: prompt}},
+    MaxTokens:   apiMaxTokens,
+    Temperature: 0.3,
+  }, func(event StreamEvent) {
+    if event.Type == "text_delta" {
+      var text string
+      if json.Unmarshal(event.Data, &text) == nil {
+        summary += text
+      }
+    }
+  })
+  if err != nil {
+    return "", err
+  }
+  return summary, nil
 }

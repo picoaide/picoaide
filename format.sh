@@ -29,6 +29,8 @@ done < <(find . \
   -o -name "*.css" -o -name "*.json" -o -name "*.sh" -o -name "*.md" \) \
   ! -path "./vendor/*" \
   ! -path "./node_modules/*" \
+  ! -path "./.opencode/*" \
+  ! -path "./web/ui/node_modules/*" \
   ! -path "./.git/*" \
   ! -path "./users/*" \
   ! -path "./archive/*" \

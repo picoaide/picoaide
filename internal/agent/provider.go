@@ -1,20 +1,20 @@
 package agent
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"log/slog"
-	"net/http"
-	"strings"
-	"time"
+  "bytes"
+  "context"
+  "encoding/json"
+  "fmt"
+  "io"
+  "log/slog"
+  "net/http"
+  "strings"
+  "time"
 
-	"github.com/avast/retry-go/v4"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
-	"github.com/openai/openai-go/v3/shared"
+  "github.com/avast/retry-go/v4"
+  "github.com/openai/openai-go/v3"
+  "github.com/openai/openai-go/v3/option"
+  "github.com/openai/openai-go/v3/shared"
 )
 
 // reasoningEvent 发出推理/思考内容增量事件
@@ -101,16 +101,16 @@ func isRetryable(err error) bool {
 // retryStream 包装流式 LLM 调用，自动重试可恢复的网络和服务端错误。
 // 不重试：4xx(除429)、context overflow、context canceled/deadline exceeded。
 func retryStream(ctx context.Context, name string, fn func(context.Context) error) error {
-	return retry.Do(
-		func() error { return fn(ctx) },
-		retry.Attempts(3),
-		retry.Delay(2*time.Second),
-		retry.MaxDelay(30*time.Second),
-		retry.DelayType(retry.BackOffDelay),
-		retry.RetryIf(func(err error) bool { return isRetryable(err) }),
-		retry.Context(ctx),
-		retry.LastErrorOnly(true),
-	)
+  return retry.Do(
+    func() error { return fn(ctx) },
+    retry.Attempts(3),
+    retry.Delay(2*time.Second),
+    retry.MaxDelay(30*time.Second),
+    retry.DelayType(retry.BackOffDelay),
+    retry.RetryIf(func(err error) bool { return isRetryable(err) }),
+    retry.Context(ctx),
+    retry.LastErrorOnly(true),
+  )
 }
 
 // ============================================================
@@ -549,7 +549,7 @@ func convertToolMessagesToText(msgs []LLMMessage) []LLMMessage {
           content += "\n"
         }
         content += strings.Join(parts, "\n")
-        result = append(result, LLMMessage{Role: "assistant", Content: content})
+        result = append(result, LLMMessage{Role: "assistant", Content: content, ReasoningContent: m.ReasoningContent})
       } else {
         result = append(result, m)
       }
