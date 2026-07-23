@@ -333,12 +333,34 @@ func (s *Server) handleAdminFolderDocuments(c *gin.Context) {
     writeError(c, http.StatusInternalServerError, "数据库连接失败")
     return
   }
-  rows, err := e.SQL("SELECT id, kb_id, folder_id, title, file_type, file_size, created_by, created_at, updated_at FROM kb_documents WHERE folder_id = ? ORDER BY title", folderID).QueryString()
+  db := e.DB().DB
+  query := "SELECT id, kb_id, folder_id, title, file_type, file_size, created_by, created_at, updated_at FROM kb_documents WHERE folder_id = ? ORDER BY title"
+  sqlRows, err := db.Query(query, folderID)
   if err != nil {
     writeError(c, http.StatusInternalServerError, "获取文档列表失败")
     return
   }
-  writeJSON(c, http.StatusOK, gin.H{"success": true, "data": rows})
+  defer sqlRows.Close()
+  cols, _ := sqlRows.Columns()
+  var result []map[string]interface{}
+  for sqlRows.Next() {
+    vals := make([]interface{}, len(cols))
+    valPtrs := make([]interface{}, len(cols))
+    for i := range vals {
+      valPtrs[i] = &vals[i]
+    }
+    sqlRows.Scan(valPtrs...)
+    row := make(map[string]interface{})
+    for i, col := range cols {
+      if b, ok := vals[i].([]byte); ok {
+        row[col] = string(b)
+      } else {
+        row[col] = vals[i]
+      }
+    }
+    result = append(result, row)
+  }
+  writeJSON(c, http.StatusOK, gin.H{"success": true, "data": result})
 }
 
 // handleAdminDeleteDocument 删除文档

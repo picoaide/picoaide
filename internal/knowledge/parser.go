@@ -67,13 +67,17 @@ func (TextParser) Parse(filename string, data []byte) (*ParseResult, error) {
 }
 
 func extractTextTitle(content string) string {
+  maxTitleLen := 200
   lines := strings.SplitN(content, "\n", 2)
   if len(lines) == 0 {
     return ""
   }
   first := strings.TrimSpace(lines[0])
   if strings.HasPrefix(first, "# ") {
-    return strings.TrimPrefix(first, "# ")
+    first = strings.TrimPrefix(first, "# ")
+  }
+  if len(first) > maxTitleLen {
+    first = first[:maxTitleLen]
   }
   return first
 }

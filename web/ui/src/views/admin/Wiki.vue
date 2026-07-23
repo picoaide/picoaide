@@ -285,7 +285,7 @@ const onFolderSelect = async (keys: any[], node?: any) => {
 const documents = ref<any[]>([])
 const docsLoading = ref(false)
 const docColumns = [
-  { title: '标题', dataIndex: 'title', key: 'title' },
+  { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true },
   { title: '类型', dataIndex: 'file_type', key: 'file_type', width: 80 },
   { title: '大小', dataIndex: 'file_size', key: 'file_size', width: 100 },
   { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
