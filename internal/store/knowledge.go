@@ -83,15 +83,15 @@ type KBTag struct {
 func (KBTag) TableName() string { return "kb_tags" }
 
 type KBImportTask struct {
-  ID        string `xorm:"pk 'id'"`
-  KbID      int64  `xorm:"notnull 'kb_id'"`
-  Username  string `xorm:"notnull 'username'"`
-  Status    string `xorm:"default 'pending' 'status'"`
-  Progress  int    `xorm:"default 0 'progress'"`
-  FileCount int    `xorm:"default 0 'file_count'"`
-  ErrorMsg  string `xorm:"default '' 'error_msg'"`
-  CreatedAt string `xorm:"created 'created_at'"`
-  UpdatedAt string `xorm:"updated 'updated_at'"`
+  ID        string `xorm:"pk 'id'" json:"id"`
+  KbID      int64  `xorm:"notnull 'kb_id'" json:"kb_id"`
+  Username  string `xorm:"notnull 'username'" json:"username"`
+  Status    string `xorm:"default 'pending' 'status'" json:"status"`
+  Progress  int    `xorm:"default 0 'progress'" json:"progress"`
+  FileCount int    `xorm:"default 0 'file_count'" json:"file_count"`
+  ErrorMsg  string `xorm:"default '' 'error_msg'" json:"error_msg"`
+  CreatedAt string `xorm:"created 'created_at'" json:"created_at"`
+  UpdatedAt string `xorm:"updated 'updated_at'" json:"updated_at"`
 }
 
 func (KBImportTask) TableName() string { return "kb_import_tasks" }
