@@ -46,10 +46,12 @@ export const api = {
   },
 
   async postForm<T = any>(path: string, formData: FormData): Promise<T> {
-    formData.append('_csrf', await getCsrf())
+    const heads: Record<string, string> = {}
+    heads['X-CSRF-Token'] = await getCsrf()
     const res = await fetch(BASE + path, {
       method: 'POST',
       credentials: 'include',
+      headers: heads,
       body: formData,
     })
     if (!res.ok) throw new Error(await res.text())

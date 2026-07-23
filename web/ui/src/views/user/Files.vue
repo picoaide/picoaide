@@ -80,7 +80,6 @@ import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { FolderOutlined, FileOutlined, UploadOutlined } from '@ant-design/icons-vue'
 import { api } from '../../composables/api'
-import { getCsrf } from '../../composables/useCsrf'
 
 const route = useRoute()
 const loading = ref(false)
@@ -173,13 +172,10 @@ const doUpload = async () => {
   if (!uploadFiles.value.length) { message.warning('请选择文件'); return }
   uploading.value = true
   try {
-    const csrf_token = await getCsrf()
     const fd = new FormData()
     fd.append('file', uploadFiles.value[0])
     fd.append('path', currentPath.value)
-    fd.append('csrf_token', csrf_token)
-    const res = await fetch('/api/files/upload', { method: 'POST', body: fd })
-    if (!res.ok) { const e = await res.json().catch(() => ({})); message.error(e.message || '上传失败'); return }
+    await api.postForm('/files/upload', fd)
     message.success('上传成功')
     showUpload.value = false
     uploadFiles.value = []
