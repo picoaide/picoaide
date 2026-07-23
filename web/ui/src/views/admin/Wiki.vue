@@ -321,10 +321,9 @@ const deleteDocument = async (record: any) => {
 
 const loadFolderPermissions = async (folderId: number) => {
   const res = await api.get('/admin/knowledge-bases/folders/' + folderId + '/permissions')
-  const data = res.data || {}
-  permissionsSet.value = data.permissions_set === 1
-  folderUsers.value = data.users || []
-  folderGroups.value = data.groups || []
+  permissionsSet.value = res.permissions_set === 1
+  folderUsers.value = res.users || []
+  folderGroups.value = res.groups || []
 }
 
 const togglePermissionsSet = async (val: boolean) => {

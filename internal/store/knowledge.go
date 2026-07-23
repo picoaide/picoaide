@@ -450,6 +450,35 @@ func GetAccessibleFolderIDs(username string) ([]int64, error) {
     }
   }
 
+  // 对于已授权的知识库，同知识库下其他 permissions_set=0 的根文件夹也自动可访问
+  var accessibleFolders []KBFolder
+  if len(accessible) > 0 {
+    ids := make([]interface{}, 0, len(accessible))
+    for fid := range accessible {
+      ids = append(ids, fid)
+    }
+    engine.In("id", ids...).Find(&accessibleFolders)
+  }
+  var kbIDs []int64
+  kbSet := make(map[int64]bool)
+  for _, f := range accessibleFolders {
+    if !kbSet[f.KbID] {
+      kbSet[f.KbID] = true
+      kbIDs = append(kbIDs, f.KbID)
+    }
+  }
+  if len(kbIDs) > 0 {
+    ids := make([]interface{}, len(kbIDs))
+    for i, kid := range kbIDs {
+      ids[i] = kid
+    }
+    var siblings []KBFolder
+    engine.Where("parent_id IS NULL AND permissions_set = 0").In("kb_id", ids...).Find(&siblings)
+    for _, s := range siblings {
+      accessible[s.ID] = true
+    }
+  }
+
   result := make([]int64, 0, len(accessible))
   for fid := range accessible {
     result = append(result, fid)
