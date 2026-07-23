@@ -68,39 +68,34 @@ func ListSourceSkills(source string) ([]SkillInfo, error) {
     return nil, fmt.Errorf("源名称不合法: %w", err)
   }
   root := filepath.Join(SkillsRootDir(), source)
-  entries, err := os.ReadDir(root)
-  if err != nil {
-    if os.IsNotExist(err) {
-      return []SkillInfo{}, nil
-    }
-    return nil, err
+  if _, err := os.Stat(root); os.IsNotExist(err) {
+    return []SkillInfo{}, nil
   }
   var skills []SkillInfo
-  for _, e := range entries {
-    if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-      continue
+  filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+    if err != nil || !d.IsDir() || strings.HasPrefix(d.Name(), ".") {
+      return nil
     }
-    skillDir := filepath.Join(root, e.Name())
-    skmdPath := filepath.Join(skillDir, "SKILL.md")
+    skmdPath := filepath.Join(path, "SKILL.md")
     if _, err := os.Stat(skmdPath); os.IsNotExist(err) {
-      continue
+      return nil
     }
-    meta, pErr := ParseMetadata(skillDir)
+    meta, pErr := ParseMetadata(path)
     if pErr != nil {
-      continue
+      return nil
     }
-    info, iErr := e.Info()
+    info, iErr := d.Info()
     if iErr != nil {
-      continue
+      return nil
     }
     var fileCount int
     var totalSize int64
-    filepath.WalkDir(skillDir, func(path string, d os.DirEntry, err error) error {
-      if err != nil || d.IsDir() {
+    filepath.WalkDir(path, func(p string, d2 os.DirEntry, err2 error) error {
+      if err2 != nil || d2.IsDir() {
         return nil
       }
       fileCount++
-      if fi, fe := d.Info(); fe == nil {
+      if fi, fe := d2.Info(); fe == nil {
         totalSize += fi.Size()
       }
       return nil
@@ -114,7 +109,14 @@ func ListSourceSkills(source string) ([]SkillInfo, error) {
       SizeStr:     formatSize(totalSize),
       ModTime:     info.ModTime().Format("2006-01-02 15:04"),
     })
+    return filepath.SkipDir
+  })
+  if skills == nil {
+    skills = []SkillInfo{}
   }
+  sort.Slice(skills, func(i, j int) bool {
+    return skills[i].Name < skills[j].Name
+  })
   return skills, nil
 }
 

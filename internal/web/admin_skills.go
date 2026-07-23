@@ -33,8 +33,22 @@ func findSkillSource(skillName string) string {
     if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
       continue
     }
-    skillPath := filepath.Join(root, e.Name(), skillName, "SKILL.md")
-    if _, err := os.Stat(skillPath); err == nil {
+    sourceDir := filepath.Join(root, e.Name())
+    var found bool
+    filepath.WalkDir(sourceDir, func(path string, d os.DirEntry, err error) error {
+      if err != nil || d.IsDir() {
+        return nil
+      }
+      if d.Name() != "SKILL.md" {
+        return nil
+      }
+      meta, pErr := skill.ParseMetadata(filepath.Dir(path))
+      if pErr == nil && meta.Name == skillName {
+        found = true
+      }
+      return nil
+    })
+    if found {
       return e.Name()
     }
   }

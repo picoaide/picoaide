@@ -345,6 +345,7 @@ const savePermissions = async () => {
     await api.put('/admin/knowledge-bases/folders/' + selectedFolder.value.id + '/permissions', {
       users: folderUsers.value,
       groups: folderGroups.value,
+      permissions_set: permissionsSet.value ? 1 : 0,
     })
     message.success('权限已保存')
   } catch (e: any) {
