@@ -334,7 +334,7 @@ func (s *Server) handleAdminFolderDocuments(c *gin.Context) {
     return
   }
   var docs []store.KBDocument
-  if err := e.Where("folder_id = ?", folderID).OrderBy("title").Find(&docs); err != nil {
+  if err := e.Where("folder_id = ?", folderID).Cols("id", "kb_id", "folder_id", "title", "file_type", "file_size", "created_by", "created_at", "updated_at").OrderBy("title").Find(&docs); err != nil {
     writeError(c, http.StatusInternalServerError, "获取文档列表失败")
     return
   }
