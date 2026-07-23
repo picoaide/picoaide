@@ -491,7 +491,7 @@ func DeleteDocument(id int64) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  _, err := engine.Where("doc_id = ?", id).Delete(&KBLink{})
+  _, err := engine.Where("source_doc = ?", id).Delete(&KBLink{})
   if err != nil {
     return err
   }
