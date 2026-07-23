@@ -46,12 +46,11 @@ export const api = {
   },
 
   async postForm<T = any>(path: string, formData: FormData): Promise<T> {
-    const heads: Record<string, string> = {}
-    heads['X-CSRF-Token'] = await getCsrf()
-    const res = await fetch(BASE + path, {
+    const csrf = await getCsrf()
+    const qs = path.includes('?') ? '&' : '?'
+    const res = await fetch(BASE + path + qs + '_csrf=' + encodeURIComponent(csrf), {
       method: 'POST',
       credentials: 'include',
-      headers: heads,
       body: formData,
     })
     if (!res.ok) throw new Error(await res.text())

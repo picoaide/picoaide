@@ -285,6 +285,9 @@ func (s *Server) checkCSRF(c *gin.Context) bool {
   }
   token := c.Request.Header.Get("X-CSRF-Token")
   if token == "" {
+    token = c.Query("_csrf")
+  }
+  if token == "" {
     return false
   }
   return hmac.Equal([]byte(token), []byte(s.csrfToken(username)))
