@@ -308,6 +308,7 @@ func (s *Server) superadminMiddleware() gin.HandlerFunc {
     }
     if c.Request.Method != "GET" && c.Request.Method != "HEAD" {
       if !s.checkCSRF(c) {
+        writeError(c, http.StatusForbidden, "无效请求")
         c.Abort()
         return
       }
@@ -340,7 +341,8 @@ func (s *Server) secureHeaders() gin.HandlerFunc {
     c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 
     if (c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") &&
-      !strings.HasSuffix(c.Request.URL.Path, "/files/upload") {
+      !strings.HasSuffix(c.Request.URL.Path, "/files/upload") &&
+      !strings.HasSuffix(c.Request.URL.Path, "/import/upload") {
       c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
     }
 
