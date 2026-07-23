@@ -316,3 +316,27 @@ func (s *Server) handleAdminFolderSetPermissions(c *gin.Context) {
   }
   writeJSON(c, http.StatusOK, gin.H{"success": true})
 }
+
+// handleAdminFolderDocuments 获取文件夹内的文档列表
+func (s *Server) handleAdminFolderDocuments(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
+    return
+  }
+  idStr := c.Param("id")
+  folderID, err := strconv.ParseInt(idStr, 10, 64)
+  if err != nil {
+    writeError(c, http.StatusBadRequest, "无效的 ID")
+    return
+  }
+  e, err := store.GetEngine()
+  if err != nil {
+    writeError(c, http.StatusInternalServerError, "数据库连接失败")
+    return
+  }
+  var docs []store.KBDocument
+  if err := e.Where("folder_id = ?", folderID).OrderBy("title").Find(&docs); err != nil {
+    writeError(c, http.StatusInternalServerError, "获取文档列表失败")
+    return
+  }
+  writeJSON(c, http.StatusOK, gin.H{"success": true, "data": docs})
+}

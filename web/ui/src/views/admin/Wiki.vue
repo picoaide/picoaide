@@ -41,9 +41,9 @@
         </a-card>
       </a-col>
       <a-col :span="14">
-        <a-card title="文件夹权限">
+        <a-card v-if="selectedFolder" :title="'文件夹: ' + (selectedFolder.name || '')">
           <template #extra>
-            <a-space v-if="selectedFolder">
+            <a-space>
               <a-button size="small" @click="showRenameFolder">重命名</a-button>
               <a-popconfirm title="确定删除此文件夹？" @confirm="deleteFolder">
                 <a-button size="small" danger>删除</a-button>
@@ -51,28 +51,27 @@
               <a-button size="small" @click="showAddSubFolder">添加子文件夹</a-button>
             </a-space>
           </template>
-
-          <div v-if="!selectedFolder">
-            <a-empty description="选择一个文件夹管理权限" />
-          </div>
-
-          <div v-else>
-            <a-form layout="inline">
-              <a-form-item label="独立权限（不继承父级）">
-                <a-switch v-model:checked="permissionsSet" @change="togglePermissionsSet" />
-              </a-form-item>
-            </a-form>
-
-            <a-divider />
-
-            <h4>用户授权</h4>
-            <a-select mode="multiple" v-model:value="folderUsers" placeholder="选择用户" style="width: 100%" :options="userOptions" />
-
-            <h4 style="margin-top: 12px">用户组授权</h4>
-            <a-select mode="multiple" v-model:value="folderGroups" placeholder="选择用户组" style="width: 100%" :options="groupOptions" />
-
-            <a-button type="primary" style="margin-top: 16px" @click="savePermissions">保存权限</a-button>
-          </div>
+          <a-tabs v-model:activeKey="folderTab">
+            <a-tab-pane key="docs" tab="文档">
+              <a-table :data-source="documents" :columns="docColumns" row-key="id" :loading="docsLoading" size="small" />
+            </a-tab-pane>
+            <a-tab-pane key="perms" tab="访问权限">
+              <a-form layout="inline">
+                <a-form-item label="独立权限（不继承父级）">
+                  <a-switch v-model:checked="permissionsSet" @change="togglePermissionsSet" />
+                </a-form-item>
+              </a-form>
+              <a-divider />
+              <h4>用户授权</h4>
+              <a-select mode="multiple" v-model:value="folderUsers" placeholder="选择用户" style="width: 100%" :options="userOptions" />
+              <h4 style="margin-top: 12px">用户组授权</h4>
+              <a-select mode="multiple" v-model:value="folderGroups" placeholder="选择用户组" style="width: 100%" :options="groupOptions" />
+              <a-button type="primary" style="margin-top: 16px" @click="savePermissions">保存权限</a-button>
+            </a-tab-pane>
+          </a-tabs>
+        </a-card>
+        <a-card v-else title="文件夹">
+          <a-empty description="选择一个文件夹查看文档和权限" />
         </a-card>
       </a-col>
     </a-row>
@@ -105,11 +104,13 @@
             :disabled="importing"
             accept=".md,.txt,.html,.pdf,.docx,.zip"
           >
-            <p class="ant-upload-drag-icon">
-              <file-outlined />
-            </p>
-            <p class="ant-upload-text">点击或拖拽文件到此区域</p>
-            <p class="ant-upload-hint">支持 .md .txt .html .pdf .docx .zip 格式</p>
+            <a-button type="dashed" style="border:none;width:100%;height:130px">
+              <p class="ant-upload-drag-icon">
+                <file-outlined />
+              </p>
+              <p class="ant-upload-text">点击或拖拽文件到此区域</p>
+              <p class="ant-upload-hint">支持 .md .txt .html .pdf .docx .zip 格式</p>
+            </a-button>
           </a-upload-dragger>
           <div v-if="selectedFile" style="margin-top: 12px">
             <a-alert :message="'已选择: ' + selectedFile.name" type="info" show-icon style="margin-bottom: 12px" />
@@ -220,6 +221,7 @@ const selectedKB = ref<any>(null)
 const folderTreeData = ref<any[]>([])
 const treeLoading = ref(false)
 const selectedFolder = ref<any>(null)
+const folderTab = ref('docs')
 
 const selectKB = async (kb: any) => {
   selectedKB.value = kb
@@ -260,11 +262,34 @@ const allGroups = ref<any[]>([])
 const userOptions = computed(() => allUsers.value.map((u: any) => ({ label: u.username, value: u.username })))
 const groupOptions = computed(() => allGroups.value.map((g: any) => ({ label: g.name, value: g.id })))
 
-const onFolderSelect = async (keys: any[]) => {
-  if (keys.length === 0) { selectedFolder.value = null; return }
+const onFolderSelect = async (keys: any[], node?: any) => {
+  if (keys.length === 0) { selectedFolder.value = null; documents.value = []; return }
   const folderId = parseInt(keys[0])
-  selectedFolder.value = { id: folderId }
-  await loadFolderPermissions(folderId)
+  const name = node?.node?.title || ''
+  selectedFolder.value = { id: folderId, name }
+  folderTab.value = 'docs'
+  await Promise.all([
+    loadFolderPermissions(folderId),
+    loadDocuments(folderId),
+  ])
+}
+
+const documents = ref<any[]>([])
+const docsLoading = ref(false)
+const docColumns = [
+  { title: '标题', dataIndex: 'title', key: 'title' },
+  { title: '类型', dataIndex: 'file_type', key: 'file_type', width: 80 },
+  { title: '大小', dataIndex: 'file_size', key: 'file_size', width: 100 },
+  { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
+]
+
+const loadDocuments = async (folderId: number) => {
+  docsLoading.value = true
+  try {
+    const res = await api.get('/admin/knowledge-bases/folders/' + folderId + '/documents')
+    documents.value = res.data || []
+  } catch { documents.value = [] }
+  docsLoading.value = false
 }
 
 const loadFolderPermissions = async (folderId: number) => {
@@ -445,6 +470,8 @@ const pollProgress = (taskId: string) => {
         clearTimer()
         message.success('导入完成')
         importModalOpen.value = false
+        if (selectedFolder.value) loadDocuments(selectedFolder.value.id)
+        else loadFolderTree()
       } else if (task.status === 'error') {
         importProgress.value = 100
         importStatus.value = 'exception'
@@ -478,7 +505,7 @@ onMounted(async () => {
     const groupsRes = await api.get('/admin/groups')
     allGroups.value = groupsRes.groups || []
   } catch {}
+})
 
 onUnmounted(clearTimer)
-})
 </script>

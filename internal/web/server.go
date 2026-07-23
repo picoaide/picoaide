@@ -521,6 +521,7 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
     admin.DELETE("/knowledge-bases/folders/:id", s.handleAdminFolderDelete)
     admin.GET("/knowledge-bases/folders/:id/permissions", s.handleAdminFolderPermissions)
     admin.PUT("/knowledge-bases/folders/:id/permissions", s.handleAdminFolderSetPermissions)
+    admin.GET("/knowledge-bases/folders/:id/documents", s.handleAdminFolderDocuments)
     admin.POST("/knowledge-bases/:id/import/upload", s.handleUserKBImportUpload)
     admin.POST("/knowledge-bases/:id/import/web", s.handleUserKBImportWeb)
     admin.GET("/knowledge-bases/imports/:task_id", s.handleUserKBImportProgress)
