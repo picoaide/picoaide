@@ -135,12 +135,12 @@ func (p *Pipeline) Process(task *ImportTask) {
       if content == "" {
         content = section.Title
       }
-      store.CreateDocument(task.KbID, folderID, section.Title, content, "upload", result.FileType, task.Username)
+      store.CreateDocument(task.KbID, folderID, section.Title, content, "upload", result.FileType, task.Username, int(result.FileSize))
     }
 
     task.ExtraKeywords = classifyResult.Keywords
   } else {
-    store.CreateDocument(task.KbID, task.FolderID, result.Title, result.Content, "upload", result.FileType, task.Username)
+    store.CreateDocument(task.KbID, task.FolderID, result.Title, result.Content, "upload", result.FileType, task.Username, int(result.FileSize))
   }
 
   p.debouncer.Trigger(task.KbID, func(kbID int64) {

@@ -168,7 +168,7 @@ func TestDeleteKnowledgeBase_Cascade(t *testing.T) {
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
   sub, _ := CreateFolder(kb.ID, &root.ID, "sub")
-  doc, _ := CreateDocument(kb.ID, sub.ID, "cascade-doc", "content", "manual", "md", "alice")
+  doc, _ := CreateDocument(kb.ID, sub.ID, "cascade-doc", "content", "manual", "md", "alice", 0)
 
   DeleteKnowledgeBase(kb.ID)
 
@@ -317,7 +317,7 @@ func TestDeleteFolder(t *testing.T) {
     t.Fatal(err)
   }
 
-  doc, err := CreateDocument(kb.ID, sub.ID, "title", "content", "manual", "md", "u1")
+  doc, err := CreateDocument(kb.ID, sub.ID, "title", "content", "manual", "md", "u1", 0)
   if err != nil {
     t.Fatal(err)
   }
@@ -485,7 +485,7 @@ func TestCreateDocument(t *testing.T) {
   var root KBFolder
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
-  doc, err := CreateDocument(kb.ID, root.ID, "my doc", "hello world", "manual", "md", "alice")
+  doc, err := CreateDocument(kb.ID, root.ID, "my doc", "hello world", "manual", "md", "alice", 0)
   if err != nil {
     t.Fatal(err)
   }
@@ -501,11 +501,11 @@ func TestCreateDocument_DuplicateTitle(t *testing.T) {
   var root KBFolder
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
-  _, err := CreateDocument(kb.ID, root.ID, "same-title", "content1", "manual", "md", "alice")
+  _, err := CreateDocument(kb.ID, root.ID, "same-title", "content1", "manual", "md", "alice", 0)
   if err != nil {
     t.Fatal(err)
   }
-  doc2, err := CreateDocument(kb.ID, root.ID, "same-title", "content2", "manual", "md", "alice")
+  doc2, err := CreateDocument(kb.ID, root.ID, "same-title", "content2", "manual", "md", "alice", 0)
   if err != nil {
     t.Fatal(err)
   }
@@ -516,7 +516,7 @@ func TestCreateDocument_DuplicateTitle(t *testing.T) {
 
 func TestCreateDocument_NonExistentKB(t *testing.T) {
   testInitDB(t)
-  _, err := CreateDocument(99999, 1, "title", "content", "manual", "md", "alice")
+  _, err := CreateDocument(99999, 1, "title", "content", "manual", "md", "alice", 0)
   if err == nil {
     t.Error("expected error for non-existent KB")
   }
@@ -529,8 +529,8 @@ func TestGetDocumentsByKB(t *testing.T) {
   var root KBFolder
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
-  CreateDocument(kb.ID, root.ID, "doc-a", "", "manual", "md", "alice")
-  CreateDocument(kb.ID, root.ID, "doc-b", "", "manual", "md", "alice")
+  CreateDocument(kb.ID, root.ID, "doc-a", "", "manual", "md", "alice", 0)
+  CreateDocument(kb.ID, root.ID, "doc-b", "", "manual", "md", "alice", 0)
 
   docs, err := GetDocumentsByKB(kb.ID)
   if err != nil {
@@ -548,7 +548,7 @@ func TestGetDocumentByID(t *testing.T) {
   var root KBFolder
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
-  doc, _ := CreateDocument(kb.ID, root.ID, "secret", "content", "manual", "md", "alice")
+  doc, _ := CreateDocument(kb.ID, root.ID, "secret", "content", "manual", "md", "alice", 0)
 
   // alice can access
   got, err := GetDocumentByID("alice", doc.ID)
@@ -586,7 +586,7 @@ func TestGetDocumentByID_GroupPermission(t *testing.T) {
 
   engine.Exec("INSERT INTO user_groups (username, group_id) VALUES (?, ?)", "charlie", g.ID)
 
-  doc, _ := CreateDocument(kb.ID, root.ID, "group-doc", "content", "manual", "md", "alice")
+  doc, _ := CreateDocument(kb.ID, root.ID, "group-doc", "content", "manual", "md", "alice", 0)
 
   got, err := GetDocumentByID("charlie", doc.ID)
   if err != nil {
@@ -610,9 +610,9 @@ func TestBrowseFolder(t *testing.T) {
   var root KBFolder
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
-  CreateDocument(kb.ID, root.ID, "doc1", "", "manual", "md", "alice")
+  CreateDocument(kb.ID, root.ID, "doc1", "", "manual", "md", "alice", 0)
   sub, _ := CreateFolder(kb.ID, &root.ID, "subfolder")
-  CreateDocument(kb.ID, sub.ID, "nested-doc", "", "manual", "md", "alice")
+  CreateDocument(kb.ID, sub.ID, "nested-doc", "", "manual", "md", "alice", 0)
 
   // alice can browse
   folders, docs, err := BrowseFolder("alice", root.ID)
@@ -737,8 +737,8 @@ func TestRebuildLinksAndTags(t *testing.T) {
   var root KBFolder
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
-  doc1, _ := CreateDocument(kb.ID, root.ID, "doc1", "content1", "manual", "md", "alice")
-  doc2, _ := CreateDocument(kb.ID, root.ID, "doc2", "content2", "manual", "md", "alice")
+  doc1, _ := CreateDocument(kb.ID, root.ID, "doc1", "content1", "manual", "md", "alice", 0)
+  doc2, _ := CreateDocument(kb.ID, root.ID, "doc2", "content2", "manual", "md", "alice", 0)
 
   links := []KBLink{
     {SourceDoc: doc1.ID, TargetDoc: doc2.ID, Keyword: "reference"},
@@ -869,7 +869,7 @@ func TestUpdateDocumentsByURL(t *testing.T) {
   var root KBFolder
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
-  doc, err := CreateDocument(kb.ID, root.ID, "web doc", "original", "web", "md", "admin")
+  doc, err := CreateDocument(kb.ID, root.ID, "web doc", "original", "web", "md", "admin", 0)
   if err != nil {
     t.Fatal(err)
   }
@@ -899,8 +899,8 @@ func TestSearchKB(t *testing.T) {
   var root KBFolder
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
-  CreateDocument(kb.ID, root.ID, "golang tutorial", "Go is a compiled programming language", "manual", "md", "alice")
-  CreateDocument(kb.ID, root.ID, "python tutorial", "Python is an interpreted language", "manual", "md", "alice")
+  CreateDocument(kb.ID, root.ID, "golang tutorial", "Go is a compiled programming language", "manual", "md", "alice", 0)
+  CreateDocument(kb.ID, root.ID, "python tutorial", "Python is an interpreted language", "manual", "md", "alice", 0)
 
   // FTS5 may need a small delay or sync; fire the trigger by re-reading
   engine.Exec("UPDATE kb_documents SET title=title WHERE kb_id=?", kb.ID)
@@ -960,8 +960,8 @@ func TestSearchKB_SpecialChars(t *testing.T) {
   var root KBFolder
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
-  CreateDocument(kb.ID, root.ID, "C++ Guide", "guide for C plus plus", "manual", "md", "alice")
-  CreateDocument(kb.ID, root.ID, "C# Guide", "guide for C sharp language", "manual", "md", "alice")
+  CreateDocument(kb.ID, root.ID, "C++ Guide", "guide for C plus plus", "manual", "md", "alice", 0)
+  CreateDocument(kb.ID, root.ID, "C# Guide", "guide for C sharp language", "manual", "md", "alice", 0)
 
   engine.Exec("UPDATE kb_documents SET title=title WHERE kb_id=?", kb.ID)
 

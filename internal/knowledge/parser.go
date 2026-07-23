@@ -50,7 +50,7 @@ func Parse(filename string, data []byte) (*ParseResult, error) {
 type TextParser struct{}
 
 func (TextParser) Parse(filename string, data []byte) (*ParseResult, error) {
-  content := string(data)
+  content := string(ensureUTF8(data))
   title := extractTextTitle(content)
   ext := strings.ToLower(filepath.Ext(filename))
   if ext == ".md" {
@@ -85,11 +85,12 @@ func extractTextTitle(content string) string {
 type HTMLParser struct{}
 
 func (HTMLParser) Parse(filename string, data []byte) (*ParseResult, error) {
-  article, err := readability.FromReader(bytes.NewReader(data), nil)
+  utf8Data := ensureUTF8(data)
+  article, err := readability.FromReader(bytes.NewReader(utf8Data), nil)
   if err != nil {
     return &ParseResult{
       Title:    extractHTMLTitle(data),
-      Content:  string(data),
+      Content:  string(utf8Data),
       FileType: "html",
       FileSize: int64(len(data)),
     }, nil

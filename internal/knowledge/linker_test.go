@@ -70,8 +70,8 @@ func TestLinker_Rebuild(t *testing.T) {
   kb := createTestKB(t, "rebuild-test", "", "admin")
   rootID := getRootFolderID(t, kb.ID)
 
-  store.CreateDocument(kb.ID, rootID, "OAuth2 Guide", "参考 [[JWT Guide]]", "manual", "md", "admin")
-  store.CreateDocument(kb.ID, rootID, "JWT Guide", "用于 [[OAuth2 Guide]]", "manual", "md", "admin")
+  store.CreateDocument(kb.ID, rootID, "OAuth2 Guide", "参考 [[JWT Guide]]", "manual", "md", "admin", 0)
+  store.CreateDocument(kb.ID, rootID, "JWT Guide", "用于 [[OAuth2 Guide]]", "manual", "md", "admin", 0)
 
   linker := NewLinker()
   links, tags, err := linker.Rebuild(kb.ID)
@@ -92,8 +92,8 @@ func TestLinker_RebuildAndStore(t *testing.T) {
   kb := createTestKB(t, "rebuild-store-test", "", "admin")
   rootID := getRootFolderID(t, kb.ID)
 
-  d1, _ := store.CreateDocument(kb.ID, rootID, "Doc A", "参考 [[Doc B]]", "manual", "md", "admin")
-  store.CreateDocument(kb.ID, rootID, "Doc B", "参考 [[Doc A]]", "manual", "md", "admin")
+  d1, _ := store.CreateDocument(kb.ID, rootID, "Doc A", "参考 [[Doc B]]", "manual", "md", "admin", 0)
+  store.CreateDocument(kb.ID, rootID, "Doc B", "参考 [[Doc A]]", "manual", "md", "admin", 0)
 
   linker := NewLinker()
   if err := linker.RebuildAndStore(kb.ID); err != nil {
@@ -111,8 +111,8 @@ func TestLinker_MatchKeywords(t *testing.T) {
   kb := createTestKB(t, "keyword-test", "", "admin")
   rootID := getRootFolderID(t, kb.ID)
 
-  store.CreateDocument(kb.ID, rootID, "OAuth2 Guide", "content", "manual", "md", "admin")
-  store.CreateDocument(kb.ID, rootID, "JWT Guide", "content", "manual", "md", "admin")
+  store.CreateDocument(kb.ID, rootID, "OAuth2 Guide", "content", "manual", "md", "admin", 0)
+  store.CreateDocument(kb.ID, rootID, "JWT Guide", "content", "manual", "md", "admin", 0)
 
   linker := NewLinker()
   links, err := linker.MatchKeywords(kb.ID, []string{"OAuth2 Guide", "Unknown"})
@@ -196,8 +196,8 @@ func TestLinker_RebuildAndStore_ReplaceLinks(t *testing.T) {
   kb := createTestKB(t, "replace-links", "", "admin")
   rootID := getRootFolderID(t, kb.ID)
 
-  d1, _ := store.CreateDocument(kb.ID, rootID, "Doc X", "参考 [[Doc Y]]", "manual", "md", "admin")
-  store.CreateDocument(kb.ID, rootID, "Doc Y", "content without links", "manual", "md", "admin")
+  d1, _ := store.CreateDocument(kb.ID, rootID, "Doc X", "参考 [[Doc Y]]", "manual", "md", "admin", 0)
+  store.CreateDocument(kb.ID, rootID, "Doc Y", "content without links", "manual", "md", "admin", 0)
 
   linker := NewLinker()
   if err := linker.RebuildAndStore(kb.ID); err != nil {

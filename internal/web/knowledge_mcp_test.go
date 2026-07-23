@@ -37,7 +37,7 @@ func TestKBSearch_SearchMode(t *testing.T) {
   kb, _ := store.CreateKnowledgeBase("mcp-search", "", "testadmin")
   folders, _ := store.GetFolderTree(kb.ID)
   rootID := folders[0].ID
-  store.CreateDocument(kb.ID, rootID, "MCP Test Doc", "This is a searchable content for MCP testing", "manual", "md", "testadmin")
+  store.CreateDocument(kb.ID, rootID, "MCP Test Doc", "This is a searchable content for MCP testing", "manual", "md", "testadmin", 0)
 
   w := httptest.NewRecorder()
   c, _ := gin.CreateTestContext(w)
@@ -98,7 +98,7 @@ func TestKBSearch_ReadMode(t *testing.T) {
   kb, _ := store.CreateKnowledgeBase("mcp-read", "", "testadmin")
   folders, _ := store.GetFolderTree(kb.ID)
   rootID := folders[0].ID
-  doc, _ := store.CreateDocument(kb.ID, rootID, "Readable Doc", "This is the content of the document", "manual", "md", "testadmin")
+  doc, _ := store.CreateDocument(kb.ID, rootID, "Readable Doc", "This is the content of the document", "manual", "md", "testadmin", 0)
 
   w := httptest.NewRecorder()
   c, _ := gin.CreateTestContext(w)
@@ -156,7 +156,7 @@ func TestKBSearch_BrowseMode(t *testing.T) {
   kb, _ := store.CreateKnowledgeBase("mcp-browse", "", "testadmin")
   folders, _ := store.GetFolderTree(kb.ID)
   rootID := folders[0].ID
-  store.CreateDocument(kb.ID, rootID, "Browse Doc", "browse content", "manual", "md", "testadmin")
+  store.CreateDocument(kb.ID, rootID, "Browse Doc", "browse content", "manual", "md", "testadmin", 0)
 
   w := httptest.NewRecorder()
   c, _ := gin.CreateTestContext(w)

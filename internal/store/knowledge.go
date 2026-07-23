@@ -473,12 +473,12 @@ func addInheritedFolders(parentID int64, acc map[int64]bool) error {
   return nil
 }
 
-func CreateDocument(kbID, folderID int64, title, content, sourceType, fileType, createdBy string) (*KBDocument, error) {
+func CreateDocument(kbID, folderID int64, title, content, sourceType, fileType, createdBy string, fileSize int) (*KBDocument, error) {
   if err := ensureDB(); err != nil {
     return nil, err
   }
   doc := &KBDocument{
-    KbID: kbID, FolderID: folderID, Title: title, Content: content,
+    KbID: kbID, FolderID: folderID, Title: title, Content: content, FileSize: fileSize,
     SourceType: sourceType, FileType: fileType, CreatedBy: createdBy,
   }
   if _, err := engine.Insert(doc); err != nil {

@@ -287,7 +287,15 @@ const docsLoading = ref(false)
 const docColumns = [
   { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true },
   { title: '类型', dataIndex: 'file_type', key: 'file_type', width: 80 },
-  { title: '大小', dataIndex: 'file_size', key: 'file_size', width: 100 },
+  { title: '大小', dataIndex: 'file_size', key: 'file_size', width: 100,
+    customRender: ({ text }: any) => {
+      const n = parseInt(text)
+      if (!n) return '0 B'
+      if (n < 1024) return n + ' B'
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
+      return (n / (1024 * 1024)).toFixed(1) + ' MB'
+    },
+  },
   { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
   { title: '操作', key: 'actions', width: 80 },
 ]

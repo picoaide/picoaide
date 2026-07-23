@@ -58,7 +58,7 @@ func TestSyncChecker_NetworkError(t *testing.T) {
   var root store.KBFolder
   engine, _ := store.GetEngine()
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
-  store.CreateDocument(kb.ID, root.ID, "error doc", "old", "web", "md", "admin")
+  store.CreateDocument(kb.ID, root.ID, "error doc", "old", "web", "md", "admin", 0)
   engine.Exec("UPDATE kb_documents SET url = ? WHERE kb_id = ?", "http://127.0.0.1:1/nonexistent", kb.ID)
   src, _ := store.CreateSyncSource(kb.ID, "http://127.0.0.1:1/nonexistent", "broken source")
   store.UpdateSyncSource(src.ID, 1, "")
@@ -85,7 +85,7 @@ func TestSyncChecker_Non200Response(t *testing.T) {
   var root store.KBFolder
   engine, _ := store.GetEngine()
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
-  store.CreateDocument(kb.ID, root.ID, "error doc", "old content", "web", "md", "admin")
+  store.CreateDocument(kb.ID, root.ID, "error doc", "old content", "web", "md", "admin", 0)
 
   ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusInternalServerError)
@@ -131,12 +131,12 @@ func TestSyncChecker_MultipleSources(t *testing.T) {
   }))
   defer ts2.Close()
 
-  store.CreateDocument(kb.ID, root.ID, "doc1", "old1", "web", "md", "admin")
+  store.CreateDocument(kb.ID, root.ID, "doc1", "old1", "web", "md", "admin", 0)
   engine.Exec("UPDATE kb_documents SET url = ? WHERE kb_id = ?", ts1.URL, kb.ID)
   src1, _ := store.CreateSyncSource(kb.ID, ts1.URL, "source 1")
   store.UpdateSyncSource(src1.ID, 1, "")
 
-  store.CreateDocument(kb.ID, root.ID, "doc2", "old2", "web", "md", "admin")
+  store.CreateDocument(kb.ID, root.ID, "doc2", "old2", "web", "md", "admin", 0)
   engine.Exec("UPDATE kb_documents SET url = ? WHERE kb_id = ? AND title = 'doc2'", ts2.URL, kb.ID)
   src2, _ := store.CreateSyncSource(kb.ID, ts2.URL, "source 2")
   store.UpdateSyncSource(src2.ID, 1, "")
@@ -190,7 +190,7 @@ func TestSyncChecker(t *testing.T) {
   defer ts.Close()
 
   // Create a document with matching URL
-  _, _ = store.CreateDocument(kb.ID, root.ID, "external doc", "old content", "web", "md", "admin")
+  _, _ = store.CreateDocument(kb.ID, root.ID, "external doc", "old content", "web", "md", "admin", 0)
   engine.Exec("UPDATE kb_documents SET url = ? WHERE kb_id = ?", ts.URL, kb.ID)
 
   src, err := store.CreateSyncSource(kb.ID, ts.URL, "test source")
