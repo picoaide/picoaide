@@ -333,10 +333,10 @@ func (s *Server) handleAdminFolderDocuments(c *gin.Context) {
     writeError(c, http.StatusInternalServerError, "数据库连接失败")
     return
   }
-  var docs []store.KBDocument
-  if err := e.Where("folder_id = ?", folderID).Cols("id", "kb_id", "folder_id", "title", "file_type", "file_size", "created_by", "created_at", "updated_at").OrderBy("title").Find(&docs); err != nil {
+  rows, err := e.SQL("SELECT id, kb_id, folder_id, title, file_type, file_size, created_by, created_at, updated_at FROM kb_documents WHERE folder_id = ? ORDER BY title", folderID).QueryString()
+  if err != nil {
     writeError(c, http.StatusInternalServerError, "获取文档列表失败")
     return
   }
-  writeJSON(c, http.StatusOK, gin.H{"success": true, "data": docs})
+  writeJSON(c, http.StatusOK, gin.H{"success": true, "data": rows})
 }
