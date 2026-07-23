@@ -48,12 +48,32 @@ export const api = {
   async postForm<T = any>(path: string, formData: FormData): Promise<T> {
     const csrf = await getCsrf()
     const qs = path.includes('?') ? '&' : '?'
-    const res = await fetch(BASE + path + qs + '_csrf=' + encodeURIComponent(csrf), {
-      method: 'POST',
-      credentials: 'include',
-      body: formData,
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', BASE + path + qs + '_csrf=' + encodeURIComponent(csrf))
+      xhr.withCredentials = true
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(JSON.parse(xhr.responseText)) }
+          catch { reject(new Error(xhr.responseText || '上传失败')) }
+        } else {
+          try {
+            const err = JSON.parse(xhr.responseText)
+            reject(new Error(err.error || err.message || '上传失败'))
+          } catch { reject(new Error(xhr.responseText || '上传失败')) }
+        }
+      }
+      xhr.onerror = () => {
+        // XHR onerror fires for network-level failures.
+        // If the server actually processed the request (status available via xhr.status),
+        // we try to parse it. Otherwise reject.
+        if (xhr.status > 0 && xhr.responseText) {
+          try { resolve(JSON.parse(xhr.responseText)); return }
+          catch { reject(new Error(xhr.responseText || '上传失败')); return }
+        }
+        reject(new Error('网络错误'))
+      }
+      xhr.send(formData)
     })
-    if (!res.ok) throw new Error(await res.text())
-    return res.json()
   },
 }
