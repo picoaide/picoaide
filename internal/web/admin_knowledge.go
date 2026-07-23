@@ -340,3 +340,21 @@ func (s *Server) handleAdminFolderDocuments(c *gin.Context) {
   }
   writeJSON(c, http.StatusOK, gin.H{"success": true, "data": rows})
 }
+
+// handleAdminDeleteDocument 删除文档
+func (s *Server) handleAdminDeleteDocument(c *gin.Context) {
+  if s.requireSuperadmin(c) == "" {
+    return
+  }
+  idStr := c.Param("id")
+  id, err := strconv.ParseInt(idStr, 10, 64)
+  if err != nil {
+    writeError(c, http.StatusBadRequest, "无效的 ID")
+    return
+  }
+  if err := store.DeleteDocument(id); err != nil {
+    writeError(c, http.StatusNotFound, err.Error())
+    return
+  }
+  writeJSON(c, http.StatusOK, gin.H{"success": true})
+}

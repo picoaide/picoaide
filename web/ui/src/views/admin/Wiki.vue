@@ -53,7 +53,15 @@
           </template>
           <a-tabs v-model:activeKey="folderTab">
             <a-tab-pane key="docs" tab="文档">
-              <a-table :data-source="documents" :columns="docColumns" row-key="id" :loading="docsLoading" size="small" />
+              <a-table :data-source="documents" :columns="docColumns" row-key="id" :loading="docsLoading" size="small">
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'actions'">
+                <a-popconfirm title="确定删除此文档？" @confirm="deleteDocument(record)">
+                  <a-button type="link" size="small" danger>删除</a-button>
+                </a-popconfirm>
+              </template>
+            </template>
+          </a-table>
             </a-tab-pane>
             <a-tab-pane key="perms" tab="访问权限">
               <a-form layout="inline">
@@ -281,6 +289,7 @@ const docColumns = [
   { title: '类型', dataIndex: 'file_type', key: 'file_type', width: 80 },
   { title: '大小', dataIndex: 'file_size', key: 'file_size', width: 100 },
   { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
+  { title: '操作', key: 'actions', width: 80 },
 ]
 
 const loadDocuments = async (folderId: number) => {
@@ -290,6 +299,16 @@ const loadDocuments = async (folderId: number) => {
     documents.value = res.data || []
   } catch { documents.value = [] }
   docsLoading.value = false
+}
+
+const deleteDocument = async (record: any) => {
+  try {
+    await api.delete('/admin/knowledge-bases/documents/' + record.id)
+    message.success('文档已删除')
+    if (selectedFolder.value) loadDocuments(selectedFolder.value.id)
+  } catch (e: any) {
+    message.error(e.message || '删除失败')
+  }
 }
 
 const loadFolderPermissions = async (folderId: number) => {

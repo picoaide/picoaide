@@ -187,14 +187,65 @@ func DeleteKnowledgeBase(id int64) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  affected, err := engine.Where("id = ?", id).Delete(&KnowledgeBase{})
+  session := engine.NewSession()
+  defer session.Close()
+  if err := session.Begin(); err != nil {
+    return err
+  }
+  // 获取所有文件夹 ID
+  var folders []KBFolder
+  if err := session.Where("kb_id = ?", id).Find(&folders); err != nil {
+    session.Rollback()
+    return err
+  }
+  // 收集所有文件夹 ID
+  var folderIDs []int64
+  for _, f := range folders {
+    folderIDs = append(folderIDs, f.ID)
+  }
+  // 删除文档链接和标签
+  for _, fid := range folderIDs {
+    if _, err := session.Exec("DELETE FROM kb_links WHERE doc_id IN (SELECT id FROM kb_documents WHERE folder_id = ?)", fid); err != nil {
+      session.Rollback()
+      return err
+    }
+    if _, err := session.Exec("DELETE FROM kb_tags WHERE doc_id IN (SELECT id FROM kb_documents WHERE folder_id = ?)", fid); err != nil {
+      session.Rollback()
+      return err
+    }
+  }
+  // 删除所有文档
+  if _, err := session.Where("kb_id = ?", id).Delete(&KBDocument{}); err != nil {
+    session.Rollback()
+    return err
+  }
+  // 删除文件夹授权
+  for _, fid := range folderIDs {
+    if _, err := session.Where("folder_id = ?", fid).Delete(&KBFolderUser{}); err != nil {
+      session.Rollback()
+      return err
+    }
+    if _, err := session.Where("folder_id = ?", fid).Delete(&KBFolderGroup{}); err != nil {
+      session.Rollback()
+      return err
+    }
+  }
+  // 删除文件夹
+  if _, err := session.Where("kb_id = ?", id).Delete(&KBFolder{}); err != nil {
+    session.Rollback()
+    return err
+  }
+  // 删除知识库
+  affected, err := session.Where("id = ?", id).Delete(&KnowledgeBase{})
   if err != nil {
+    session.Rollback()
     return err
   }
   if affected == 0 {
+    session.Rollback()
     return fmt.Errorf("knowledge base %d not found", id)
   }
-  return nil
+  return session.Commit()
 }
 
 func CreateFolder(kbID int64, parentID *int64, name string) (*KBFolder, error) {
@@ -237,14 +288,48 @@ func DeleteFolder(id int64) error {
   if err := ensureDB(); err != nil {
     return err
   }
-  affected, err := engine.Where("id = ?", id).Delete(&KBFolder{})
+  session := engine.NewSession()
+  defer session.Close()
+  if err := session.Begin(); err != nil {
+    return err
+  }
+  // 删除子文件夹
+  var children []KBFolder
+  if err := session.Where("parent_id = ?", id).Find(&children); err != nil {
+    session.Rollback()
+    return err
+  }
+  for _, child := range children {
+    if err := DeleteFolder(child.ID); err != nil {
+      session.Rollback()
+      return err
+    }
+  }
+  // 删除文件夹内文档
+  if _, err := session.Where("folder_id = ?", id).Delete(&KBDocument{}); err != nil {
+    session.Rollback()
+    return err
+  }
+  // 删除文件夹授权
+  if _, err := session.Where("folder_id = ?", id).Delete(&KBFolderUser{}); err != nil {
+    session.Rollback()
+    return err
+  }
+  if _, err := session.Where("folder_id = ?", id).Delete(&KBFolderGroup{}); err != nil {
+    session.Rollback()
+    return err
+  }
+  // 删除文件夹
+  affected, err := session.Where("id = ?", id).Delete(&KBFolder{})
   if err != nil {
+    session.Rollback()
     return err
   }
   if affected == 0 {
+    session.Rollback()
     return fmt.Errorf("folder %d not found", id)
   }
-  return nil
+  return session.Commit()
 }
 
 func AddFolderUser(folderID int64, username string) error {
@@ -400,6 +485,28 @@ func CreateDocument(kbID, folderID int64, title, content, sourceType, fileType, 
     return nil, fmt.Errorf("create document: %w", err)
   }
   return doc, nil
+}
+
+func DeleteDocument(id int64) error {
+  if err := ensureDB(); err != nil {
+    return err
+  }
+  _, err := engine.Where("doc_id = ?", id).Delete(&KBLink{})
+  if err != nil {
+    return err
+  }
+  _, err = engine.Where("doc_id = ?", id).Delete(&KBTag{})
+  if err != nil {
+    return err
+  }
+  affected, err := engine.Where("id = ?", id).Delete(&KBDocument{})
+  if err != nil {
+    return err
+  }
+  if affected == 0 {
+    return fmt.Errorf("document %d not found", id)
+  }
+  return nil
 }
 
 func GetDocumentsByKB(kbID int64) ([]KBDocument, error) {
