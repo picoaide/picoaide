@@ -241,10 +241,15 @@ const kbRowClick = (record: any) => ({
   onClick: () => selectKB(record),
 })
 
+let loadFolderTreeSeq = 0
+
 const loadFolderTree = async () => {
   if (!selectedKB.value) return
+  const seq = ++loadFolderTreeSeq
+  const kbId = selectedKB.value.id
   treeLoading.value = true
-  const res = await api.get('/admin/knowledge-bases/' + selectedKB.value.id + '/folders')
+  const res = await api.get('/admin/knowledge-bases/' + kbId + '/folders')
+  if (seq !== loadFolderTreeSeq || selectedKB.value?.id !== kbId) return
   const folders = res.data || []
   folderTreeData.value = buildTree(folders)
   treeLoading.value = false
@@ -457,9 +462,9 @@ const startFileUpload = async () => {
     if (selectedFolder.value) formData.append('folder_id', String(selectedFolder.value.id))
     if (autoClassify.value) formData.append('auto_classify', 'true')
     const res = await api.postForm('/admin/knowledge-bases/' + selectedKB.value.id + '/import/upload', formData)
-    importTaskId.value = res.task_id
+    importTaskId.value = res.data?.task_id || res.task_id
     importProgress.value = 10
-    pollProgress(res.task_id)
+    pollProgress(importTaskId.value)
   } catch (e: any) {
     message.error(e.message || '上传失败')
     importing.value = false
@@ -477,9 +482,9 @@ const startURLImport = async () => {
     const res = await api.post('/admin/knowledge-bases/' + selectedKB.value.id + '/import/web', {
       url: importURL.value.trim(),
     })
-    importTaskId.value = res.task_id
+    importTaskId.value = res.data?.task_id || res.task_id
     importProgress.value = 10
-    pollProgress(res.task_id)
+    pollProgress(importTaskId.value)
   } catch (e: any) {
     message.error(e.message || '导入失败')
     importing.value = false

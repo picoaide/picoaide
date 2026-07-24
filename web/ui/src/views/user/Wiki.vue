@@ -39,6 +39,17 @@
           <a-empty v-else description="未找到相关文档" />
         </div>
 
+        <div v-else-if="documents.length > 0 && !currentDoc">
+          <h3>文件夹内容</h3>
+          <a-list :data-source="documents">
+            <template #renderItem="{ item }">
+              <a-list-item @click="loadDocument(item.id)" style="cursor:pointer">
+                <a-list-item-meta :title="item.title" :description="item.file_type" />
+              </a-list-item>
+            </template>
+          </a-list>
+        </div>
+
         <div v-else-if="currentDoc">
           <a-page-header :title="currentDoc.title" @back="currentDoc = null" />
           <div v-if="currentDoc.tags?.length" style="margin-bottom: 8px">
@@ -221,6 +232,8 @@ const onFolderSelect = async (_keys: any, info: any) => {
   if (node.isLeaf && node.doc_id) {
     loadDocument(node.doc_id)
   } else {
+    currentDoc.value = null
+    searchQuery.value = ''
     currentFolder.value = parseInt(node.key.replace('folder-', ''), 10)
     if (!isNaN(currentFolder.value)) {
       browseFolder(currentFolder.value)

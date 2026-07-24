@@ -34,7 +34,8 @@ func (s *Server) handleUserKBList(c *gin.Context) {
 
 // handleUserKBOverview 知识库概览 + 文件夹树
 func (s *Server) handleUserKBOverview(c *gin.Context) {
-  if s.requireRegularUser(c) == "" {
+  username := s.requireRegularUser(c)
+  if username == "" {
     return
   }
   idStr := c.Param("id")
@@ -53,7 +54,14 @@ func (s *Server) handleUserKBOverview(c *gin.Context) {
     writeError(c, 500, "获取文件夹树失败")
     return
   }
-  writeJSON(c, 200, gin.H{"success": true, "data": gin.H{"kb": kb, "folders": folders}})
+  docs, err := store.GetAccessibleDocuments(username, id)
+  if err != nil {
+    writeError(c, 500, "获取文档失败")
+    return
+  }
+  writeJSON(c, 200, gin.H{"success": true, "data": gin.H{
+    "kb": kb, "folders": folders, "documents": docs,
+  }})
 }
 
 // handleUserKBNavigate 浏览文件夹内容
@@ -100,8 +108,20 @@ func (s *Server) handleUserKBNavigate(c *gin.Context) {
     return
   }
 
-  // ponytail: pagination params accepted but not applied; add when BrowseFolder supports it
-  writeJSON(c, 200, gin.H{"success": true, "data": gin.H{"folders": subFolders, "documents": docs}})
+  // 收集所有文档的标签
+  var allTags []store.KBTag
+  seenTag := make(map[string]bool)
+  for _, d := range docs {
+    tags, _ := store.GetDocumentTags(d.ID)
+    for _, t := range tags {
+      if !seenTag[t.Tag] {
+        seenTag[t.Tag] = true
+        allTags = append(allTags, t)
+      }
+    }
+  }
+
+  writeJSON(c, 200, gin.H{"success": true, "data": gin.H{"folders": subFolders, "documents": docs, "tags": allTags}})
 }
 
 // handleUserKBRead 读取文档

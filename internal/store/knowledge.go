@@ -549,6 +549,31 @@ func GetDocumentsByKB(kbID int64) ([]KBDocument, error) {
   return docs, nil
 }
 
+// GetAccessibleDocuments 返回用户有权限访问的所有文档（按文件夹 ID 过滤）
+func GetAccessibleDocuments(username string, kbID int64) ([]KBDocument, error) {
+  if err := ensureDB(); err != nil {
+    return nil, err
+  }
+  accessible, err := GetAccessibleFolderIDs(username)
+  if err != nil {
+    return nil, err
+  }
+  if len(accessible) == 0 {
+    return nil, nil
+  }
+  var docs []KBDocument
+  q := fmt.Sprintf("SELECT * FROM kb_documents WHERE kb_id = ? AND folder_id IN (%s) ORDER BY title", placeholders(len(accessible)))
+  args := make([]interface{}, 0, len(accessible)+1)
+  args = append(args, kbID)
+  for _, fid := range accessible {
+    args = append(args, fid)
+  }
+  if err := engine.SQL(q, args...).Find(&docs); err != nil {
+    return nil, err
+  }
+  return docs, nil
+}
+
 // GetDocumentByID returns a document only if the user has permission to access it.
 func GetDocumentByID(username string, docID int64) (*KBDocument, error) {
   if err := ensureDB(); err != nil {
