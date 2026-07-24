@@ -205,7 +205,7 @@ func DeleteKnowledgeBase(id int64) error {
   }
   // 删除文档链接和标签
   for _, fid := range folderIDs {
-    if _, err := session.Exec("DELETE FROM kb_links WHERE doc_id IN (SELECT id FROM kb_documents WHERE folder_id = ?)", fid); err != nil {
+    if _, err := session.Exec("DELETE FROM kb_links WHERE source_doc IN (SELECT id FROM kb_documents WHERE folder_id = ?) OR target_doc IN (SELECT id FROM kb_documents WHERE folder_id = ?)", fid, fid); err != nil {
       session.Rollback()
       return err
     }

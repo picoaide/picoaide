@@ -188,11 +188,11 @@ const loadHistory = async () => {
       chatList.value = [{
         id: Date.now().toString(),
         title: data.messages[0]?.content?.slice(0, 20) || '历史对话',
-        messages: data.messages.map((m: any, i: number) => ({
-          id: `${Date.now()}-${i}`,
+        messages: data.messages.map((m: any) => ({
+          id: m.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           role: m.role || 'assistant',
           content: m.content || '',
-          timestamp: Date.now(),
+          timestamp: m.timestamp || Date.now(),
         })),
       }]
       currentChatId.value = chatList.value[0]?.id || ''
@@ -271,6 +271,26 @@ const connectSSE = (runId: string) => {
   // 引用该条消息，后续在 onmessage 中直接追加文本
   const currentMsg = chat.messages[chat.messages.length - 1]
 
+  // 打字机节流：缓冲累积 + requestAnimationFrame 刷出
+  let textBuffer = ''
+  let rafId: number | null = null
+  let hasRendered = false
+
+  const flushText = () => {
+    if (textBuffer) {
+      currentMsg.content += textBuffer
+      textBuffer = ''
+      scrollToBottom()
+    }
+    rafId = null
+  }
+
+  const scheduleFlush = () => {
+    if (!rafId) {
+      rafId = requestAnimationFrame(flushText)
+    }
+  }
+
   evtSource = new EventSource(`/api/user/chat/stream?run_id=${encodeURIComponent(runId)}`)
 
   evtSource.onmessage = (event) => {
@@ -281,30 +301,47 @@ const connectSSE = (runId: string) => {
       if (data.type === 'text_delta' || data.type === 'delta' || data.type === 'content') {
         const textChunk = data.data || data.content || data.delta || ''
         if (textChunk) {
-          currentMsg.content += textChunk
-          scrollToBottom()
+          if (!hasRendered) {
+            // 第一块立即显示（切换掉 typing-indicator）
+            currentMsg.content += textChunk
+            hasRendered = true
+            scrollToBottom()
+          } else {
+            // 后续累积到 buffer，在 rAF 回调中刷出
+            textBuffer += textChunk
+            scheduleFlush()
+          }
         }
       } 
       // 2. 匹配传输结束指令
       else if (data.type === 'done' || data.type === 'end' || data.type === 'finish') {
+        flushText()
         if (!currentMsg.content) currentMsg.content = '（空回复）'
         closeSSE()
       } 
       // 3. 匹配后端抛出的错误信息
       else if (data.type === 'error') {
+        flushText()
         currentMsg.content += `\n\n**错误:** ${data.data || '生成中断'}`
         closeSSE()
       }
     } catch {
       // 容错机制：如果后端没有传 JSON，直接发送了纯文本
       if (event.data) {
-        currentMsg.content += event.data
-        scrollToBottom()
+        if (!hasRendered) {
+          currentMsg.content += event.data
+          hasRendered = true
+          scrollToBottom()
+        } else {
+          textBuffer += event.data
+          scheduleFlush()
+        }
       }
     }
   }
 
   evtSource.onerror = () => {
+    flushText()
     closeSSE()
     if (currentMsg && !currentMsg.content) {
       currentMsg.content = '连接中断，请重试'

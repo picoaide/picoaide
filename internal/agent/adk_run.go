@@ -8,6 +8,7 @@ import (
 
   "google.golang.org/adk/v2/agent"
   "google.golang.org/adk/v2/agent/llmagent"
+  "google.golang.org/adk/v2/model"
   "google.golang.org/adk/v2/runner"
   "google.golang.org/adk/v2/session"
   "google.golang.org/adk/v2/tool"
@@ -15,8 +16,9 @@ import (
 )
 
 // ADKRun 使用 ADK 的 llmagent + runner 处理一条消息。
+// historyMsgs 可选，用于预填会话上下文（跨轮次记忆）
 func ADKRun(ctx context.Context, cfg *AgentConfig, p Provider, toolsH *ToolRegistry,
-  mcpToolsets []tool.Toolset, sessionSvc session.Service, sysPrompt string, msg *Message, cb func(StreamEvent)) (err error) {
+  mcpToolsets []tool.Toolset, sessionSvc session.Service, sysPrompt string, msg *Message, cb func(StreamEvent), historyMsgs ...*Message) (err error) {
 
   defer func() {
     if r := recover(); r != nil {
@@ -27,6 +29,59 @@ func ADKRun(ctx context.Context, cfg *AgentConfig, p Provider, toolsH *ToolRegis
   }()
 
   slog.Debug("adk_run.start")
+
+  // 预填会话上下文（跨轮次记忆）
+  if len(historyMsgs) > 0 {
+    getResp, getErr := sessionSvc.Get(ctx, &session.GetRequest{
+      AppName:   "picoaide",
+      UserID:    cfg.UserID,
+      SessionID: "default",
+    })
+    var sess session.Session
+    if getErr != nil {
+      createResp, createErr := sessionSvc.Create(ctx, &session.CreateRequest{
+        AppName:   "picoaide",
+        UserID:    cfg.UserID,
+        SessionID: "default",
+      })
+      if createErr == nil {
+        sess = createResp.Session
+      }
+    } else {
+      sess = getResp.Session
+    }
+    if sess != nil {
+      var appended int
+      for _, h := range historyMsgs {
+        author := "user"
+        role := "user"
+        if h.Role == RoleAssistant {
+          author = "assistant"
+          role = "model"
+        } else if h.Role == RoleTool {
+          author = "tool"
+          role = "tool"
+        }
+        evt := &session.Event{
+          Author: author,
+          LLMResponse: model.LLMResponse{
+            Content: &genai.Content{
+              Role:  role,
+              Parts: []*genai.Part{{Text: h.Content}},
+            },
+          },
+          Actions: session.EventActions{
+            StateDelta:    make(map[string]any),
+            ArtifactDelta: make(map[string]int64),
+          },
+        }
+        if appendErr := sessionSvc.AppendEvent(ctx, sess, evt); appendErr == nil {
+          appended++
+        }
+      }
+      slog.Debug("adk_run.history_injected", "count", appended, "total", len(historyMsgs))
+    }
+  }
 
   adapter := NewADKProviderAdapter(p, cfg.Model.Provider)
   adapter.SetDisableTools(cfg.Model.DisableToolCall)

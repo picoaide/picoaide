@@ -4,9 +4,11 @@ import (
   "bufio"
   "encoding/json"
   "fmt"
+  "io/fs"
   "net/http"
   "os"
   "path/filepath"
+  "sort"
   "strconv"
   "strings"
 
@@ -452,8 +454,10 @@ func (s *Server) handleUserInfo(c *gin.Context) {
 }
 
 type chatMessage struct {
-  Role    string `json:"role"`
-  Content string `json:"content"`
+  ID        string `json:"id"`
+  Role      string `json:"role"`
+  Content   string `json:"content"`
+  Timestamp int64  `json:"timestamp"`
 }
 
 // handleChatHistory 返回当前用户的完整对话历史
@@ -474,14 +478,29 @@ func (s *Server) handleChatHistory(c *gin.Context) {
     return
   }
   if entries, err := os.ReadDir(sessDir); err == nil {
-    for _, entry := range entries {
-      if !entry.IsDir() {
+    // 按修改时间降序排列，取最新会话目录
+    var dirs []string
+    for _, e := range entries {
+      if !e.IsDir() {
         continue
       }
-      sid := entry.Name()
-      if err := util.SafePathSegment(sid); err != nil {
+      if util.SafePathSegment(e.Name()) != nil {
         continue
       }
+      dirs = append(dirs, e.Name())
+    }
+    if len(dirs) > 0 {
+      dirFS := os.DirFS(sessDir)
+      sort.Slice(dirs, func(i, j int) bool {
+        fi, errI := fs.Stat(dirFS, dirs[i])
+        fj, errJ := fs.Stat(dirFS, dirs[j])
+        if errI != nil || errJ != nil {
+          return errI == nil
+        }
+        return fi.ModTime().After(fj.ModTime())
+      })
+      sid := dirs[0]
+
       // 读 live.jsonl（消息历史）
       liveFile := filepath.Join(sessDir, sid, "live.jsonl")
       if strings.HasPrefix(filepath.Clean(liveFile), sessDir+string(os.PathSeparator)) {
@@ -512,7 +531,6 @@ func (s *Server) handleChatHistory(c *gin.Context) {
           f.Close()
         }
       }
-      break // 只读第一个会话目录
     }
   }
   if messages == nil {

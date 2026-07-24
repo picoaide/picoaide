@@ -1,18 +1,17 @@
 package web
 
 import (
+  "bufio"
   "context"
   "crypto/rand"
   "encoding/hex"
   "encoding/json"
   "errors"
   "fmt"
-  "io/fs"
   "log/slog"
   "net/http"
   "os"
   "path/filepath"
-  "sort"
   "strings"
   "sync"
   "time"
@@ -43,10 +42,11 @@ type chatRun struct {
   cancel   context.CancelFunc
   source   string // "web" 或 "im"，用于决定是否转发事件到 IM
 
-  mu     sync.Mutex
-  events []streamEvent
-  subs   map[chan struct{}]bool
-  done   bool
+  mu        sync.Mutex
+  events    []streamEvent
+  subs      map[chan struct{}]bool
+  done      bool
+  persisted bool // 标记是否已持久化，防止重复写入
 }
 
 var activeRuns sync.Map // map[string]*chatRun
@@ -280,61 +280,139 @@ func (s *Server) forwardEventToIM(username string, evt sandbox.StreamEvent, extr
   }(text)
 }
 
+// liveMsg 是写入 live.jsonl 的消息格式
+type liveMsg struct {
+  ID        string `json:"id"`
+  Role      string `json:"role"`
+  Content   string `json:"content"`
+  Timestamp int64  `json:"timestamp"`
+}
+
 // ============================================================
 // persistRunEvents 在 run 结束后将事件持久化到 session 目录，供刷新后还原
+// 写入 events.jsonl（SSE 重连用）和 live.jsonl（历史展示用）
+// 幂等：已标记 persisted 的 run 不会重复写入
 func (s *Server) persistRunEvents(username string, run *chatRun) {
-  sessDir := filepath.Join(config.WorkDir(), "users", username, "sessions")
-  entries, err := os.ReadDir(sessDir)
-  if err != nil {
+  run.mu.Lock()
+  if run.persisted {
+    run.mu.Unlock()
     return
   }
-  if len(entries) == 0 {
+  run.persisted = true
+  events := make([]streamEvent, len(run.events))
+  copy(events, run.events)
+  run.mu.Unlock()
+
+  // 1. 计算会话目录（与 picoagent 一致: sk_v1_<sha256>）
+  scope := agent.SessionScope{
+    Version:    1,
+    AgentID:    "pico",
+    Account:    username,
+    Dimensions: []string{"user"},
+    Values:     map[string]string{"user": username},
+  }
+  sessionKey := agent.SanitizeKey(agent.BuildSessionKey(scope))
+  sessDir := filepath.Join(config.WorkDir(), "users", username, "sessions", sessionKey)
+  if err := os.MkdirAll(sessDir, 0755); err != nil {
+    slog.Error("chat.persist_mkdir_failed", "error", err.Error())
     return
   }
-  // 按修改时间排序，取最新会话目录
-  sessions := make([]string, 0, len(entries))
-  for _, e := range entries {
-    if e.IsDir() {
-      name := e.Name()
-      if strings.Contains(name, "/") || strings.Contains(name, "\\") || name == ".." {
-        continue
-      }
-      sessions = append(sessions, name)
+
+  // 2. 写 events.jsonl（供 SSE 重连，仅当前 run 的事件）
+  eventsFile := filepath.Join(sessDir, "events.jsonl")
+  if f, err := os.Create(eventsFile); err == nil {
+    for _, evt := range events {
+      line, _ := json.Marshal(evt)
+      f.Write(line)
+      f.Write([]byte{'\n'})
     }
+    f.Close()
   }
-  if len(sessions) == 0 {
-    return
-  }
-  // 按修改时间降序排列，最新的在最前面
-  dirFS := os.DirFS(sessDir)
-  sort.Slice(sessions, func(i, j int) bool {
-    fi, errI := fs.Stat(dirFS, sessions[i])
-    fj, errJ := fs.Stat(dirFS, sessions[j])
-    if errI != nil || errJ != nil {
-      return errI == nil
-    }
-    return fi.ModTime().After(fj.ModTime())
-  })
-  sessionName := filepath.Base(sessions[0])
-  if strings.ContainsAny(sessionName, "/\\") || sessionName == "." || sessionName == ".." || sessionName == "" {
-    return
-  }
-  eventsFile := filepath.Join(sessDir, sessionName, "events.jsonl")
-  if !strings.HasPrefix(filepath.Clean(eventsFile), sessDir+string(os.PathSeparator)) {
-    return
-  }
-  f, err := os.Create(eventsFile)
+
+  // 3. 从 events 重构消息，追加到 live.jsonl（累积所有轮次历史）
+  liveFile := filepath.Join(sessDir, "live.jsonl")
+
+  // 先读已有消息，计算起始 msgIdx
+  existing := countLines(liveFile)
+  msgIdx := existing
+
+  f, err := os.OpenFile(liveFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
   if err != nil {
+    slog.Error("chat.persist_live_failed", "error", err.Error())
     return
   }
   defer f.Close()
-  run.mu.Lock()
-  defer run.mu.Unlock()
-  for _, evt := range run.events {
-    line, _ := json.Marshal(evt)
-    f.Write(line)
-    f.Write([]byte{'\n'})
+
+  var textBuf strings.Builder
+  now := time.Now().UnixMilli()
+  enc := json.NewEncoder(f)
+
+  writeAssistant := func() {
+    if textBuf.Len() == 0 {
+      return
+    }
+    enc.Encode(liveMsg{
+      ID:        fmt.Sprintf("msg-%d", msgIdx),
+      Role:      "assistant",
+      Content:   textBuf.String(),
+      Timestamp: now,
+    })
+    msgIdx++
+    textBuf.Reset()
   }
+
+  writeUser := func(content string) {
+    enc.Encode(liveMsg{
+      ID:        fmt.Sprintf("msg-%d", msgIdx),
+      Role:      "user",
+      Content:   content,
+      Timestamp: now,
+    })
+    msgIdx++
+  }
+
+  for _, evt := range events {
+    switch evt.Type {
+    case "user_message":
+      writeAssistant()
+      var content string
+      if json.Unmarshal(evt.Data, &content) == nil {
+        writeUser(content)
+      }
+    case "text_delta":
+      var chunk string
+      if json.Unmarshal(evt.Data, &chunk) == nil {
+        textBuf.WriteString(chunk)
+      }
+    case "error":
+      writeAssistant()
+      var errMsg string
+      if json.Unmarshal(evt.Data, &errMsg) == nil {
+        textBuf.WriteString("错误: " + errMsg)
+      }
+      writeAssistant()
+    case "finish":
+      writeAssistant()
+    }
+  }
+  writeAssistant()
+}
+
+// countLines 返回文件行数，用于计算下一条消息的索引
+func countLines(path string) int {
+  f, err := os.Open(path)
+  if err != nil {
+    return 0
+  }
+  defer f.Close()
+  s := bufio.NewScanner(f)
+  var n int
+  for s.Scan() {
+    if len(s.Bytes()) > 0 {
+      n++
+    }
+  }
+  return n
 }
 
 // handleChatActive 返回当前是否有活跃会话

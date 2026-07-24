@@ -11,9 +11,7 @@ export const api = {
   },
   async post<T = any>(path: string, body?: Record<string, any>): Promise<T> {
     const heads: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (body) {
-      heads['X-CSRF-Token'] = await getCsrf()
-    }
+    heads['X-CSRF-Token'] = await getCsrf()
     const res = await fetch(BASE + path, {
       method: 'POST',
       credentials: 'include',

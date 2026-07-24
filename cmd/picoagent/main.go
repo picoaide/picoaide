@@ -247,7 +247,7 @@ msgLoop:
       data, _ := json.Marshal(event)
       fmt.Println(string(data))
       os.Stdout.Sync()
-    })
+    }, history...)
     adkCancel()
 
     if err != nil {

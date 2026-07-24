@@ -325,7 +325,7 @@ const handleAddGrant = async () => {
   addGrantLoading.value = true
   try {
     await api.post('/admin/mcp/servers/grants/add', {
-      server_id: String(grantServerId.value),
+      server_id: grantServerId.value,
       grant_type: grantForm.grant_type,
       grant_value: grantForm.grant_type === '*' ? '*' : grantForm.grant_value,
     })
