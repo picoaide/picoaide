@@ -263,9 +263,18 @@ const browseFolder = async (folderId: number) => {
 const loadDocument = async (docId: number) => {
   loading.value = true
   try {
-    const res = await api.get<{ success: boolean; data: Document }>('/user/knowledge-bases/documents/' + docId)
+    const res = await api.get<{ success: boolean; data: any }>('/user/knowledge-bases/documents/' + docId)
     if (res.success) {
-      currentDoc.value = res.data
+      const raw = res.data
+      if (raw.doc) {
+        const doc = raw.doc as Document
+        doc.tags = raw.tags || []
+        doc.links = raw.links || []
+        doc.backlinks = raw.backlinks || []
+        currentDoc.value = doc
+      } else {
+        currentDoc.value = raw as Document
+      }
       searchQuery.value = ''
     }
   } catch (e: any) {
