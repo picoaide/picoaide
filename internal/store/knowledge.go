@@ -664,6 +664,7 @@ func SearchKB(username, query string, page, pageSize int) ([]SearchResult, int64
     JOIN kb_documents d ON f.rowid = d.id
     WHERE kb_documents_fts MATCH ?
     AND d.folder_id IN (%s)
+    AND length(d.content) > 50
     ORDER BY rank
     LIMIT ? OFFSET ?`, placeholders(len(accessible)))
 
@@ -683,7 +684,8 @@ func SearchKB(username, query string, page, pageSize int) ([]SearchResult, int64
     FROM kb_documents_fts f
     JOIN kb_documents d ON f.rowid = d.id
     WHERE kb_documents_fts MATCH ?
-    AND d.folder_id IN (%s)`, placeholders(len(accessible)))
+    AND d.folder_id IN (%s)
+    AND length(d.content) > 50`, placeholders(len(accessible)))
   countArgs := make([]interface{}, 0, len(accessible)+1)
   countArgs = append(countArgs, query)
   for _, fid := range accessible {

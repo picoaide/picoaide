@@ -58,7 +58,7 @@ func handleKBSearch(s *Server, c *gin.Context, id json.Number, args map[string]i
       })
       return
     }
-    maxLen := 4000
+    maxLen := 50000
     if ml, ok := args["max_length"].(float64); ok && ml > 0 {
       maxLen = int(ml)
     }
