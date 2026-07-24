@@ -1,7 +1,17 @@
 <template>
   <div class="wiki-container">
     <div class="wiki-topbar">
-      <a-input-search v-model:value="searchQuery" placeholder="搜索知识库..." style="width: 400px" @search="doSearch" />
+      <a-space style="display:flex; flex:1">
+        <a-select
+          v-if="kbs.length > 1"
+          v-model:value="currentKBId"
+          style="width: 200px"
+          :options="kbs.map(k => ({ label: k.name, value: k.id }))"
+          @change="onKBChange"
+        />
+        <div v-else-if="currentKB" style="font-weight:500; min-width:120px">{{ currentKB.name }}</div>
+        <a-input-search v-model:value="searchQuery" placeholder="搜索知识库..." style="max-width: 400px; flex:1" @search="doSearch" />
+      </a-space>
     </div>
 
     <div class="wiki-body">
@@ -28,7 +38,7 @@
 
       <div class="wiki-content">
         <div v-if="searchQuery">
-          <h3>搜索结果: "{{ searchQuery }}"</h3>
+          <h3>搜索结果: "{{ searchQuery }}" <span v-if="searchTotal > 0">(共 {{ searchTotal }} 条)</span></h3>
           <a-list v-if="searchResults.length > 0" :data-source="searchResults">
             <template #renderItem="{ item }">
               <a-list-item @click="loadDocument(item.doc_id)" style="cursor:pointer">
@@ -36,18 +46,29 @@
               </a-list-item>
             </template>
           </a-list>
-          <a-empty v-else description="未找到相关文档" />
+          <a-empty v-else-if="!loading" description="未找到相关文档，请尝试其他关键词" />
+          <a-pagination
+            v-if="searchTotal > searchPageSize"
+            v-model:current="searchPage"
+            :total="searchTotal"
+            :page-size="searchPageSize"
+            :show-size-changer="false"
+            size="small"
+            style="margin-top: 12px; text-align: center"
+            @change="doSearch"
+          />
         </div>
 
         <div v-else-if="documents.length > 0 && !currentDoc">
           <h3>文件夹内容</h3>
-          <a-list :data-source="documents">
+          <a-list :data-source="documents.slice(0, 50)">
             <template #renderItem="{ item }">
               <a-list-item @click="loadDocument(item.id)" style="cursor:pointer">
                 <a-list-item-meta :title="item.title" :description="item.file_type" />
               </a-list-item>
             </template>
           </a-list>
+          <a-empty v-if="documents.length === 0 && !loading" description="此文件夹暂无文档" />
         </div>
 
         <div v-else-if="currentDoc">
@@ -55,6 +76,7 @@
           <div v-if="currentDoc.tags?.length" style="margin-bottom: 8px">
             <a-tag v-for="t in currentDoc.tags" :key="t.tag" color="blue">{{ t.tag }}</a-tag>
           </div>
+          <a-alert v-if="currentDoc.truncated" type="warning" message="文档内容过长，已截断显示" banner style="margin-bottom: 12px" />
           <div class="wiki-doc-content" @click="onDocContentClick" v-html="renderedContent"></div>
 
           <a-divider />
@@ -119,6 +141,7 @@ interface Document {
   id: number
   title: string
   content: string
+  truncated?: boolean
   tags?: { tag: string }[]
   links?: { id: number; keyword: string; target_doc: number }[]
   backlinks?: { id: number; keyword: string; source_doc: number }[]
@@ -139,12 +162,16 @@ const md = new MarkdownIt({ html: false, breaks: true, linkify: true })
 
 const kbs = ref<KB[]>([])
 const currentKB = ref<KB | null>(null)
+const currentKBId = ref<number | undefined>()
 const folderTree = ref<TreeNode[]>([])
 const currentFolder = ref<number | undefined>()
 const documents = ref<DocListItem[]>([])
 const currentDoc = ref<Document | null>(null)
 const searchQuery = ref('')
 const searchResults = ref<SearchResult[]>([])
+const searchTotal = ref(0)
+const searchPage = ref(1)
+const searchPageSize = 20
 const tags = ref<TagInfo[]>([])
 const loading = ref(false)
 const treeLoading = ref(false)
@@ -163,11 +190,24 @@ const loadKBs = async () => {
     if (res.success && res.data.length > 0) {
       kbs.value = res.data
       currentKB.value = res.data[0]
+      currentKBId.value = res.data[0].id
       loadFolderTree()
     }
   } catch (e: any) {
     message.error('加载知识库失败: ' + e.message)
   }
+}
+
+const onKBChange = (kbId: number) => {
+  const kb = kbs.value.find(k => k.id === kbId)
+  if (!kb) return
+  currentKB.value = kb
+  currentDoc.value = null
+  searchQuery.value = ''
+  searchResults.value = []
+  documents.value = []
+  tags.value = []
+  loadFolderTree()
 }
 
 const loadFolderTree = async () => {
@@ -263,7 +303,9 @@ const browseFolder = async (folderId: number) => {
 const loadDocument = async (docId: number) => {
   loading.value = true
   try {
-    const res = await api.get<{ success: boolean; data: any }>('/user/knowledge-bases/documents/' + docId)
+    const res = await api.get<{ success: boolean; data: any }>('/user/knowledge-bases/documents/' + docId, {
+      max_length: '50000',
+    })
     if (res.success) {
       const raw = res.data
       if (raw.doc) {
@@ -271,6 +313,7 @@ const loadDocument = async (docId: number) => {
         doc.tags = raw.tags || []
         doc.links = raw.links || []
         doc.backlinks = raw.backlinks || []
+        doc.truncated = raw.truncated || false
         currentDoc.value = doc
       } else {
         currentDoc.value = raw as Document
@@ -284,19 +327,21 @@ const loadDocument = async (docId: number) => {
   }
 }
 
-const doSearch = async () => {
+const doSearch = async (page = 1) => {
   const q = searchQuery.value.trim()
   if (!q) return
   loading.value = true
   currentDoc.value = null
+  searchPage.value = page
   try {
-    const res = await api.get<{ success: boolean; data: { results: SearchResult[] } }>('/user/knowledge-bases/search', {
+    const res = await api.get<{ success: boolean; data: { results: SearchResult[]; total: number } }>('/user/knowledge-bases/search', {
       q,
-      page: '1',
-      size: '20',
+      page: String(page),
+      size: String(searchPageSize),
     })
     if (res.success) {
       searchResults.value = res.data.results || []
+      searchTotal.value = res.data.total || 0
     }
   } catch (e: any) {
     message.error('搜索失败: ' + e.message)

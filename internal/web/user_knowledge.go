@@ -141,11 +141,23 @@ func (s *Server) handleUserKBRead(c *gin.Context) {
     writeError(c, http.StatusNotFound, err.Error())
     return
   }
+
+  maxLen := 50000
+  if ml := c.Query("max_length"); ml != "" {
+    if parsed, err := strconv.Atoi(ml); err == nil && parsed > 0 {
+      maxLen = parsed
+    }
+  }
+  truncated := len(doc.Content) > maxLen
+  if truncated {
+    doc.Content = doc.Content[:maxLen]
+  }
+
   links, _ := store.GetDocumentLinks(doc.ID)
   backlinks, _ := store.GetDocumentBacklinks(doc.ID)
   tags, _ := store.GetDocumentTags(doc.ID)
   writeJSON(c, 200, gin.H{"success": true, "data": gin.H{
-    "doc": doc, "links": links, "backlinks": backlinks, "tags": tags,
+    "doc": doc, "links": links, "backlinks": backlinks, "tags": tags, "truncated": truncated,
   }})
 }
 
