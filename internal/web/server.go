@@ -425,6 +425,7 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
   g.GET("/user/info", s.handleUserInfo)
   g.POST("/user/password", s.handleChangePassword)
   // 对话
+  g.POST("/user/chat/create", s.handleChatCreate)
   g.GET("/user/chat/history", s.handleChatHistory)
   g.POST("/user/chat/send", s.handleChatSend)
   g.GET("/user/chat/stream", s.handleChatStream)

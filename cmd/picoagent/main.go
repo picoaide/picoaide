@@ -156,6 +156,9 @@ func main() {
     Dimensions: []string{"user"},
     Values:     map[string]string{"user": cfg.UserID},
   }
+  if convID := os.Getenv("PICOAGENT_CONVERSATION_ID"); convID != "" {
+    scope.Values["conversation"] = convID
+  }
   sessionKey := agent.BuildSessionKey(scope)
 
   history, _ := store.LoadLive(sessionKey)

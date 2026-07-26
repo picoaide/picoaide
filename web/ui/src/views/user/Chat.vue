@@ -134,11 +134,20 @@ const chatList = ref<Chat[]>([])
 const currentChatId = ref<string>('')
 const currentChat = computed(() => chatList.value.find(c => c.id === currentChatId.value))
 
-// 新增对话
-const createNewChat = () => {
-  const id = Date.now().toString()
-  chatList.value.unshift({ id, title: '', messages: [] })
-  currentChatId.value = id
+// 新增对话（调用后端创建）
+const createNewChat = async () => {
+  try {
+    const res = await api.post('/user/chat/create', {})
+    if (res.conversation_id) {
+      chatList.value.unshift({ id: res.conversation_id, title: '', messages: [] })
+      currentChatId.value = res.conversation_id
+    }
+  } catch {
+    // 降级：纯本地创建
+    const id = Date.now().toString()
+    chatList.value.unshift({ id, title: '', messages: [] })
+    currentChatId.value = id
+  }
 }
 
 // 切换对话
@@ -184,6 +193,24 @@ const loadHistory = async () => {
     const res = await fetch('/api/user/chat/history')
     if (!res.ok) return
     const data = await res.json()
+
+    // 新格式：多对话
+    if (data.conversations?.length) {
+      chatList.value = data.conversations.map((c: any) => ({
+        id: c.id,
+        title: c.title || (c.messages?.[0]?.content?.slice(0, 20) || '新对话'),
+        messages: (c.messages || []).map((m: any) => ({
+          id: m.id || `${c.id}-${m.timestamp || Date.now()}`,
+          role: m.role || 'assistant',
+          content: m.content || '',
+          timestamp: m.timestamp || Date.now(),
+        })),
+      }))
+      currentChatId.value = chatList.value[0]?.id || ''
+      return
+    }
+
+    // 旧格式兼容：单会话
     if (data.messages?.length) {
       chatList.value = [{
         id: Date.now().toString(),
@@ -207,6 +234,13 @@ const checkActive = async () => {
     if (res.ok) {
       const data = await res.json()
       if (data.run_id) {
+        // 如果有 conversation_id，切换到对应对话
+        if (data.conversation_id) {
+          const existing = chatList.value.find(c => c.id === data.conversation_id)
+          if (existing) {
+            currentChatId.value = data.conversation_id
+          }
+        }
         connectSSE(data.run_id)
       }
     }
@@ -218,8 +252,8 @@ const sendMessage = async () => {
   const content = inputMessage.value.trim()
   if (!content || isStreaming.value) return
 
-  if (!currentChatId.value) createNewChat()
-  const chat = currentChat.value!
+  const chat = currentChat.value
+  if (!chat) return
 
   // 追加用户消息
   const userMsg: Message = {
@@ -238,7 +272,7 @@ const sendMessage = async () => {
 
   isSending.value = true
   try {
-    const data = await api.post('/user/chat/send', { message: content })
+    const data = await api.post('/user/chat/send', { message: content, conversation_id: chat.id })
     if (data.run_id) {
       connectSSE(data.run_id)
     }
@@ -254,10 +288,11 @@ const connectSSE = (runId: string) => {
   // 关闭上一个连接，防止泄漏
   if (evtSource) evtSource.close()
 
+  const chat = currentChat.value
+  if (!chat) return
+
   isStreaming.value = true
   scrollToBottom()
-
-  const chat = currentChat.value!
 
   // 先在消息列表中压入一条空的 AI 消息，用于占位和后续文本追加
   const assistantMsg: Message = {
@@ -368,10 +403,10 @@ const stopStream = async () => {
 }
 
 // 生命周期挂载
-onMounted(() => {
-  loadHistory()
-  checkActive()
-  if (!chatList.value.length) createNewChat()
+onMounted(async () => {
+  await loadHistory()
+  await checkActive()
+  if (!chatList.value.length) await createNewChat()
 })
 
 // 组件卸载时安全清理连接

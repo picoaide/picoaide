@@ -13,6 +13,7 @@ import (
   "strings"
 
   "github.com/gin-gonic/gin"
+  "github.com/picoaide/picoaide/internal/agent"
   "github.com/picoaide/picoaide/internal/auth"
   "github.com/picoaide/picoaide/internal/authsource"
   "github.com/picoaide/picoaide/internal/config"
@@ -460,7 +461,13 @@ type chatMessage struct {
   Timestamp int64  `json:"timestamp"`
 }
 
-// handleChatHistory 返回当前用户的完整对话历史
+type conversationEntry struct {
+  ID       string        `json:"id"`
+  Title    string        `json:"title"`
+  Messages []chatMessage `json:"messages"`
+}
+
+// handleChatHistory 返回当前用户的所有对话历史
 func (s *Server) handleChatHistory(c *gin.Context) {
   username := s.requireRegularUser(c)
   if username == "" {
@@ -470,15 +477,36 @@ func (s *Server) handleChatHistory(c *gin.Context) {
   workspace := filepath.Join(config.WorkDir(), "users", username)
   user.InitializeUser(filepath.Join(config.WorkDir(), "user-template"), filepath.Join(config.WorkDir(), "users"), username)
 
+  if !strings.HasPrefix(filepath.Clean(workspace), filepath.Clean(config.WorkDir())+string(os.PathSeparator)) {
+    writeError(c, http.StatusForbidden, "访问被拒绝")
+    return
+  }
+
+  // 优先从 conversations/ 目录读多对话
+  convDir := filepath.Join(workspace, "conversations")
+  convEntries, err := os.ReadDir(convDir)
+  if err == nil && len(convEntries) > 0 {
+    conversations := s.loadConversationsFromDir(username, workspace, convDir, convEntries)
+    writeJSON(c, http.StatusOK, struct {
+      Success       bool                `json:"success"`
+      Ready         bool                `json:"ready"`
+      Conversations []conversationEntry `json:"conversations"`
+    }{
+      Success:       true,
+      Ready:         true,
+      Conversations: conversations,
+    })
+    return
+  }
+
+  // 旧数据兼容：从 sessions/ 读单会话
   var messages []chatMessage
-  var events []streamEvent
   sessDir := filepath.Join(workspace, "sessions")
   if !strings.HasPrefix(filepath.Clean(sessDir), filepath.Clean(config.WorkDir())+string(os.PathSeparator)) {
     writeError(c, http.StatusForbidden, "访问被拒绝")
     return
   }
   if entries, err := os.ReadDir(sessDir); err == nil {
-    // 按修改时间降序排列，取最新会话目录
     var dirs []string
     for _, e := range entries {
       if !e.IsDir() {
@@ -500,8 +528,6 @@ func (s *Server) handleChatHistory(c *gin.Context) {
         return fi.ModTime().After(fj.ModTime())
       })
       sid := dirs[0]
-
-      // 读 live.jsonl（消息历史）
       liveFile := filepath.Join(sessDir, sid, "live.jsonl")
       if strings.HasPrefix(filepath.Clean(liveFile), sessDir+string(os.PathSeparator)) {
         f, err := os.Open(liveFile)
@@ -516,41 +542,95 @@ func (s *Server) handleChatHistory(c *gin.Context) {
           f.Close()
         }
       }
-      // 读 events.jsonl（流事件，用于重建完整对话状态）
-      eventsFile := filepath.Join(sessDir, sid, "events.jsonl")
-      if strings.HasPrefix(filepath.Clean(eventsFile), sessDir+string(os.PathSeparator)) {
-        f, err := os.Open(eventsFile)
-        if err == nil {
-          scanner := bufio.NewScanner(f)
-          for scanner.Scan() {
-            var evt streamEvent
-            if json.Unmarshal([]byte(scanner.Text()), &evt) == nil {
-              events = append(events, evt)
-            }
-          }
-          f.Close()
-        }
-      }
     }
   }
   if messages == nil {
     messages = []chatMessage{}
   }
-  if events == nil {
-    events = []streamEvent{}
+  writeJSON(c, http.StatusOK, struct {
+    Success       bool                `json:"success"`
+    Ready         bool                `json:"ready"`
+    Messages      []chatMessage       `json:"messages"`
+    Conversations []conversationEntry `json:"conversations"`
+  }{
+    Success:       true,
+    Ready:         true,
+    Messages:      messages,
+    Conversations: nil,
+  })
+}
+
+// loadConversationsFromDir 遍历 conversations 目录，组装每个对话的消息
+func (s *Server) loadConversationsFromDir(username, workspace, convDir string, convEntries []os.DirEntry) []conversationEntry {
+  var conversations []conversationEntry
+  for _, e := range convEntries {
+    if !e.IsDir() {
+      continue
+    }
+    convID := e.Name()
+    if util.SafePathSegment(convID) != nil {
+      continue
+    }
+
+    // 读 meta
+    title := ""
+    metaFile := filepath.Join(convDir, convID, "meta.json")
+    if strings.HasPrefix(filepath.Clean(metaFile), filepath.Clean(convDir)+string(os.PathSeparator)) {
+      if metaData, err := os.ReadFile(metaFile); err == nil {
+        var meta struct {
+          ID    string `json:"id"`
+          Title string `json:"title"`
+        }
+        if json.Unmarshal(metaData, &meta) == nil {
+          title = meta.Title
+        }
+      }
+    }
+
+    // 计算 session key 并读 live.jsonl
+    scope := agent.SessionScope{
+      Version:    1,
+      AgentID:    "pico",
+      Account:    username,
+      Dimensions: []string{"user"},
+      Values:     map[string]string{"user": username, "conversation": convID},
+    }
+    sessionKey := agent.SanitizeKey(agent.BuildSessionKey(scope))
+    liveFile := filepath.Join(workspace, "sessions", sessionKey, "live.jsonl")
+
+    var messages []chatMessage
+    if strings.HasPrefix(filepath.Clean(liveFile), filepath.Clean(workspace)+string(os.PathSeparator)) {
+      if f, err := os.Open(liveFile); err == nil {
+        scanner := bufio.NewScanner(f)
+        for scanner.Scan() {
+          var msg chatMessage
+          if json.Unmarshal([]byte(scanner.Text()), &msg) == nil {
+            messages = append(messages, msg)
+          }
+        }
+        f.Close()
+      }
+    }
+    if messages == nil {
+      messages = []chatMessage{}
+    }
+
+    conversations = append(conversations, conversationEntry{
+      ID:       convID,
+      Title:    title,
+      Messages: messages,
+    })
   }
 
-  writeJSON(c, http.StatusOK, struct {
-    Success  bool          `json:"success"`
-    Ready    bool          `json:"ready"`
-    Messages []chatMessage `json:"messages"`
-    Events   []streamEvent `json:"events"`
-  }{
-    Success:  true,
-    Ready:    true,
-    Messages: messages,
-    Events:   events,
+  // 按创建时间降序（取 meta 中的 created_at，如果读不到最新在前）
+  sort.Slice(conversations, func(i, j int) bool {
+    return conversations[i].ID > conversations[j].ID
   })
+
+  if conversations == nil {
+    conversations = []conversationEntry{}
+  }
+  return conversations
 }
 
 type changePasswordReq struct {

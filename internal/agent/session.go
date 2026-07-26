@@ -77,8 +77,9 @@ type SessionMeta struct {
 // ============================================================
 
 // BuildSessionKey 生成统一 session key
-// 同一个人不管从钉钉/飞书/企微/Web UI 进来，都是同一个 session
-// 格式: sk_v1_{sha256(agent:user:{userID})}
+// 同一个人不管从钉钉/飞书/企微/Web UI 进来，默认都是同一个 session
+// 如果 Values 中包含 "conversation"，则隔离到该对话的独立 session
+// 格式: sk_v1_{sha256(agent:user:{userID}[:conv:{conversationID}])}
 func BuildSessionKey(scope SessionScope) string {
   userID := ""
   for _, dim := range scope.Dimensions {
@@ -93,6 +94,9 @@ func BuildSessionKey(scope SessionScope) string {
   sig := fmt.Sprintf("agent:user:%s", userID)
   if scope.AgentID != "" && scope.AgentID != "pico" {
     sig = fmt.Sprintf("agent:%s:user:%s", scope.AgentID, userID)
+  }
+  if convID, ok := scope.Values["conversation"]; ok && convID != "" {
+    sig += ":conv:" + convID
   }
   sum := sha256.Sum256([]byte(sig))
   return "sk_v1_" + hex.EncodeToString(sum[:])

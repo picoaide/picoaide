@@ -15,7 +15,9 @@ import (
   "strings"
   "sync"
   "time"
+
   "github.com/gin-gonic/gin"
+  "github.com/google/uuid"
 
   "github.com/picoaide/picoaide/internal/agent"
   "github.com/picoaide/picoaide/internal/store"
@@ -36,11 +38,12 @@ type streamEvent struct {
 }
 
 type chatRun struct {
-  runID    string
-  username string
-  createdAt time.Time
-  cancel   context.CancelFunc
-  source   string // "web" 或 "im"，用于决定是否转发事件到 IM
+  runID          string
+  username       string
+  conversationID string
+  createdAt      time.Time
+  cancel         context.CancelFunc
+  source         string // "web" 或 "im"，用于决定是否转发事件到 IM
 
   mu        sync.Mutex
   events    []streamEvent
@@ -86,13 +89,14 @@ func generateRunID() string {
   return hex.EncodeToString(b)
 }
 
-func newChatRun(username, source string) *chatRun {
+func newChatRun(username, source, conversationID string) *chatRun {
   return &chatRun{
-    runID:     generateRunID(),
-    username:  username,
-    source:    source,
-    createdAt: time.Now(),
-    subs:      make(map[chan struct{}]bool),
+    runID:          generateRunID(),
+    username:       username,
+    conversationID: conversationID,
+    source:         source,
+    createdAt:      time.Now(),
+    subs:           make(map[chan struct{}]bool),
   }
 }
 
@@ -154,7 +158,7 @@ func (r *chatRun) unsubscribe(ch chan struct{}) {
 
 // startChatSandbox 创建聊天运行并启动沙箱，Web 和 IM 共用
 // source 为 "web" 或 "im"，"web" 来源的事件会转发到用户的所有 IM 渠道
-func (s *Server) startChatSandbox(username, message string, inputJSON []byte, source ...string) *chatRun {
+func (s *Server) startChatSandbox(username, message string, inputJSON []byte, conversationID string, source ...string) *chatRun {
   src := "web"
   if len(source) > 0 && source[0] == "im" {
     src = "im"
@@ -168,7 +172,7 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte, so
   }
 
   runCtx, runCancel := context.WithCancel(context.Background())
-  run := newChatRun(username, src)
+  run := newChatRun(username, src, conversationID)
   run.cancel = runCancel
   activeRuns.Store(run.runID, run)
   userRun.Store(username, run)
@@ -180,8 +184,11 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte, so
   }
   workspace := filepath.Join(config.WorkDir(), "users", username)
   apiKeys := s.loadAPIKeys()
+  if conversationID != "" {
+    apiKeys["PICOAGENT_CONVERSATION_ID"] = conversationID
+  }
 
-  slog.Debug("chat.sandbox_start", "run_id", run.runID, "username", username)
+  slog.Debug("chat.sandbox_start", "run_id", run.runID, "username", username, "conversation_id", conversationID)
 
   go func() {
     defer runCancel()
@@ -311,6 +318,9 @@ func (s *Server) persistRunEvents(username string, run *chatRun) {
     Dimensions: []string{"user"},
     Values:     map[string]string{"user": username},
   }
+  if run.conversationID != "" {
+    scope.Values["conversation"] = run.conversationID
+  }
   sessionKey := agent.SanitizeKey(agent.BuildSessionKey(scope))
   sessDir := filepath.Join(config.WorkDir(), "users", username, "sessions", sessionKey)
   if err := os.MkdirAll(sessDir, 0755); err != nil {
@@ -422,22 +432,64 @@ func (s *Server) handleChatActive(c *gin.Context) {
     return
   }
   runID := ""
+  conversationID := ""
   if v, ok := userRun.Load(username); ok {
-    runID = v.(*chatRun).runID
+    run := v.(*chatRun)
+    runID = run.runID
+    conversationID = run.conversationID
   } else {
     activeRuns.Range(func(key, value interface{}) bool {
       run, ok := value.(*chatRun)
       if ok && run.username == username {
         runID = run.runID
+        conversationID = run.conversationID
         return false
       }
       return true
     })
   }
   writeJSON(c, http.StatusOK, map[string]interface{}{
-    "success": true,
-    "active":  runID != "",
-    "run_id":  runID,
+    "success":         true,
+    "active":          runID != "",
+    "run_id":          runID,
+    "conversation_id": conversationID,
+  })
+}
+
+// POST /api/user/chat/create — 新建对话，返回 conversation_id
+// ============================================================
+
+func (s *Server) handleChatCreate(c *gin.Context) {
+  username := s.requireRegularUser(c)
+  if username == "" {
+    return
+  }
+
+  conversationID := uuid.New().String()
+  user.InitializeUser("", filepath.Join(config.WorkDir(), "users"), username)
+
+  // 创建 conversation 元数据目录
+  convDir := filepath.Join(config.WorkDir(), "users", username, "conversations", conversationID)
+  if err := os.MkdirAll(convDir, 0755); err != nil {
+    writeError(c, http.StatusInternalServerError, "创建对话失败")
+    return
+  }
+
+  // 写 meta.json
+  meta := map[string]interface{}{
+    "id":         conversationID,
+    "title":      "",
+    "created_at": time.Now().UTC().Format(time.RFC3339),
+  }
+  metaData, _ := json.MarshalIndent(meta, "", "  ")
+  if err := os.WriteFile(filepath.Join(convDir, "meta.json"), metaData, 0644); err != nil {
+    slog.Error("chat.create_meta_failed", "error", err.Error())
+  }
+
+  slog.Debug("chat.created", "username", username, "conversation_id", conversationID)
+  writeJSON(c, http.StatusOK, map[string]interface{}{
+    "success":         true,
+    "conversation_id": conversationID,
   })
 }
 
@@ -451,14 +503,15 @@ func (s *Server) handleChatSend(c *gin.Context) {
   }
 
   var req struct {
-    Message string `json:"message"`
+    Message        string `json:"message"`
+    ConversationID string `json:"conversation_id"`
   }
   if err := c.ShouldBindJSON(&req); err != nil {
     writeError(c, http.StatusBadRequest, "无效的请求参数")
     return
   }
   message := req.Message
-  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/user/chat/send", "username", username, "message_length", len(message))
+  slog.Debug("request", "event", "recv", "method", "POST", "path", "/api/user/chat/send", "username", username, "message_length", len(message), "conversation_id", req.ConversationID)
   if message == "" {
     writeError(c, http.StatusBadRequest, "请输入消息")
     return
@@ -474,13 +527,14 @@ func (s *Server) handleChatSend(c *gin.Context) {
   input := agent.Message{Role: agent.RoleUser, Content: message}
   inputJSON, _ := json.Marshal(input)
 
-  run := s.startChatSandbox(username, message, inputJSON)
+  run := s.startChatSandbox(username, message, inputJSON, req.ConversationID)
 
-  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/user/chat/send", "status", http.StatusOK, "run_id", run.runID)
+  slog.Debug("response", "event", "send", "method", "POST", "path", "/api/user/chat/send", "status", http.StatusOK, "run_id", run.runID, "conversation_id", req.ConversationID)
   writeJSON(c, http.StatusOK, map[string]interface{}{
-    "success": true,
-    "run_id":  run.runID,
-    "message": "消息已提交，AI 正在处理",
+    "success":         true,
+    "run_id":          run.runID,
+    "conversation_id": req.ConversationID,
+    "message":         "消息已提交，AI 正在处理",
   })
 }
 
