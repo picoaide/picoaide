@@ -41,62 +41,51 @@ func (s *Server) initAgentIntegration() (*AgentIntegration, error) {
     s.handleIMMessage(ctx, msg)
   })
 
-  // 注册 IM 渠道（根据配置）
-  if s.loadConfig() != nil {
-    // 钉钉 — 从 user_channels 读取每用户凭据
-    dingtalkProvider := im.NewDingTalkProvider()
-    engine, err := store.GetEngine()
-    if err == nil {
-      var channels []store.UserChannel
-      engine.Where("channel = ? AND configured = ? AND enabled = ?", "dingtalk", true, true).Find(&channels)
-      for _, ch := range channels {
-        var creds map[string]string
-        if json.Unmarshal([]byte(ch.Credentials), &creds) == nil {
-          if creds["client_id"] != "" && creds["client_secret"] != "" {
-            dingtalkProvider.AddUser(ch.Username, creds["client_id"], creds["client_secret"], creds["default_chat"])
-            // 重启后恢复持久化的 session webhook
-            if creds["webhook"] != "" && creds["default_chat"] != "" {
-              dingtalkProvider.SetUserWebhook(ch.Username, creds["default_chat"], creds["webhook"])
-            }
-          }
-        }
-      }
-    }
-    gw.Register(dingtalkProvider)
+  // 注册所有 IM 渠道（每用户连接模式）
+  channelProviders := map[string]func() im.Provider{
+    "dingtalk": func() im.Provider { return im.NewDingTalkProvider() },
+    "feishu":   func() im.Provider { return im.NewFeishuProvider() },
+    "wechat":   func() im.Provider { return im.NewWeChatProvider() },
+    "wecom":    func() im.Provider { return im.NewWeComProvider() },
+  }
 
-    // 飞书 — 从 user_channels 读取每用户凭据
-    feishuProvider := im.NewFeishuProvider()
-    feishuEngine, feishuErr := store.GetEngine()
-    if feishuErr == nil {
-      var feishuChannels []store.UserChannel
-      feishuEngine.Where("channel = ? AND configured = ? AND enabled = ?", "feishu", true, true).Find(&feishuChannels)
-      for _, ch := range feishuChannels {
-        var creds map[string]string
-        if json.Unmarshal([]byte(ch.Credentials), &creds) == nil {
-          if creds["app_id"] != "" && creds["app_secret"] != "" {
-            feishuProvider.AddUser(ch.Username, creds["app_id"], creds["app_secret"], creds["default_chat"])
-          }
-        }
-      }
+  for chKey, factory := range channelProviders {
+    if !store.GetChannelEnabled(chKey) {
+      continue
     }
-    gw.Register(feishuProvider)
+    provider := factory()
+    gw.Register(provider)
 
-    // 企微 — 从 user_channels 读取每用户凭据
-    wecomProvider := im.NewWeComProvider()
-    wecomEngine, wecomErr := store.GetEngine()
-    if wecomErr == nil {
-      var wecomChannels []store.UserChannel
-      wecomEngine.Where("channel = ? AND configured = ? AND enabled = ?", "wecom", true, true).Find(&wecomChannels)
-      for _, ch := range wecomChannels {
-        var creds map[string]string
-        if json.Unmarshal([]byte(ch.Credentials), &creds) == nil {
-          if creds["bot_id"] != "" && creds["secret"] != "" {
-            wecomProvider.AddUser(ch.Username, creds["bot_id"], creds["secret"], creds["default_chat"])
-          }
+    // 加载已配置的用户连接
+    users, err := store.ListConfiguredUserChannelsByChannel(chKey)
+    if err != nil {
+      slog.Warn("查询渠道已配置用户失败", "channel", chKey, "error", err)
+      continue
+    }
+    for _, uc := range users {
+      var creds map[string]string
+      if json.Unmarshal([]byte(uc.Credentials), &creds) != nil || creds == nil {
+        continue
+      }
+      switch p := provider.(type) {
+      case *im.DingTalkProvider:
+        if creds["client_id"] != "" && creds["client_secret"] != "" {
+          p.AddUser(uc.Username, creds["client_id"], creds["client_secret"], creds["default_chat"])
+        }
+      case *im.FeishuProvider:
+        if creds["app_id"] != "" && creds["app_secret"] != "" {
+          p.AddUser(uc.Username, creds["app_id"], creds["app_secret"], creds["default_chat"])
+        }
+      case *im.WeChatProvider:
+        if creds["bot_id"] != "" && creds["secret"] != "" {
+          p.AddUser(uc.Username, creds["bot_id"], creds["secret"], creds["default_chat"])
+        }
+      case *im.WeComProvider:
+        if creds["bot_id"] != "" && creds["secret"] != "" {
+          p.AddUser(uc.Username, creds["bot_id"], creds["secret"], creds["default_chat"])
         }
       }
     }
-    gw.Register(wecomProvider)
   }
 
   // 3. Cron 调度器
@@ -126,14 +115,13 @@ func (s *Server) initAgentIntegration() (*AgentIntegration, error) {
 
 // handleIMMessage 处理 IM 消息 → 启动沙箱 → 返回响应
 func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
-  // 查找用户
   username := msg.UserID
-  slog.Debug("process", "event", "process", "phase", "im_message_recv", "platform", msg.Platform, "user_id", msg.UserID, "chat_id", msg.ChatID, "text_length", len(msg.Text))
+  slog.Debug("process", "event", "process", "phase", "im_message_recv", "platform", msg.Platform, "username", username, "chat_id", msg.ChatID, "text_length", len(msg.Text))
   if username == "" {
     return
   }
 
-  // 保存当前会话 ID + webhook 作为该用户的默认通知渠道
+  // 保存当前会话信息
   if msg.ChatID != "" {
     if existing, err := store.GetUserChannel(username, msg.Platform); err == nil && existing != nil {
       var creds map[string]string
@@ -194,9 +182,15 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
   var lastSent int
   cursor := len(events)
   sendCtx := context.Background()
+  reqID := msg.Raw["req_id"]
   flushIM := func(text string) {
     if s.agentIntegration == nil { return }
-    err := s.agentIntegration.imGateway.Send(sendCtx, msg.Platform, msg.ChatID, text)
+    var err error
+    if reqID != "" {
+      err = s.agentIntegration.imGateway.SendWithReqID(sendCtx, msg.Platform, msg.ChatID, text, reqID)
+    } else {
+      err = s.agentIntegration.imGateway.Send(sendCtx, msg.Platform, msg.ChatID, text)
+    }
     if err != nil {
       slog.Warn("IM 发送失败", "platform", msg.Platform, "error", err)
     }

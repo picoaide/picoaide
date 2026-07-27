@@ -6,7 +6,7 @@ import (
   "encoding/json"
   "fmt"
   "log/slog"
-  "math/big"
+  "strings"
   "sync"
   "time"
 
@@ -14,37 +14,38 @@ import (
 )
 
 // ============================================================
-// 企业微信实现（WebSocket 模式）— 支持每用户独立连接
+// 企业微信智能机器人（长连接 API 模式，aibot 协议）
 // ============================================================
 
 const (
   wecomConnectTimeout    = 15 * time.Second
   wecomCommandTimeout    = 10 * time.Second
   wecomHeartbeatInterval = 30 * time.Second
-  wecomDefaultWSUrl      = "wss://wss.weixin.qq.com/"
+  wecomReadTimeout       = 60 * time.Second
+  wecomWSUrl             = "wss://openws.work.weixin.qq.com"
 )
 
-type wecomUserConn struct {
-  username  string
-  botID     string
-  secret    string
-  wsURL     string
-  conn      *websocket.Conn
-  connMu    sync.Mutex
-  ctx       context.Context
-  cancel    context.CancelFunc
-  defaultChat string
-  pendingMu sync.Mutex
-  pending   map[string]chan wecomEnvelope
+type wecomConn struct {
+  username      string
+  botID         string
+  secret        string
+  conn          *websocket.Conn
+  connMu        sync.Mutex
+  ctx           context.Context
+  cancel        context.CancelFunc
+  defaultChat   string
+  defaultChatMu sync.Mutex
+  pendingMu     sync.Mutex
+  pending       map[string]chan wecomEnvelope
 }
 
 type WeComProvider struct {
-  mu           sync.Mutex
-  conns        map[string]*wecomUserConn // username -> 连接
-  rootCtx      context.Context
-  rootCancel   context.CancelFunc
-  onMessage    func(ctx context.Context, msg Message)
-  chatIDToUser sync.Map // chatID -> username，用于 Send 查找连接
+  mu          sync.Mutex
+  conns       map[string]*wecomConn
+  chatIDToUser sync.Map // chatID -> username, O(1) Send lookup
+  rootCtx     context.Context
+  rootCancel  context.CancelFunc
+  onMessage   func(ctx context.Context, msg Message)
 }
 
 type wecomEnvelope struct {
@@ -56,7 +57,7 @@ type wecomEnvelope struct {
 }
 
 type wecomHeaders struct {
-  ReqID string `json:"req_id"`
+  ReqID string `json:"req_id,omitempty"`
 }
 
 type wecomCommand struct {
@@ -65,25 +66,56 @@ type wecomCommand struct {
   Body    interface{}  `json:"body,omitempty"`
 }
 
-type wecomIncomingMessage struct {
-  Sender struct {
-    UserID string `json:"user_id"`
-  } `json:"sender"`
-  MsgID    string `json:"msg_id"`
-  MsgType  string `json:"msg_type"`
-  ChatType string `json:"chat_type"`
-  Content  struct {
-    Text string `json:"text"`
-  } `json:"content"`
-  Text struct {
-    Content string `json:"content"`
-  } `json:"text"`
-  AIBotID string `json:"ai_bot_id"`
+type wecomMsgCallback struct {
+  MsgID   string       `json:"msgid"`
+  AIBotID string       `json:"aibotid"`
+  ChatID  string       `json:"chatid,omitempty"`
+  ChatType string      `json:"chattype"`
+  From    wecomFrom    `json:"from"`
+  MsgType string       `json:"msgtype"`
+  Text    *wecomText   `json:"text,omitempty"`
+  Mixed   *wecomMixed  `json:"mixed,omitempty"`
+  Image   *wecomMedia  `json:"image,omitempty"`
+  File    *wecomMedia  `json:"file,omitempty"`
+  Voice   *wecomMedia  `json:"voice,omitempty"`
+  Video   *wecomMedia  `json:"video,omitempty"`
+}
+
+type wecomFrom struct {
+  UserID string `json:"userid"`
+}
+
+type wecomText struct {
+  Content string `json:"content"`
+}
+
+type wecomMixed struct {
+  Content string `json:"content"`
+}
+
+type wecomMedia struct {
+  URL    string `json:"url,omitempty"`
+  AESKey string `json:"aeskey,omitempty"`
+}
+
+type wecomEventCallback struct {
+  MsgID      string     `json:"msgid"`
+  CreateTime int64      `json:"create_time"`
+  AIBotID    string     `json:"aibotid"`
+  ChatID     string     `json:"chatid,omitempty"`
+  ChatType   string     `json:"chattype,omitempty"`
+  From       *wecomFrom  `json:"from,omitempty"`
+  MsgType    string     `json:"msgtype"`
+  Event      wecomEvent `json:"event"`
+}
+
+type wecomEvent struct {
+  EventType string `json:"eventtype"`
 }
 
 func NewWeComProvider() *WeComProvider {
   return &WeComProvider{
-    conns: make(map[string]*wecomUserConn),
+    conns: make(map[string]*wecomConn),
   }
 }
 
@@ -117,23 +149,20 @@ func (w *WeComProvider) Stop(ctx context.Context) error {
   return nil
 }
 
-// AddUser 为指定用户添加企微连接。如果用户已有连接则先关闭旧连接。
 func (w *WeComProvider) AddUser(username, botID, secret string, defaultChat string) {
-  slog.Info("企微渠道添加用户连接", "username", username, "bot_id", botID)
+  slog.Info("企微智能机器人添加用户连接", "username", username, "bot_id", botID)
 
   w.mu.Lock()
   defer w.mu.Unlock()
 
-  // 关闭旧连接
   if old, ok := w.conns[username]; ok {
     w.stopConn(old)
   }
 
-  uc := &wecomUserConn{
+  uc := &wecomConn{
     username:    username,
     botID:       botID,
     secret:      secret,
-    wsURL:       wecomDefaultWSUrl,
     defaultChat: defaultChat,
     pending:     make(map[string]chan wecomEnvelope),
   }
@@ -144,9 +173,8 @@ func (w *WeComProvider) AddUser(username, botID, secret string, defaultChat stri
   }
 }
 
-// RemoveUser 移除用户的企微连接
 func (w *WeComProvider) RemoveUser(username string) {
-  slog.Info("企微渠道移除用户连接", "username", username)
+  slog.Info("企微智能机器人移除用户连接", "username", username)
 
   w.mu.Lock()
   defer w.mu.Unlock()
@@ -157,7 +185,7 @@ func (w *WeComProvider) RemoveUser(username string) {
   }
 }
 
-func (w *WeComProvider) startConn(ctx context.Context, uc *wecomUserConn) {
+func (w *WeComProvider) startConn(ctx context.Context, uc *wecomConn) {
   connCtx, cancel := context.WithCancel(ctx)
   uc.ctx = connCtx
   uc.cancel = cancel
@@ -165,19 +193,14 @@ func (w *WeComProvider) startConn(ctx context.Context, uc *wecomUserConn) {
   go w.connectLoop(uc)
 }
 
-func (w *WeComProvider) stopConn(uc *wecomUserConn) {
+func (w *WeComProvider) stopConn(uc *wecomConn) {
   if uc.cancel != nil {
     uc.cancel()
   }
-  uc.connMu.Lock()
-  if uc.conn != nil {
-    uc.conn.Close()
-    uc.conn = nil
-  }
-  uc.connMu.Unlock()
+  w.closeConn(uc)
 }
 
-func (w *WeComProvider) connectLoop(uc *wecomUserConn) {
+func (w *WeComProvider) connectLoop(uc *wecomConn) {
   backoff := time.Second
   for {
     select {
@@ -187,11 +210,7 @@ func (w *WeComProvider) connectLoop(uc *wecomUserConn) {
     }
 
     if err := w.runConnection(uc); err != nil {
-      slog.Warn("企微 WebSocket 连接断开",
-        "username", uc.username,
-        "error", err,
-        "backoff", backoff,
-      )
+      slog.Warn("企微智能机器人连接断开", "username", uc.username, "error", err, "backoff", backoff)
       select {
       case <-time.After(backoff):
       case <-uc.ctx.Done():
@@ -209,11 +228,11 @@ func (w *WeComProvider) connectLoop(uc *wecomUserConn) {
   }
 }
 
-func (w *WeComProvider) runConnection(uc *wecomUserConn) error {
+func (w *WeComProvider) runConnection(uc *wecomConn) error {
   dialCtx, cancel := context.WithTimeout(uc.ctx, wecomConnectTimeout)
   defer cancel()
 
-  conn, _, err := websocket.DefaultDialer.DialContext(dialCtx, uc.wsURL, nil)
+  conn, _, err := websocket.DefaultDialer.DialContext(dialCtx, wecomWSUrl, nil)
   if err != nil {
     return fmt.Errorf("企微 WebSocket 连接失败: %w", err)
   }
@@ -222,18 +241,18 @@ func (w *WeComProvider) runConnection(uc *wecomUserConn) error {
   uc.conn = conn
   uc.connMu.Unlock()
   defer func() {
-    uc.connMu.Lock()
-    if uc.conn == conn {
-      uc.conn = nil
-    }
-    uc.connMu.Unlock()
+    w.closeConn(uc)
     conn.Close()
   }()
 
-  // 订阅消息
+  readDone := make(chan error, 1)
+  go func() {
+    readDone <- w.readLoop(uc, conn)
+  }()
+
   if err := w.writeAndWait(uc, conn, wecomCommand{
-    Cmd:     "subscribe",
-    Headers: wecomHeaders{ReqID: randomID(10)},
+    Cmd:     "aibot_subscribe",
+    Headers: wecomHeaders{ReqID: newReqID()},
     Body: map[string]string{
       "bot_id": uc.botID,
       "secret": uc.secret,
@@ -242,9 +261,8 @@ func (w *WeComProvider) runConnection(uc *wecomUserConn) error {
     return err
   }
 
-  slog.Info("企微 WebSocket 已连接并订阅", "username", uc.username)
+  slog.Info("企微智能机器人已连接并订阅", "username", uc.username)
 
-  // 心跳
   heartbeatDone := make(chan struct{})
   go func() {
     defer close(heartbeatDone)
@@ -252,111 +270,150 @@ func (w *WeComProvider) runConnection(uc *wecomUserConn) error {
     defer ticker.Stop()
     for {
       select {
+      case <-uc.ctx.Done():
+        return
       case <-ticker.C:
         if err := w.writeAndWait(uc, conn, wecomCommand{
           Cmd:     "ping",
-          Headers: wecomHeaders{ReqID: randomID(10)},
+          Headers: wecomHeaders{ReqID: newReqID()},
         }, wecomCommandTimeout); err != nil {
           return
         }
-      case <-uc.ctx.Done():
-        return
       }
     }
   }()
 
-  // 读循环
-  readErr := w.readLoop(uc, conn)
-  conn.Close()
-  <-heartbeatDone
-  return readErr
+  select {
+  case err := <-readDone:
+    return err
+  case <-uc.ctx.Done():
+    return uc.ctx.Err()
+  case <-heartbeatDone:
+    return fmt.Errorf("心跳异常")
+  }
 }
 
-func (w *WeComProvider) readLoop(uc *wecomUserConn, conn *websocket.Conn) error {
+func (w *WeComProvider) readLoop(uc *wecomConn, conn *websocket.Conn) error {
   for {
-    _, raw, err := conn.ReadMessage()
-    if err != nil {
-      select {
-      case <-uc.ctx.Done():
-        return nil
-      default:
-        return fmt.Errorf("企微读取错误: %w", err)
-      }
+    select {
+    case <-uc.ctx.Done():
+      return uc.ctx.Err()
+    default:
+    }
+
+    if err := conn.SetReadDeadline(time.Now().Add(wecomReadTimeout)); err != nil {
+      return fmt.Errorf("设置读取截止时间失败: %w", err)
     }
 
     var env wecomEnvelope
-    if err := json.Unmarshal(raw, &env); err != nil {
-      continue
+    if err := conn.ReadJSON(&env); err != nil {
+      // 区分超时和真正的错误
+      select {
+      case <-uc.ctx.Done():
+        return uc.ctx.Err()
+      default:
+        if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
+          continue
+        }
+        return fmt.Errorf("微信读取错误: %w", err)
+      }
     }
 
-    // ACK 消息
-    if env.Cmd == "" && env.Headers.ReqID != "" {
+    if reqID := env.Headers.ReqID; reqID != "" {
       uc.pendingMu.Lock()
-      ch, ok := uc.pending[env.Headers.ReqID]
-      if ok {
-        delete(uc.pending, env.Headers.ReqID)
+      if ch, ok := uc.pending[reqID]; ok {
+        ch <- env
+        uc.pendingMu.Unlock()
+        continue
       }
       uc.pendingMu.Unlock()
-      if ok {
-        ch <- env
-      }
-      continue
     }
 
-    // 消息回调
-    if env.Cmd == "message_callback" {
-      w.handleIncoming(uc, env)
+    switch env.Cmd {
+    case "aibot_msg_callback":
+      w.handleMsgCallback(uc, env)
+    case "aibot_event_callback":
+      w.handleEventCallback(uc, env)
     }
   }
 }
 
-func (w *WeComProvider) handleIncoming(uc *wecomUserConn, env wecomEnvelope) {
-  var msg wecomIncomingMessage
-  if err := json.Unmarshal(env.Body, &msg); err != nil {
+func (w *WeComProvider) handleMsgCallback(uc *wecomConn, env wecomEnvelope) {
+  var cb wecomMsgCallback
+  if err := json.Unmarshal(env.Body, &cb); err != nil {
     return
   }
 
-  senderID := msg.Sender.UserID
-  if senderID == "" {
-    senderID = "unknown"
+  content := ""
+  if cb.Text != nil {
+    content = strings.TrimSpace(cb.Text.Content)
   }
-  chatID := msg.MsgID
-  if chatID == "" {
-    chatID = senderID
-  }
-
-  content := msg.Text.Content
-  if content == "" {
-    content = msg.Content.Text
+  if content == "" && cb.Mixed != nil {
+    content = strings.TrimSpace(cb.Mixed.Content)
   }
   if content == "" {
-    content = "[empty]"
+    return
   }
 
-  // 记录 chatID -> username 映射，用于 Send 查找连接
-  w.chatIDToUser.Store(chatID, uc.username)
-  uc.defaultChat = chatID
+  chatID := cb.From.UserID
+  if cb.ChatID != "" {
+    chatID = cb.ChatID
+  }
+
+  uc.defaultChatMu.Lock()
+  uc.defaultChat = cb.From.UserID
+  uc.defaultChatMu.Unlock()
+
+  // 注册 chatID → username 映射，供 Send O(1) 查找
+  w.chatIDToUser.Store(cb.From.UserID, uc.username)
+  if cb.ChatID != "" {
+    w.chatIDToUser.Store(cb.ChatID, uc.username)
+  }
 
   if w.onMessage != nil {
-    w.onMessage(uc.ctx, Message{
+    w.onMessage(context.Background(), Message{
       Platform: "wecom",
-      UserID:   uc.username, // 用 PicoAide 用户名，而非企微 ID
+      UserID:   uc.username,
       ChatID:   chatID,
       Text:     content,
       Raw: map[string]string{
-        "msg_id":    msg.MsgID,
-        "msg_type":  msg.MsgType,
-        "chat_type": msg.ChatType,
+        "aibotid":  cb.AIBotID,
+        "chattype": cb.ChatType,
+        "msgid":    cb.MsgID,
+        "req_id":   env.Headers.ReqID,
       },
     })
   }
 }
 
+func (w *WeComProvider) handleEventCallback(uc *wecomConn, env wecomEnvelope) {
+  var cb wecomEventCallback
+  if err := json.Unmarshal(env.Body, &cb); err != nil {
+    return
+  }
+
+  switch cb.Event.EventType {
+  case "enter_chat":
+    if cb.From != nil {
+      uc.defaultChatMu.Lock()
+      uc.defaultChat = cb.From.UserID
+      uc.defaultChatMu.Unlock()
+      w.chatIDToUser.Store(cb.From.UserID, uc.username)
+      if cb.ChatID != "" {
+        w.chatIDToUser.Store(cb.ChatID, uc.username)
+      }
+      slog.Info("企微用户进入会话", "username", uc.username, "userid", cb.From.UserID)
+    }
+  case "disconnected_event":
+    slog.Warn("企微连接被踢出，准备重连", "username", uc.username)
+    w.closeConn(uc)
+  }
+}
+
 func (w *WeComProvider) Send(ctx context.Context, msg SendMsg) error {
-  // 查找 chatID 对应的用户名
   userRaw, ok := w.chatIDToUser.Load(msg.ChatID)
   if !ok {
-    return fmt.Errorf("企微发送失败: 未找到 chatID 对应的用户连接")
+    return fmt.Errorf("未找到企微会话 %s", msg.ChatID)
   }
   username, _ := userRaw.(string)
 
@@ -364,15 +421,19 @@ func (w *WeComProvider) Send(ctx context.Context, msg SendMsg) error {
   uc, ok := w.conns[username]
   w.mu.Unlock()
   if !ok {
-    return fmt.Errorf("企微发送失败: 未找到用户连接 %s", username)
+    return fmt.Errorf("未找到用户连接 %s", username)
+  }
+
+  reqID := msg.ReqID
+  if reqID == "" {
+    reqID = newReqID()
   }
 
   return w.sendCommand(uc, wecomCommand{
-    Cmd:     "send_msg",
-    Headers: wecomHeaders{ReqID: randomID(10)},
+    Cmd:     "aibot_respond_msg",
+    Headers: wecomHeaders{ReqID: reqID},
     Body: map[string]interface{}{
-      "chat_id":  msg.ChatID,
-      "msg_type": "markdown",
+      "msgtype": "markdown",
       "markdown": map[string]string{
         "content": msg.Text,
       },
@@ -384,19 +445,26 @@ func (w *WeComProvider) SendToUser(ctx context.Context, username string, text st
   w.mu.Lock()
   uc, ok := w.conns[username]
   w.mu.Unlock()
+
   if !ok {
-    return fmt.Errorf("企微发送失败: 未找到用户连接 %s", username)
+    return fmt.Errorf("用户 %s 未连接企微智能机器人", username)
   }
-  if uc.defaultChat == "" {
+
+  uc.defaultChatMu.Lock()
+  dc := uc.defaultChat
+  uc.defaultChatMu.Unlock()
+
+  if dc == "" {
     return fmt.Errorf("用户 %s 没有可用的企微会话", username)
   }
 
   return w.sendCommand(uc, wecomCommand{
-    Cmd:     "send_msg",
-    Headers: wecomHeaders{ReqID: randomID(10)},
+    Cmd:     "aibot_send_msg",
+    Headers: wecomHeaders{ReqID: newReqID()},
     Body: map[string]interface{}{
-      "chat_id":  uc.defaultChat,
-      "msg_type": "markdown",
+      "chatid":    dc,
+      "chat_type": 1,
+      "msgtype":   "markdown",
       "markdown": map[string]string{
         "content": text,
       },
@@ -404,62 +472,63 @@ func (w *WeComProvider) SendToUser(ctx context.Context, username string, text st
   })
 }
 
-func (w *WeComProvider) sendCommand(uc *wecomUserConn, cmd wecomCommand) error {
+func (w *WeComProvider) sendCommand(uc *wecomConn, cmd wecomCommand) error {
   uc.connMu.Lock()
   conn := uc.conn
   uc.connMu.Unlock()
+
   if conn == nil {
-    return fmt.Errorf("企微未连接")
+    return fmt.Errorf("企微连接未就绪")
   }
+
   return w.writeAndWait(uc, conn, cmd, wecomCommandTimeout)
 }
 
-func (w *WeComProvider) writeAndWait(uc *wecomUserConn, conn *websocket.Conn, cmd wecomCommand, timeout time.Duration) error {
-  if cmd.Headers.ReqID == "" {
-    cmd.Headers.ReqID = randomID(10)
-  }
+func (w *WeComProvider) writeAndWait(uc *wecomConn, conn *websocket.Conn, cmd wecomCommand, timeout time.Duration) error {
   waitCh := make(chan wecomEnvelope, 1)
+  reqID := cmd.Headers.ReqID
+
   uc.pendingMu.Lock()
-  uc.pending[cmd.Headers.ReqID] = waitCh
+  uc.pending[reqID] = waitCh
   uc.pendingMu.Unlock()
+
   defer func() {
     uc.pendingMu.Lock()
-    delete(uc.pending, cmd.Headers.ReqID)
+    delete(uc.pending, reqID)
     uc.pendingMu.Unlock()
   }()
 
-  data, err := json.Marshal(cmd)
-  if err != nil {
-    return fmt.Errorf("企微命令序列化失败: %w", err)
-  }
   uc.connMu.Lock()
-  err = conn.WriteMessage(websocket.TextMessage, data)
+  err := conn.WriteJSON(cmd)
   uc.connMu.Unlock()
   if err != nil {
-    return fmt.Errorf("企微写入失败: %w", err)
+    return fmt.Errorf("企微发送命令失败: %w", err)
   }
 
-  timer := time.NewTimer(timeout)
-  defer timer.Stop()
   select {
-  case <-waitCh:
+  case res := <-waitCh:
+    if res.ErrCode != 0 {
+      return fmt.Errorf("企微命令错误: errcode=%d errmsg=%s", res.ErrCode, res.ErrMsg)
+    }
     return nil
-  case <-timer.C:
+  case <-time.After(timeout):
     return fmt.Errorf("企微命令超时")
   case <-uc.ctx.Done():
     return uc.ctx.Err()
   }
 }
 
-func randomID(n int) string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-  if n <= 0 {
-    n = 10
+func (w *WeComProvider) closeConn(uc *wecomConn) {
+  uc.connMu.Lock()
+  defer uc.connMu.Unlock()
+  if uc.conn != nil {
+    uc.conn.Close()
+    uc.conn = nil
   }
-  buf := make([]byte, n)
-  for i := range buf {
-    v, _ := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
-    buf[i] = alphabet[v.Int64()]
-  }
-  return string(buf)
+}
+
+func newReqID() string {
+  b := make([]byte, 16)
+  rand.Read(b)
+  return fmt.Sprintf("%x", b)
 }
