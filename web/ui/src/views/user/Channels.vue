@@ -1,26 +1,26 @@
 <template>
   <div>
-    <a-page-header title="渠道配置" sub-title="配置你的渠道" />
+    <a-page-header title="通讯渠道" sub-title="配置你的通讯渠道凭据" />
     <a-spin :spinning="loadingChannels">
       <a-list :data-source="channels" :grid="{ gutter: 16, column: 3 }">
         <template #renderItem="{ item }">
           <a-list-item>
-            <a-card :title="item.name || item.channel" size="small" hoverable @click="openConfig(item)">
+            <a-card :title="item.label" size="small" hoverable @click="openConfig(item)">
               <template #extra>
                 <a-tag :color="item.enabled ? 'green' : 'default'">{{ item.enabled ? '已启用' : '未启用' }}</a-tag>
                 <a-tag :color="item.configured ? 'blue' : 'default'">{{ item.configured ? '已配置' : '未配置' }}</a-tag>
               </template>
-              <p style="color: #666">{{ item.description || '点击配置' }}</p>
+              <p style="color: #666; min-height: 40px">点击配置渠道凭据</p>
             </a-card>
           </a-list-item>
         </template>
       </a-list>
-      <a-empty v-if="!loadingChannels && channels.length === 0" description="暂无渠道" />
+      <a-empty v-if="!loadingChannels && channels.length === 0" description="暂无可用渠道，请联系管理员" />
     </a-spin>
 
     <a-modal
       v-model:open="showConfig"
-      :title="'配置: ' + currentChannel"
+      :title="'配置: ' + currentLabel"
       @ok="saveConfig"
       :confirm-loading="saving"
       :width="560"
@@ -50,8 +50,10 @@
               :placeholder="field.description"
             />
           </a-form-item>
-          <a-empty v-if="!loadingFields && fields.length === 0" description="无配置项" />
         </a-form>
+        <a-form-item label="启用">
+          <a-switch v-model:checked="formEnabled" />
+        </a-form-item>
       </a-spin>
     </a-modal>
   </div>
@@ -63,9 +65,8 @@ import { message } from 'ant-design-vue'
 import { api } from '../../composables/api'
 
 interface Channel {
-  channel: string
-  name: string
-  description: string
+  key: string
+  label: string
   enabled: boolean
   configured: boolean
 }
@@ -80,20 +81,21 @@ interface FieldDef {
 const loadingChannels = ref(false)
 const channels = ref<Channel[]>([])
 const showConfig = ref(false)
-const currentChannel = ref('')
+const currentKey = ref('')
+const currentLabel = ref('')
 const loadingFields = ref(false)
 const fields = ref<FieldDef[]>([])
 const formValues = ref<Record<string, any>>({})
+const formEnabled = ref(false)
 const saving = ref(false)
 
 const loadChannels = async () => {
   loadingChannels.value = true
   try {
     const data = await api.get('/channels')
-    channels.value = (data.channels || data || []).map((c: any) => ({
-      channel: c.channel || c.name || '',
-      name: c.name || c.channel || '',
-      description: c.description || '',
+    channels.value = (data.channels || []).map((c: any) => ({
+      key: c.key || '',
+      label: c.label || '',
       enabled: !!c.enabled,
       configured: !!c.configured,
     }))
@@ -105,13 +107,15 @@ const loadChannels = async () => {
 }
 
 const openConfig = async (ch: Channel) => {
-  currentChannel.value = ch.channel
+  currentKey.value = ch.key
+  currentLabel.value = ch.label
   showConfig.value = true
   loadingFields.value = true
   fields.value = []
   formValues.value = {}
+  formEnabled.value = ch.enabled
   try {
-    const data = await api.get('/channels/config-fields', { section: ch.channel })
+    const data = await api.get('/channels/config-fields', { section: ch.key })
     fields.value = (data.fields || []).map((f: any) => ({
       name: f.field?.key || '',
       label: f.field?.label || f.field?.key || '',
@@ -123,6 +127,7 @@ const openConfig = async (ch: Channel) => {
       vals[f.field?.key] = f.value
     })
     formValues.value = vals
+    formEnabled.value = !!data.enabled
   } catch {
     message.error('网络错误')
   } finally {
@@ -133,7 +138,8 @@ const openConfig = async (ch: Channel) => {
 const saveConfig = async () => {
   saving.value = true
   try {
-    await api.post('/channels/config-fields', { section: currentChannel.value, values: formValues.value })
+    const values = { ...formValues.value, enabled: formEnabled.value }
+    await api.post('/channels/config-fields', { section: currentKey.value, values })
     message.success('保存成功')
     showConfig.value = false
     loadChannels()

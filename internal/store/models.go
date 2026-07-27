@@ -82,6 +82,19 @@ type UserChannel struct {
 
 func (UserChannel) TableName() string { return "user_channels" }
 
+// UserIMBinding 用户 IM 外部身份绑定表
+type UserIMBinding struct {
+  ID             int64  `xorm:"pk autoincr 'id'"`
+  Username       string `xorm:"notnull unique(username, platform) 'username'"`
+  Platform       string `xorm:"notnull 'platform'"`
+  ExternalUserID string `xorm:"notnull 'external_user_id'"`
+  ExternalChatID string `xorm:"notnull 'external_chat_id'"`
+  CreatedAt      string `xorm:"notnull 'created_at'"`
+  UpdatedAt      string `xorm:"notnull 'updated_at'"`
+}
+
+func (UserIMBinding) TableName() string { return "user_im_bindings" }
+
 // ============================================================
 // UserEmail（邮件配置）
 // ============================================================

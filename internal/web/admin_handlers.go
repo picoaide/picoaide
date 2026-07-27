@@ -88,6 +88,9 @@ func (s *Server) purgeOrdinaryAuthProviderStateForConfig(cfg *config.GlobalConfi
       if fs, ok := s.agentIntegration.imGateway.GetProvider("feishu").(*im.FeishuProvider); ok {
         fs.RemoveUser(name)
       }
+      if wc, ok := s.agentIntegration.imGateway.GetProvider("wechat").(*im.WeChatProvider); ok {
+        wc.RemoveUser(name)
+      }
       if wc, ok := s.agentIntegration.imGateway.GetProvider("wecom").(*im.WeComProvider); ok {
         wc.RemoveUser(name)
       }

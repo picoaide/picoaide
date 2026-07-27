@@ -23,6 +23,7 @@ type Message struct {
 type SendMsg struct {
   ChatID string
   Text   string
+  ReqID  string // 可选：回调透传的 req_id，供 provider 使用
 }
 
 // Provider IM 渠道接口
@@ -88,6 +89,14 @@ func (g *Gateway) Send(ctx context.Context, platform, chatID, text string) error
     return fmt.Errorf("不支持的平台: %s", platform)
   }
   return p.Send(ctx, SendMsg{ChatID: chatID, Text: text})
+}
+
+func (g *Gateway) SendWithReqID(ctx context.Context, platform, chatID, text, reqID string) error {
+  p, ok := g.providers[platform]
+  if !ok {
+    return fmt.Errorf("不支持的平台: %s", platform)
+  }
+  return p.Send(ctx, SendMsg{ChatID: chatID, Text: text, ReqID: reqID})
 }
 
 func (g *Gateway) SendToUser(ctx context.Context, platform, username, text string) error {
