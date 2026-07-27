@@ -216,7 +216,7 @@ func (f *FeishuProvider) Send(ctx context.Context, msg SendMsg) error {
 
       content, _ := json.Marshal(map[string]string{"text": msg.Text})
       req := larkim.NewCreateMessageReqBuilder().
-        ReceiveIdType(larkim.ReceiveIdTypeChatId).
+        ReceiveIdType("chat_id").
         Body(larkim.NewCreateMessageReqBodyBuilder().
           ReceiveId(msg.ChatID).
           MsgType(larkim.MsgTypeText).
@@ -260,7 +260,7 @@ func (f *FeishuProvider) SendToUser(ctx context.Context, username string, text s
 
   content, _ := json.Marshal(map[string]string{"text": text})
   req := larkim.NewCreateMessageReqBuilder().
-    ReceiveIdType(larkim.ReceiveIdTypeChatId).
+    ReceiveIdType("chat_id").
     Body(larkim.NewCreateMessageReqBodyBuilder().
       ReceiveId(chatID).
       MsgType(larkim.MsgTypeText).

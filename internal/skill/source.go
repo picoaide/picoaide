@@ -73,8 +73,11 @@ func ListSourceSkills(source string) ([]SkillInfo, error) {
   }
   var skills []SkillInfo
   filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-    if err != nil || !d.IsDir() || strings.HasPrefix(d.Name(), ".") {
+    if err != nil || !d.IsDir() {
       return nil
+    }
+    if strings.HasPrefix(d.Name(), ".") {
+      return filepath.SkipDir
     }
     skmdPath := filepath.Join(path, "SKILL.md")
     if _, err := os.Stat(skmdPath); os.IsNotExist(err) {

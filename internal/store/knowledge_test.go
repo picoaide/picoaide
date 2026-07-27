@@ -899,8 +899,8 @@ func TestSearchKB(t *testing.T) {
   var root KBFolder
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
-  CreateDocument(kb.ID, root.ID, "golang tutorial", "Go is a compiled programming language", "manual", "md", "alice", 0)
-  CreateDocument(kb.ID, root.ID, "python tutorial", "Python is an interpreted language", "manual", "md", "alice", 0)
+  CreateDocument(kb.ID, root.ID, "golang tutorial", "Go is a compiled programming language developed at Google. It is known for its simplicity, strong typing, and excellent concurrency support through goroutines and channels.", "manual", "md", "alice", 0)
+  CreateDocument(kb.ID, root.ID, "python tutorial", "Python is an interpreted high-level programming language created by Guido van Rossum. It emphasizes code readability with its notable use of significant indentation and dynamic semantics.", "manual", "md", "alice", 0)
 
   // FTS5 may need a small delay or sync; fire the trigger by re-reading
   engine.Exec("UPDATE kb_documents SET title=title WHERE kb_id=?", kb.ID)
@@ -960,8 +960,8 @@ func TestSearchKB_SpecialChars(t *testing.T) {
   var root KBFolder
   engine.Where("kb_id = ? AND name = '/'", kb.ID).Get(&root)
 
-  CreateDocument(kb.ID, root.ID, "C++ Guide", "guide for C plus plus", "manual", "md", "alice", 0)
-  CreateDocument(kb.ID, root.ID, "C# Guide", "guide for C sharp language", "manual", "md", "alice", 0)
+  CreateDocument(kb.ID, root.ID, "C++ Guide", "guide for C plus plus programming language that is widely used for system software and game development with high performance and efficiency.", "manual", "md", "alice", 0)
+  CreateDocument(kb.ID, root.ID, "C# Guide", "guide for C sharp language developed by Microsoft as part of the .NET framework for building Windows applications and enterprise software.", "manual", "md", "alice", 0)
 
   engine.Exec("UPDATE kb_documents SET title=title WHERE kb_id=?", kb.ID)
 
